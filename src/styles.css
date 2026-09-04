@@ -291,6 +291,10 @@ table.gantt { border-collapse: separate; border-spacing: 0; }
 .tip-systems { width: 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
 .chip.static { cursor: default; }
 .indent { display: inline-block; width: 18px; }
+.plabel-link { border: none; background: none; padding: 0; font: inherit; color: var(--accent); cursor: pointer; text-align: left; }
+.plabel-link:hover { text-decoration: underline; }
+.g-row.proj.hl > .c-name { background: var(--accent-soft); }
+.g-row.proj.hl .plabel-link { font-weight: 700; }
 .plabel {
   display: inline-block;
   max-width: 210px;

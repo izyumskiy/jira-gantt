@@ -11,7 +11,11 @@ export const DICT = {
     "tab.search": "Поиск эпиков",
     "tab.epics": "Гант по эпикам",
     "tab.people": "Гант по людям",
+    "tab.epicPeople": "Гант по эпикам и людям",
     "tab.team": "Команда",
+    "gantt.personClick": "Раскрыть все эпики с участием {name}, остальные свернуть",
+    "gantt.personFilter": "Раскрыты эпики с участием: {name}",
+    "gantt.clearPersonFilter": "снять фильтр",
     "tab.settings": "Настройки",
 
     "team.hint": "Люди из выгрузки (исполнители задач целевых и прочих эпиков). Свойства сохраняются локально и при повторной выгрузке сопоставляются по имени.",
@@ -194,7 +198,11 @@ export const DICT = {
     "tab.search": "Epic search",
     "tab.epics": "Gantt by epics",
     "tab.people": "Gantt by people",
+    "tab.epicPeople": "Gantt by epics and people",
     "tab.team": "Team",
+    "gantt.personClick": "Expand every epic with {name}, collapse the rest",
+    "gantt.personFilter": "Expanded epics with: {name}",
+    "gantt.clearPersonFilter": "clear filter",
     "tab.settings": "Settings",
 
     "team.hint": "People from the download (assignees of target and other epics). Properties are stored locally and re-matched by name on every download.",

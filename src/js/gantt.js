@@ -8,7 +8,12 @@ import * as settings from "./settings.js";
 import { cfId, escapeJql } from "./jira.js";
 import { normName } from "./team.js";
 
-const collapsed = { epic: new Set(), assignee: new Set() };
+const collapsed = { epic: new Set(), epicPeople: new Set(), assignee: new Set() };
+
+// Свернуть/развернуть группы снаружи (фильтр по человеку на «Ганте по эпикам и людям»).
+export function setCollapsed(mode, keys) {
+  collapsed[mode] = new Set(keys);
+}
 
 function el(tag, cls, text) {
   const n = document.createElement(tag);
@@ -135,7 +140,8 @@ function emptyCells(n) {
 }
 
 export function render(container, model, opts) {
-  const { mode, profiles = [] } = opts;
+  const { mode, profiles = [], highlightChild = "", onChildClick = null } = opts;
+  const epicLike = mode !== "assignee";
   // Профили людей (вкладка «Команда») — по нормализованному имени.
   const profileOf = new Map(profiles.map((p) => [p.name, p]));
   container.textContent = "";
@@ -183,8 +189,8 @@ export function render(container, model, opts) {
   const thead = el("thead");
   const hr = el("tr");
   const th0 = el("th", "c-name");
-  th0.append(el("span", null, mode === "epic" ? t("gantt.epic") : t("gantt.assignee")));
-  th0.append(el("span", "th-hint", ` / ${t("gantt.project")}`));
+  th0.append(el("span", null, epicLike ? t("gantt.epic") : t("gantt.assignee")));
+  th0.append(el("span", "th-hint", ` / ${model.childKind === "person" ? t("gantt.assignee") : t("gantt.project")}`));
   hr.append(th0);
   for (const sec of model.columns) {
     const th = el("th", "c-sprint" + (sec.id === model.currentId ? " current" : ""));
@@ -201,7 +207,7 @@ export function render(container, model, opts) {
     hr.append(th);
   }
   // Справа от спринтов — «Бэклог»: задачи без спринта и не в статусе «Готово».
-  const showBacklog = mode === "epic";
+  const showBacklog = epicLike;
   if (showBacklog) {
     const th = el("th", "c-sprint backlog");
     th.append(el("div", "sp-name", t("gantt.backlog")));
@@ -240,7 +246,7 @@ export function render(container, model, opts) {
       isCollapsed ? collapsed[mode].delete(g.key) : collapsed[mode].add(g.key);
       render(container, model, opts);
     };
-    if (mode === "epic") name.append(el("span", "gnum", `${index + 1}.`));
+    if (epicLike) name.append(el("span", "gnum", `${index + 1}.`));
     const profile = mode === "assignee" ? profileOf.get(normName(g.label)) || null : null;
     const label = el("button", "glabel" + (profile && profile.status ? ` p-${profile.status}` : ""), g.label);
     label.title = g.label + (profile && profile.status ? ` · ${t(`pstatus.${profile.status}`)}` : "");
@@ -254,7 +260,7 @@ export function render(container, model, opts) {
     }
     name.append(
       badges(g.count, g.sum, {
-        left: mode === "epic" ? g.other : null,
+        left: epicLike ? g.other : null,
         other: mode === "assignee" ? { count: g.otherCount, sum: g.otherSum } : null
       })
     );
@@ -279,9 +285,18 @@ export function render(container, model, opts) {
 
     if (isCollapsed) return;
     for (const p of g.projects) {
-      const ptr = el("tr", "g-row proj");
+      const ptr = el("tr", "g-row proj" + (highlightChild && p.key === highlightChild ? " hl" : ""));
       const pname = el("td", "c-name");
-      pname.append(el("span", "indent"), el("span", "plabel", p.label), badges(p.count, p.sum));
+      let plabel;
+      if (model.childKind === "person" && onChildClick) {
+        // Имя человека — кнопка: раскрывает его эпики, остальные сворачивает.
+        plabel = el("button", "plabel plabel-link", p.label);
+        plabel.title = t("gantt.personClick", { name: p.label });
+        plabel.onclick = () => onChildClick(p.key, p.label);
+      } else {
+        plabel = el("span", "plabel", p.label);
+      }
+      pname.append(el("span", "indent"), plabel, badges(p.count, p.sum));
       ptr.append(pname);
       for (const sec of model.columns) ptr.append(nestedCell(p.cells.get(sec.id), sec, model, `${g.label} · ${p.label}`));
       if (showBacklog) ptr.append(backlogNested(p.backlog, model, `${g.label} · ${p.label}`));
@@ -330,7 +345,7 @@ function issuesUrl(jql) {
 // JQL всех задач группы: эпика или исполнителя.
 function scopeJql(g, mode) {
   const f = settings.get().fields;
-  if (mode === "epic") {
+  if (mode !== "assignee") {
     if (!g.key) return "";
     const field = f.epicLink ? `cf[${cfId(f.epicLink)}]` : '"Epic Link"';
     return `${field} = ${g.key}`;
@@ -407,10 +422,11 @@ function showIssues(anchor, title, issues) {
 }
 
 function showTooltip(anchor, g, mode, model, profile = null) {
+  const epicLike = mode !== "assignee";
   closeTooltip();
   tip = el("div", "tooltip");
   const scope = scopeJql(g, mode);
-  const headUrl = mode === "epic" ? browseUrl(g.key) : issuesUrl(scope);
+  const headUrl = epicLike ? browseUrl(g.key) : issuesUrl(scope);
 
   const head = el("div", "tip-head");
   const title = el("strong");
@@ -510,6 +526,5 @@ function showTooltip(anchor, g, mode, model, profile = null) {
 }
 
 export function resetCollapse() {
-  collapsed.epic.clear();
-  collapsed.assignee.clear();
+  for (const set of Object.values(collapsed)) set.clear();
 }

@@ -203,8 +203,10 @@ function briefOf(issue, est, done) {
 
 export const BACKLOG_ID = "sec:backlog";
 
-// mode: "epic" | "assignee"; others — задачи людей вне целевых эпиков (учитываются только по людям).
+// mode: "epic" (эпики → проекты) | "epicPeople" (эпики → исполнители) | "assignee" (люди → проекты);
+// others — задачи людей вне целевых эпиков (учитываются только по людям).
 export function buildModel({ issues, others = [], sprints, epics, boards = [], mode }) {
+  const epicLike = mode !== "assignee"; // группы — эпики
   const teamsInfo = buildTeams(sprints, boards);
   const sprintById = new Map(sprints.map((s) => [s.id, s]));
   const columns = timeline(sprints, issues);
@@ -217,9 +219,14 @@ export function buildModel({ issues, others = [], sprints, epics, boards = [], m
 
   const epicById = new Map(epics.map((e) => [e.key, e]));
   const groups = new Map();
-  const groupKeyOf = (i) => (mode === "epic" ? i.epicKey || "" : i.assigneeKey || "");
+  const groupKeyOf = (i) => (epicLike ? i.epicKey || "" : i.assigneeKey || "");
+  // Вложенная строка: проект (epic/assignee) или исполнитель (epicPeople).
+  const childOf = (i) =>
+    mode === "epicPeople"
+      ? { key: i.assigneeKey || "", label: i.assigneeName || t("gantt.noAssignee") }
+      : { key: i.projectKey || t("dash"), label: i.projectName || i.projectKey || t("dash") };
   const groupLabelOf = (i) => {
-    if (mode === "epic") {
+    if (epicLike) {
       const k = i.epicKey || "";
       return k ? `${k} · ${epicById.get(k)?.summary || ""}`.trim() : t("dash");
     }
@@ -229,7 +236,7 @@ export function buildModel({ issues, others = [], sprints, epics, boards = [], m
   for (const issue of issues) {
     const gk = groupKeyOf(issue);
     if (!groups.has(gk)) {
-      const epic = mode === "epic" ? epicById.get(gk) : null;
+      const epic = epicLike ? epicById.get(gk) : null;
       const cls = epic ? classify(epic.statusName, epic.statusCategory) : null;
       groups.set(gk, {
         key: gk,
@@ -267,9 +274,10 @@ export function buildModel({ issues, others = [], sprints, epics, boards = [], m
     const statusName = (issue.statusName || "").trim();
     if (statusName) (done ? g.doneStatuses : g.openStatuses).add(statusName);
 
-    const pk = issue.projectKey || t("dash");
+    const child = childOf(issue);
+    const pk = child.key;
     if (!g.projects.has(pk)) {
-      g.projects.set(pk, { key: pk, label: issue.projectName || pk, count: 0, sum: 0, noSprint: 0, cells: new Map(), backlog: emptyCell() });
+      g.projects.set(pk, { key: pk, label: child.label, count: 0, sum: 0, noSprint: 0, cells: new Map(), backlog: emptyCell() });
     }
     const p = g.projects.get(pk);
     p.count += 1;
@@ -338,7 +346,7 @@ export function buildModel({ issues, others = [], sprints, epics, boards = [], m
     };
   });
 
-  if (mode === "epic") {
+  if (epicLike) {
     // Эпики: сначала то, что в работе и на бизнес-тесте, ниже — «сделать» и «new», в самом низу готовое.
     list.sort((a, b) => a.statusRank - b.statusRank || b.sum - a.sum || b.count - a.count);
   } else {
@@ -372,7 +380,8 @@ export function buildModel({ issues, others = [], sprints, epics, boards = [], m
     teamOf: teamsInfo.of,
     teamOfSprint: (id) => teamsInfo.of(sprintById.get(id)),
     sprintById,
-    targetKeys: epics.map((e) => e.key)
+    targetKeys: epics.map((e) => e.key),
+    childKind: mode === "epicPeople" ? "person" : "project"
   };
 }
 

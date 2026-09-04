@@ -10,7 +10,13 @@ import * as team from "./team.js";
 import { classify, isDoneStatus } from "./status.js";
 
 const $ = (sel) => document.querySelector(sel);
-const state = { results: [], selected: new Set(), boards: [], filter: { label: "", assignee: "" } };
+const state = {
+  results: [],
+  selected: new Set(),
+  boards: [],
+  filter: { label: "", assignee: "" },
+  personFilter: null // «Гант по эпикам и людям»: { key, name } человека, чьи эпики раскрыты
+};
 
 // ---------- статус-строка ----------
 
@@ -39,7 +45,17 @@ function showTab(name) {
   $(`#page-${name}`).classList.remove("hidden");
   if (name === "epics") drawGantt("epic", $("#page-epics"));
   if (name === "people") drawGantt("assignee", $("#page-people"));
+  if (name === "epicPeople") drawGantt("epicPeople", $("#page-epicPeople"));
   if (name === "team") team.render($("#page-team"), { notify: (m) => status(m) }).catch(fail);
+}
+
+// Перерисовать активную вкладку с диаграммой (после синка, смены языка, фильтров).
+function redrawActive() {
+  const active = document.querySelector(".tab.active")?.dataset.tab;
+  if (active === "epics") drawGantt("epic", $("#page-epics"));
+  if (active === "people") drawGantt("assignee", $("#page-people"));
+  if (active === "epicPeople") drawGantt("epicPeople", $("#page-epicPeople"));
+  if (active === "team") team.render($("#page-team"), { notify: (m) => status(m) }).catch(fail);
 }
 
 // ---------- поиск эпиков ----------
@@ -448,9 +464,7 @@ async function doSync({ full = false } = {}) {
     await refreshHeader();
     if (result.othersError) status(result.othersError, "error");
     gantt.resetCollapse();
-    const active = document.querySelector(".tab.active")?.dataset.tab;
-    if (active === "epics") drawGantt("epic", $("#page-epics"));
-    if (active === "people") drawGantt("assignee", $("#page-people"));
+    redrawActive();
   } catch (e) {
     fail(e);
   } finally {
@@ -477,8 +491,7 @@ async function refreshHeader() {
 const NO_ASSIGNEE = "__none__";
 
 // Выпадающий список исполнителей эпиков: «все», затем люди по алфавиту, затем «без исполнителя».
-function renderEpicAssigneeFilter(epics) {
-  const sel = $("#epicAssignee");
+function renderEpicAssigneeFilter(epics, sel = $("#epicAssignee")) {
   const current = settings.get().epicAssigneeFilter || "";
   sel.textContent = "";
   const add = (value, label) => {
@@ -504,8 +517,7 @@ function renderEpicAssigneeFilter(epics) {
 }
 
 // Пояснение над Гантом: сколько эпиков скрыто галочками и какие фильтры пришли со страницы поиска.
-function renderGanttFilterNote(hiddenCount) {
-  const box = $("#ganttFilterNote");
+function renderGanttFilterNote(hiddenCount, box = $("#ganttFilterNote")) {
   box.textContent = "";
   const parts = [];
   if (hiddenCount) parts.push(t("gantt.hiddenUnchecked", { n: hiddenCount }));
@@ -520,10 +532,37 @@ function renderGanttFilterNote(hiddenCount) {
     clear.textContent = t("gantt.clearSearchFilters");
     clear.onclick = () => {
       setFilter({ label: "", assignee: "" });
-      drawGantt("epic", $("#page-epics"));
+      redrawActive();
     };
     box.append(clear);
   }
+}
+
+// Фильтр по человеку на «Ганте по эпикам и людям»: раскрыты только эпики с его участием.
+function renderPersonFilterNote() {
+  const box = $("#personFilterNote");
+  box.textContent = "";
+  if (!state.personFilter) return;
+  box.append(t("gantt.personFilter", { name: state.personFilter.name }));
+  const clear = document.createElement("button");
+  clear.type = "button";
+  clear.className = "link";
+  clear.textContent = t("gantt.clearPersonFilter");
+  clear.onclick = () => {
+    state.personFilter = null;
+    gantt.setCollapsed("epicPeople", []);
+    drawGantt("epicPeople", $("#page-epicPeople"));
+  };
+  box.append(clear);
+}
+
+function applyPersonFilter(model) {
+  if (!state.personFilter) return;
+  const key = state.personFilter.key;
+  gantt.setCollapsed(
+    "epicPeople",
+    model.groups.filter((g) => !g.projects.some((p) => p.key === key)).map((g) => g.key)
+  );
 }
 
 function epicMatchesFilter(epic, filter) {
@@ -545,21 +584,31 @@ async function drawGantt(mode, container) {
     let target = container;
     let epicsShown = epics;
     let issuesShown = issues;
-    if (mode === "epic") {
+    if (mode !== "assignee") {
+      const byPeople = mode === "epicPeople";
       // Фильтр по исполнителю эпика: диаграмма строится только по подходящим эпикам и их задачам.
-      renderEpicAssigneeFilter(epics);
+      renderEpicAssigneeFilter(epics, byPeople ? $("#epicAssignee2") : $("#epicAssignee"));
       const filter = settings.get().epicAssigneeFilter || "";
       // Снятые галочки и фильтры со страницы «Поиск эпиков» действуют и здесь.
       const visible = epics.filter((e) => !e.hidden);
       epicsShown = applyFilter(visible.filter((e) => epicMatchesFilter(e, filter)));
-      renderGanttFilterNote(epics.length - visible.length);
+      renderGanttFilterNote(epics.length - visible.length, byPeople ? $("#ganttFilterNote2") : $("#ganttFilterNote"));
       const keep = new Set(epicsShown.map((e) => e.key));
       issuesShown = issues.filter((i) => keep.has(i.epicKey));
-      target = $("#epicsChart");
+      target = byPeople ? $("#epicPeopleChart") : $("#epicsChart");
     }
     const model = agg.buildModel({ issues: issuesShown, others, sprints, epics: epicsShown, boards, mode });
-    // Профили с вкладки «Команда» (роль, статус, системы) нужны только на вкладке по людям.
-    gantt.render(target, model, { mode, profiles: mode === "assignee" ? profiles : [] });
+    const opts = { mode, profiles: mode === "assignee" ? profiles : [] }; // профили нужны только по людям
+    if (mode === "epicPeople") {
+      applyPersonFilter(model);
+      renderPersonFilterNote();
+      opts.highlightChild = state.personFilter ? state.personFilter.key : "";
+      opts.onChildClick = (key, name) => {
+        state.personFilter = { key, name };
+        drawGantt("epicPeople", $("#page-epicPeople"));
+      };
+    }
+    gantt.render(target, model, opts);
   } catch (e) {
     fail(e);
   }
@@ -745,10 +794,7 @@ async function boot() {
     renderResults();
     await renderStored();
     await refreshHeader();
-    const active = document.querySelector(".tab.active")?.dataset.tab;
-    if (active === "epics") drawGantt("epic", $("#page-epics"));
-    if (active === "people") drawGantt("assignee", $("#page-people"));
-    if (active === "team") team.render($("#page-team"), { notify: (m) => status(m) }).catch(fail);
+    redrawActive();
   };
 
   $("#btnFind").onclick = async () => {
@@ -778,6 +824,10 @@ async function boot() {
   $("#epicAssignee").onchange = async () => {
     await settings.save({ epicAssigneeFilter: $("#epicAssignee").value });
     drawGantt("epic", $("#page-epics"));
+  };
+  $("#epicAssignee2").onchange = async () => {
+    await settings.save({ epicAssigneeFilter: $("#epicAssignee2").value });
+    drawGantt("epicPeople", $("#page-epicPeople"));
   };
   $("#btnRefresh").onclick = () => doSync({ full: false });
   $("#btnReload").onclick = () => doSync({ full: true });

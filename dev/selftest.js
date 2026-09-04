@@ -221,6 +221,33 @@ await settings.save({ infoSystems: ["Billing"] });
 check("справочник систем дополняется выбранными у людей", systemsList(merged).join("|") === "Billing|CRM", systemsList(merged).join("|"));
 await settings.save({ infoSystems: [] });
 
+// 4c. модель «эпики → исполнители» (Гант по эпикам и людям)
+const m3 = agg.buildModel({ issues, others, sprints, epics, boards, mode: "epicPeople" });
+check("epicPeople: группы — те же эпики в том же порядке", m3.groups.map((g) => g.key).join(",") === m1.groups.map((g) => g.key).join(","), m3.groups.map((g) => g.key).join(","));
+const ep1p = m3.groups.find((g) => g.key === "EP-1");
+check("epicPeople: вложенные строки — исполнители", ep1p.projects.map((p) => p.label).sort().join(",") === "Ivan,Olga,Petr,Без исполнителя", ep1p.projects.map((p) => p.label).join(","));
+check("epicPeople: ключ вложенной строки — ключ исполнителя", ep1p.projects.some((p) => p.key === "ivan"));
+check("epicPeople: итоги эпика совпадают с «Гантом по эпикам»", ep1p.count === ep1.count && ep1p.sum === ep1.sum && ep1p.backlog.count === ep1.backlog.count);
+check("epicPeople: Ivan в EP-1 — 3 задачи (2 в секции 0)", ep1p.projects.find((p) => p.key === "ivan")?.count === 3 && ep1p.projects.find((p) => p.key === "ivan")?.cells.get("sec:0")?.count === 2);
+check("epicPeople: статус эпика и сортировка сохранены", ep1p.status?.id === "progress" && m3.childKind === "person");
+check("epicPeople: «прочие» не учитываются", m3.groups.every((g) => g.otherCount === 0));
+const g3 = document.createElement("div");
+document.body.append(g3);
+let clicked = null;
+gantt.render(g3, m3, { mode: "epicPeople", highlightChild: "ivan", onChildClick: (k, n) => (clicked = `${k}:${n}`) });
+check("epicPeople: колонка «Бэклог» и нумерация как у эпиков", g3.querySelectorAll("thead .c-sprint.backlog").length === 1 && g3.querySelectorAll(".gnum").length === m3.groups.length);
+check("epicPeople: имена людей — кнопки", g3.querySelectorAll(".g-row.proj .plabel-link").length > 0);
+check("epicPeople: строка выбранного человека подсвечена", [...g3.querySelectorAll(".g-row.proj.hl")].every((r) => r.querySelector(".plabel").textContent === "Ivan") && g3.querySelectorAll(".g-row.proj.hl").length === 2, String(g3.querySelectorAll(".g-row.proj.hl").length));
+g3.querySelector(".g-row.proj .plabel-link").click();
+check("epicPeople: клик по имени отдаёт ключ и имя", /^[a-z]+:.+$/.test(clicked || ""), clicked);
+gantt.setCollapsed("epicPeople", ["EP-1"]);
+gantt.render(g3, m3, { mode: "epicPeople" });
+const ep1Row3 = [...g3.querySelectorAll(".g-row.group")].find((r) => r.querySelector(".glabel").textContent.startsWith("EP-1"));
+check("epicPeople: setCollapsed сворачивает указанные эпики", ep1Row3.nextElementSibling?.classList.contains("group") && ep1Row3.querySelector(".twisty").textContent === "▸",
+  `${ep1Row3.nextElementSibling?.className} / ${ep1Row3.querySelector(".twisty").textContent}`);
+gantt.resetCollapse();
+g3.remove();
+
 // 5. форматирование оценок
 check("fmtEstimate 4ч", agg.fmtEstimate(4 * H) === "4ч", agg.fmtEstimate(4 * H));
 check("fmtEstimate 12ч -> 1.5д", agg.fmtEstimate(12 * H) === "1.5д", agg.fmtEstimate(12 * H));
