@@ -92,7 +92,7 @@ main { padding: 14px 16px 40px; }
 .list { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; overflow: clip; }
 .item {
   display: grid;
-  grid-template-columns: 34px 22px 100px 1fr 340px 150px 150px 140px;
+  grid-template-columns: 34px 22px 90px 1fr 320px 220px 140px 140px 130px;
   align-items: center;
   gap: 8px;
   padding: 6px 10px;
@@ -109,6 +109,50 @@ main { padding: 14px 16px 40px; }
 .iperson { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; min-width: 0; }
 .iperson-empty { color: var(--muted); }
 .list-head .iperson { font-size: 10px; }
+.iperson-link { cursor: pointer; color: var(--accent); }
+.iperson-link:hover { text-decoration: underline; }
+.iperson-link.on { font-weight: 700; background: var(--accent-soft); border-radius: 4px; padding: 0 5px; }
+
+/* Метки эпика — чипы в одну строку; «+N» открывает всплывашку с остальными. */
+.ilabels { display: flex; align-items: center; gap: 4px; overflow: hidden; white-space: nowrap; min-width: 0; }
+.lchip {
+  flex: none;
+  padding: 0 7px;
+  border-radius: 9px;
+  border: 1px solid var(--line);
+  background: #f4f5f7;
+  color: var(--text);
+  font-size: 11px;
+  line-height: 18px;
+  cursor: pointer;
+  max-width: 110px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lchip:hover { border-color: var(--accent); color: var(--accent); background: #fff; }
+.lchip.on { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+.lchip.lmore { color: var(--muted); background: #fff; }
+.lpop {
+  position: fixed;
+  z-index: 60;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  max-width: 360px;
+  padding: 8px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(9, 30, 66, .2);
+}
+
+/* Активные фильтры и «Снять фильтры» в шапке списка. */
+.isum-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.ifilters { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; text-transform: none; letter-spacing: 0; }
+.ifilters .lchip { font-weight: 600; }
+.clear-filters { font-size: 11px; padding: 0 6px; text-transform: none; letter-spacing: 0; }
+.clear-filters:disabled { color: var(--muted); text-decoration: none; }
 .filter-bar { display: flex; align-items: center; gap: 14px; margin: 0 0 8px; }
 .filter-bar label { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); }
 .filter-bar select { min-width: 220px; }
@@ -455,6 +499,9 @@ textarea { font: inherit; padding: 5px 8px; border: 1px solid var(--line); borde
   .team-table th { background: #262c31; }
   .gantt th.c-sprint.backlog, .gantt td.c-backlog { background: #262c31; }
   .item.list-head, .item.list-head:hover { background: #262c31; }
+  .lchip { background: #2c333a; color: var(--text); }
+  .lchip:hover, .lchip.lmore { background: #343b43; }
+  .lchip.on { background: var(--accent); color: #10233f; }
   .item.due-soon { background: #4f1c14; }
   .item.due-soon:hover { background: #5c241a; }
   .item.due-soon .isum, .item.due-soon .iprj, .idate-due { color: #ffbdad; }

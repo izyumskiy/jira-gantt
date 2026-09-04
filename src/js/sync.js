@@ -54,7 +54,7 @@ async function ensureFields() {
 function epicFieldList() {
   const f = settings.get().fields;
   return [
-    "summary", "project", "status", "updated", "created", "duedate",
+    "summary", "project", "status", "updated", "created", "duedate", "labels",
     f.epicAssignee || "assignee", f.epicReporter || "reporter",
     f.plannedStart, f.plannedEnd
   ].filter(Boolean);
@@ -190,6 +190,7 @@ function mapEpic(i) {
     assigneeKey: userOf(i.fields[f.epicAssignee || "assignee"]).key,
     assigneeName: userOf(i.fields[f.epicAssignee || "assignee"]).name,
     reporterName: userOf(i.fields[f.epicReporter || "reporter"]).name,
+    labels: Array.isArray(i.fields.labels) ? i.fields.labels.filter(Boolean) : [],
     plannedStart: f.plannedStart ? dateOf(i.fields[f.plannedStart]) : "",
     plannedEnd: f.plannedEnd ? dateOf(i.fields[f.plannedEnd]) : ""
   };

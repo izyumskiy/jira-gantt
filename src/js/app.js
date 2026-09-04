@@ -10,7 +10,7 @@ import * as team from "./team.js";
 import { classify, isDoneStatus } from "./status.js";
 
 const $ = (sel) => document.querySelector(sel);
-const state = { results: [], selected: new Set(), boards: [] };
+const state = { results: [], selected: new Set(), boards: [], filter: { label: "", assignee: "" } };
 
 // ---------- статус-строка ----------
 
@@ -112,13 +112,145 @@ function epicDates(epic) {
   return box;
 }
 
-// Исполнитель или постановщик эпика — отдельная ячейка строки.
-function epicPerson(label, value) {
+// Исполнитель или постановщик эпика — отдельная ячейка строки. Исполнитель кликабелен: фильтр по имени.
+function epicPerson(label, value, clickable) {
   const cell = document.createElement("span");
   cell.className = "iperson" + (value ? "" : " iperson-empty");
   cell.title = `${t(label)}: ${value || t("dash")}`;
   cell.textContent = value || t("dash");
+  if (clickable && value) {
+    cell.classList.add("iperson-link");
+    if (state.filter.assignee === value) cell.classList.add("on");
+    cell.title = t("search.filterByAssignee", { v: value });
+    cell.onclick = (e) => {
+      e.preventDefault(); // строка — <label>, иначе клик переключит галку
+      setFilter({ assignee: state.filter.assignee === value ? "" : value });
+    };
+  }
   return cell;
+}
+
+const LABELS_INLINE = 3;
+
+function labelChip(label) {
+  const chip = document.createElement("button");
+  chip.type = "button";
+  chip.className = "lchip" + (state.filter.label === label ? " on" : "");
+  chip.textContent = label;
+  chip.title = t("search.filterByLabel", { v: label });
+  chip.onclick = (e) => {
+    e.preventDefault();
+    closeLabelPopover();
+    setFilter({ label: state.filter.label === label ? "" : label });
+  };
+  return chip;
+}
+
+// Метки эпика в одну строку: первые три чипом, остальные — за чипом «ещё N» (всплывашка с ними).
+function epicLabels(epic) {
+  const box = document.createElement("span");
+  box.className = "ilabels";
+  const labels = [...(epic.labels || [])];
+  // Активная метка всегда видна, даже если по алфавиту она дальше третьей.
+  if (state.filter.label && labels.includes(state.filter.label)) {
+    labels.splice(labels.indexOf(state.filter.label), 1);
+    labels.unshift(state.filter.label);
+  }
+  if (!labels.length) {
+    const dash = document.createElement("span");
+    dash.className = "iperson-empty";
+    dash.textContent = t("dash");
+    box.append(dash);
+    return box;
+  }
+  labels.slice(0, LABELS_INLINE).forEach((l) => box.append(labelChip(l)));
+  const rest = labels.slice(LABELS_INLINE);
+  if (rest.length) {
+    const more = document.createElement("button");
+    more.type = "button";
+    more.className = "lchip lmore";
+    more.textContent = `+${rest.length}`;
+    more.title = rest.join(", ");
+    more.onclick = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      openLabelPopover(more, rest);
+    };
+    box.append(more);
+  }
+  return box;
+}
+
+let labelPopover = null;
+function closeLabelPopover() {
+  if (labelPopover) {
+    labelPopover.remove();
+    labelPopover = null;
+  }
+}
+document.addEventListener("click", (e) => {
+  if (labelPopover && !labelPopover.contains(e.target)) closeLabelPopover();
+});
+document.addEventListener("keydown", (e) => e.key === "Escape" && closeLabelPopover());
+
+function openLabelPopover(anchor, labels) {
+  closeLabelPopover();
+  labelPopover = document.createElement("div");
+  labelPopover.className = "lpop";
+  labels.forEach((l) => labelPopover.append(labelChip(l)));
+  document.body.append(labelPopover);
+  const r = anchor.getBoundingClientRect();
+  labelPopover.style.top = `${Math.min(window.innerHeight - labelPopover.offsetHeight - 8, r.bottom + 4)}px`;
+  labelPopover.style.left = `${Math.max(8, Math.min(window.innerWidth - labelPopover.offsetWidth - 8, r.left))}px`;
+}
+
+// ---------- фильтры списка эпиков ----------
+
+function setFilter(patch) {
+  state.filter = { ...state.filter, ...patch };
+  renderResults();
+  renderStored();
+}
+
+function hasFilter() {
+  return !!(state.filter.label || state.filter.assignee);
+}
+
+function applyFilter(list) {
+  const { label, assignee } = state.filter;
+  return list.filter((e) => (!label || (e.labels || []).includes(label)) && (!assignee || e.assigneeName === assignee));
+}
+
+// Активные фильтры и кнопка «Снять фильтры» — в шапке списка, в ячейке «Название».
+function filterControls() {
+  const box = document.createElement("span");
+  box.className = "ifilters";
+  const active = [
+    ["search.filterLabel", state.filter.label, () => setFilter({ label: "" })],
+    ["search.filterAssignee", state.filter.assignee, () => setFilter({ assignee: "" })]
+  ].filter(([, v]) => v);
+  for (const [kind, value, remove] of active) {
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "lchip on";
+    chip.textContent = `${t(kind)}: ${value} ×`;
+    chip.onclick = (e) => {
+      e.preventDefault();
+      remove();
+    };
+    box.append(chip);
+  }
+  const clear = document.createElement("button");
+  clear.type = "button";
+  clear.className = "link clear-filters";
+  clear.textContent = t("search.clearFilters");
+  clear.disabled = !hasFilter();
+  clear.onclick = (e) => {
+    e.preventDefault();
+    setFilter({ label: "", assignee: "" });
+  };
+  box.append(clear);
+  return box;
 }
 
 // Шапка списка эпиков: та же сетка, что у строк; липнет под верхней панелью при прокрутке.
@@ -138,8 +270,11 @@ function listHead() {
     c.title = t(full);
     dates.append(c);
   }
+  const nameCell = cell("isum isum-head", t("search.col.name"));
+  nameCell.append(filterControls());
   head.append(
-    cell("inum", "#"), cell("", ""), cell("ikey", t("search.col.key")), cell("isum", t("search.col.name")), dates,
+    cell("inum", "#"), cell("", ""), cell("ikey", t("search.col.key")), nameCell, dates,
+    cell("ilabels", t("search.col.labels")),
     cell("iperson", t("search.assignee")), cell("iperson", t("search.reporter")), cell("istatus", t("search.col.status"))
   );
   return head;
@@ -182,8 +317,9 @@ function epicRow(epic, checked, index) {
   }
   row.append(
     num, cb, key, sum, epicDates(epic),
-    epicPerson("search.assignee", epic.assigneeName),
-    epicPerson("search.reporter", epic.reporterName),
+    epicLabels(epic),
+    epicPerson("search.assignee", epic.assigneeName, true),
+    epicPerson("search.reporter", epic.reporterName, false),
     status
   );
   return row;
@@ -234,25 +370,27 @@ function renderSelCount() {
 function renderResults() {
   const box = $("#results");
   box.textContent = "";
-  renderStatusSummary($("#resultsSummary"), state.results);
-  if (!state.results.length) {
+  const shown = applyFilter(state.results);
+  renderStatusSummary($("#resultsSummary"), shown);
+  if (state.results.length || hasFilter()) box.append(listHead());
+  if (!shown.length) {
     const p = document.createElement("div");
     p.className = "empty";
     p.textContent = t("search.empty");
     box.append(p);
     return;
   }
-  box.append(listHead());
-  sortEpics(state.results).forEach((e, i) => box.append(epicRow(e, state.selected.has(e.key), i)));
+  sortEpics(shown).forEach((e, i) => box.append(epicRow(e, state.selected.has(e.key), i)));
 }
 
 async function renderStored() {
   const stored = await sync.selectedEpics();
   const box = $("#storedList");
   box.textContent = "";
-  renderStatusSummary($("#storedSummary"), stored);
-  if (stored.length) box.append(listHead());
-  sortEpics(stored).forEach((e, i) => box.append(epicRow(e, state.selected.has(e.key), i)));
+  const shown = applyFilter(stored);
+  renderStatusSummary($("#storedSummary"), shown);
+  if (stored.length || hasFilter()) box.append(listHead());
+  sortEpics(shown).forEach((e, i) => box.append(epicRow(e, state.selected.has(e.key), i)));
   if (!stored.length) {
     const p = document.createElement("div");
     p.className = "empty";
