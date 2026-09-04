@@ -256,6 +256,7 @@ let clicked = null;
 gantt.render(g3, m3, { mode: "epicPeople", highlightChild: "ivan", onChildClick: (k, n) => (clicked = `${k}:${n}`) });
 check("epicPeople: колонка «Бэклог» и нумерация как у эпиков", g3.querySelectorAll("thead .c-sprint.backlog").length === 1 && g3.querySelectorAll(".gnum").length === m3.groups.length);
 check("epicPeople: имена людей — кнопки", g3.querySelectorAll(".g-row.proj .plabel-link").length > 0);
+check("epicPeople: лейблов с цифрами нет ни у эпиков, ни у людей", g3.querySelectorAll(".badges").length === 0, String(g3.querySelectorAll(".badges").length));
 check("epicPeople: строка выбранного человека подсвечена", [...g3.querySelectorAll(".g-row.proj.hl")].every((r) => r.querySelector(".plabel").textContent === "Ivan") && g3.querySelectorAll(".g-row.proj.hl").length === 2, String(g3.querySelectorAll(".g-row.proj.hl").length));
 g3.querySelector(".g-row.proj .plabel-link").click();
 check("epicPeople: клик по имени отдаёт ключ и имя", /^[a-z]+:.+$/.test(clicked || ""), clicked);
@@ -300,6 +301,8 @@ check("в Ганте по людям лейблов статуса нет (то�
 const nums = [...document.querySelectorAll("#g1 .gnum")].map((n) => n.textContent);
 check("эпики пронумерованы подряд", nums.join(" ") === "1. 2. 3. 4. 5.", nums.join(" "));
 check("исполнители не нумеруются", document.querySelectorAll("#g2 .gnum").length === 0);
+check("на «По эпикам» и «По людям» лейблы с цифрами остались",
+  document.querySelectorAll("#g1 .g-row.group .badges").length === m1.groups.length && document.querySelectorAll("#g2 .g-row.group .badges").length === m2.groups.length);
 
 check("полосы групп — жёлтые (.bar-group), у проектов их нет",
   document.querySelectorAll("#g1 .g-row.group .bar").length > 0 &&

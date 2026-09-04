@@ -258,12 +258,16 @@ export function render(container, model, opts) {
       role.title = t("team.role");
       name.append(role);
     }
-    name.append(
-      badges(g.count, g.sum, {
-        left: epicLike ? g.other : null,
-        other: mode === "assignee" ? { count: g.otherCount, sum: g.otherSum } : null
-      })
-    );
+    // На «По эпикам и людям» цифры не показываем — только дерево и полосы (итоги есть в подсказке).
+    const showBadges = mode !== "epicPeople";
+    if (showBadges) {
+      name.append(
+        badges(g.count, g.sum, {
+          left: epicLike ? g.other : null,
+          other: mode === "assignee" ? { count: g.otherCount, sum: g.otherSum } : null
+        })
+      );
+    }
     tr.append(name);
     for (const sec of model.columns) {
       const td = el("td", "c-cell");
@@ -296,7 +300,8 @@ export function render(container, model, opts) {
       } else {
         plabel = el("span", "plabel", p.label);
       }
-      pname.append(el("span", "indent"), plabel, badges(p.count, p.sum));
+      pname.append(el("span", "indent"), plabel);
+      if (showBadges) pname.append(badges(p.count, p.sum));
       ptr.append(pname);
       for (const sec of model.columns) ptr.append(nestedCell(p.cells.get(sec.id), sec, model, `${g.label} · ${p.label}`));
       if (showBacklog) ptr.append(backlogNested(p.backlog, model, `${g.label} · ${p.label}`));
