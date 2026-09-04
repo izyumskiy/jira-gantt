@@ -196,7 +196,20 @@ function mapEpic(i) {
   };
 }
 
+// Снятая галочка на «Поиске эпиков»: эпик остаётся в базе, но не показывается на «Ганте по эпикам».
+export async function setHidden(hiddenByKey) {
+  const epics = await db.all(db.STORES.epics);
+  const changed = [];
+  for (const e of epics) {
+    if (!(e.key in hiddenByKey)) continue;
+    const hidden = !!hiddenByKey[e.key];
+    if (!!e.hidden !== hidden) changed.push({ ...e, hidden });
+  }
+  if (changed.length) await db.putAll(db.STORES.epics, changed);
+}
+
 // Статусы и названия самих эпиков живут отдельно от их задач — обновляем при каждой синхронизации.
+// Локальный флаг hidden при этом сохраняем: из Jira он не приходит.
 async function refreshEpics(keys) {
   const fresh = [];
   for (let i = 0; i < keys.length; i += 50) {
@@ -204,7 +217,9 @@ async function refreshEpics(keys) {
     const issues = await jira.search(`key in (${chunk.join(",")})`, epicFieldList());
     fresh.push(...issues.map(mapEpic));
   }
-  if (fresh.length) await db.putAll(db.STORES.epics, fresh);
+  if (!fresh.length) return;
+  const existing = new Map((await db.all(db.STORES.epics)).map((e) => [e.key, e]));
+  await db.putAll(db.STORES.epics, fresh.map((e) => ({ ...e, hidden: !!existing.get(e.key)?.hidden })));
 }
 
 // ---------- выбор эпиков ----------
@@ -220,7 +235,8 @@ export async function saveSelection(epics) {
     db.STORES.epics,
     old.filter((e) => !keep.has(e.key)).map((e) => e.key)
   );
-  await db.putAll(db.STORES.epics, epics);
+  // Сохранённый выбор — значит эпик отмечен: снимаем «скрыт», если он был.
+  await db.putAll(db.STORES.epics, epics.map((e) => ({ ...e, hidden: false })));
   await db.clear(db.STORES.others);
   // Задачи снятых эпиков больше не нужны.
   const issues = await db.all(db.STORES.issues);

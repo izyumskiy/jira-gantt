@@ -166,6 +166,8 @@ main { padding: 14px 16px 40px; }
 .filter-bar { display: flex; align-items: center; gap: 14px; margin: 0 0 8px; }
 .filter-bar label { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); }
 .filter-bar select { min-width: 220px; }
+.filter-note { color: var(--muted); display: inline-flex; align-items: center; gap: 4px; }
+.filter-note:empty { display: none; }
 /* Срок в ближайшие 14 дней (или уже прошёл) у незавершённого эпика — вся строка красная. */
 .item.due-soon { background: #ffebe6; }
 .item.due-soon:hover { background: #ffd9d0; }

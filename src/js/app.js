@@ -204,6 +204,14 @@ function openLabelPopover(anchor, labels) {
   labelPopover.style.left = `${Math.max(8, Math.min(window.innerWidth - labelPopover.offsetWidth - 8, r.left))}px`;
 }
 
+// Флаги «скрыт» у всех сохранённых эпиков — по текущим галочкам.
+async function persistHidden() {
+  const stored = await sync.selectedEpics();
+  const map = {};
+  for (const e of stored) map[e.key] = !state.selected.has(e.key);
+  await sync.setHidden(map);
+}
+
 // ---------- фильтры списка эпиков ----------
 
 function setFilter(patch) {
@@ -299,6 +307,8 @@ function epicRow(epic, checked, index) {
       .querySelectorAll(`.item[data-key="${CSS.escape(epic.key)}"] input`)
       .forEach((other) => (other.checked = cb.checked));
     renderSelCount();
+    // Снятая галочка сразу скрывает эпик на «Ганте по эпикам» (флаг в базе, переживает перезагрузку).
+    sync.setHidden({ [epic.key]: !cb.checked }).catch(fail);
   };
   const key = document.createElement("span");
   key.className = "ikey";
@@ -493,6 +503,29 @@ function renderEpicAssigneeFilter(epics) {
   if (sel.value !== current) settings.save({ epicAssigneeFilter: "" });
 }
 
+// Пояснение над Гантом: сколько эпиков скрыто галочками и какие фильтры пришли со страницы поиска.
+function renderGanttFilterNote(hiddenCount) {
+  const box = $("#ganttFilterNote");
+  box.textContent = "";
+  const parts = [];
+  if (hiddenCount) parts.push(t("gantt.hiddenUnchecked", { n: hiddenCount }));
+  if (state.filter.label) parts.push(`${t("search.filterLabel")}: ${state.filter.label}`);
+  if (state.filter.assignee) parts.push(`${t("search.filterAssignee")}: ${state.filter.assignee}`);
+  if (!parts.length) return;
+  box.append(`${t("gantt.fromSearch")} ${parts.join(" · ")}`);
+  if (hasFilter()) {
+    const clear = document.createElement("button");
+    clear.type = "button";
+    clear.className = "link";
+    clear.textContent = t("gantt.clearSearchFilters");
+    clear.onclick = () => {
+      setFilter({ label: "", assignee: "" });
+      drawGantt("epic", $("#page-epics"));
+    };
+    box.append(clear);
+  }
+}
+
 function epicMatchesFilter(epic, filter) {
   if (!filter) return true;
   if (filter === NO_ASSIGNEE) return !epic.assigneeKey;
@@ -516,7 +549,10 @@ async function drawGantt(mode, container) {
       // Фильтр по исполнителю эпика: диаграмма строится только по подходящим эпикам и их задачам.
       renderEpicAssigneeFilter(epics);
       const filter = settings.get().epicAssigneeFilter || "";
-      epicsShown = epics.filter((e) => epicMatchesFilter(e, filter));
+      // Снятые галочки и фильтры со страницы «Поиск эпиков» действуют и здесь.
+      const visible = epics.filter((e) => !e.hidden);
+      epicsShown = applyFilter(visible.filter((e) => epicMatchesFilter(e, filter)));
+      renderGanttFilterNote(epics.length - visible.length);
       const keep = new Set(epicsShown.map((e) => e.key));
       issuesShown = issues.filter((i) => keep.has(i.epicKey));
       target = $("#epicsChart");
@@ -724,14 +760,16 @@ async function boot() {
     }
   };
   $("#q").onkeydown = (e) => e.key === "Enter" && $("#btnFind").click();
-  $("#btnSelectAll").onclick = () => {
+  $("#btnSelectAll").onclick = async () => {
     state.results.forEach((e) => state.selected.add(e.key));
+    await persistHidden();
     renderResults();
     renderStored();
     renderSelCount();
   };
-  $("#btnClear").onclick = () => {
+  $("#btnClear").onclick = async () => {
     state.selected.clear();
+    await persistHidden();
     renderResults();
     renderStored();
     renderSelCount();
@@ -799,7 +837,7 @@ async function boot() {
 
   fillSettingsForm();
   const stored = await renderStored();
-  stored.forEach((e) => state.selected.add(e.key));
+  stored.forEach((e) => !e.hidden && state.selected.add(e.key));
   await renderStored();
   renderSelCount();
   renderResults();
