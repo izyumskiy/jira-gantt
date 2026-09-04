@@ -3,6 +3,10 @@ export const DICT = {
   ru: {
     "app.title": "Jira Gantt",
     "lang.label": "Язык",
+    "app.today": "Сегодня",
+    "search.dueSoon": "Срок через {n} дн.",
+    "search.dueToday": "Срок сегодня",
+    "search.overdue": "Срок прошёл {n} дн. назад",
 
     "tab.search": "Поиск эпиков",
     "tab.epics": "Гант по эпикам",
@@ -159,6 +163,10 @@ export const DICT = {
   en: {
     "app.title": "Jira Gantt",
     "lang.label": "Language",
+    "app.today": "Today",
+    "search.dueSoon": "Due in {n} days",
+    "search.dueToday": "Due today",
+    "search.overdue": "Overdue by {n} days",
 
     "tab.search": "Epic search",
     "tab.epics": "Gantt by epics",

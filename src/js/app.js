@@ -7,7 +7,7 @@ import * as sync from "./sync.js";
 import * as agg from "./agg.js";
 import * as gantt from "./gantt.js";
 import * as team from "./team.js";
-import { classify } from "./status.js";
+import { classify, isDoneStatus } from "./status.js";
 
 const $ = (sel) => document.querySelector(sel);
 const state = { results: [], selected: new Set(), boards: [] };
@@ -60,16 +60,53 @@ const DATE_COLS = [
   ["search.due", "search.dueFull", (e) => e.dueDate]
 ];
 
+const DAY_MS = 86400000;
+const DUE_SOON_DAYS = 14;
+
+// Полночь локального дня для даты Jira («2026-09-03» или ISO с временем).
+function dayStart(v) {
+  const d = new Date(v.length === 10 ? `${v}T00:00:00` : v);
+  if (Number.isNaN(+d)) return null;
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+}
+
+// Сколько дней до срока: 0 — сегодня, отрицательное — просрочен; null — срока нет.
+export function daysUntil(dateStr, now = Date.now()) {
+  if (!dateStr) return null;
+  const due = dayStart(dateStr);
+  if (due == null) return null;
+  const today = new Date(now);
+  today.setHours(0, 0, 0, 0);
+  return Math.round((due - today.getTime()) / DAY_MS);
+}
+
+// Срок «горит»: наступает в ближайшие 14 дней или уже прошёл, а эпик ещё не готов.
+export function isDueSoon(epic, now = Date.now()) {
+  if (isDoneStatus(epic.statusName, epic.statusCategory)) return false;
+  const n = daysUntil(epic.dueDate, now);
+  return n != null && n <= DUE_SOON_DAYS;
+}
+
+function dueHint(n) {
+  if (n === 0) return t("search.dueToday");
+  return n > 0 ? t("search.dueSoon", { n }) : t("search.overdue", { n: -n });
+}
+
 // Четыре даты эпика: создан, плановое начало, плановое завершение, срок исполнения. Подписи — в шапке списка.
 function epicDates(epic) {
   const box = document.createElement("span");
   box.className = "idates";
-  for (const [, full, get] of DATE_COLS) {
+  for (const [key, full, get] of DATE_COLS) {
     const value = get(epic);
     const item = document.createElement("span");
     item.className = "idate" + (value ? "" : " idate-empty"); // не «empty»: это глобальная плашка «Нет данных»
     item.title = `${t(full)}: ${fmtDay(value)}`;
     item.textContent = fmtDay(value);
+    if (key === "search.due" && isDueSoon(epic)) {
+      item.classList.add("idate-due");
+      item.title += ` · ${dueHint(daysUntil(epic.dueDate))}`;
+    }
     box.append(item);
   }
   return box;
@@ -98,8 +135,9 @@ function listHead() {
 
 function epicRow(epic, checked, index) {
   const row = document.createElement("label");
-  row.className = "item";
+  row.className = "item" + (isDueSoon(epic) ? " due-soon" : "");
   row.dataset.key = epic.key;
+  if (isDueSoon(epic)) row.title = dueHint(daysUntil(epic.dueDate));
   const num = document.createElement("span");
   num.className = "inum";
   num.textContent = `${index + 1}.`;
@@ -412,8 +450,17 @@ function trackTopHeight() {
   window.addEventListener("scroll", applyTopHeight, { passive: true });
 }
 
+// Текущая дата в шапке (дд.мм.гггг); обновляется раз в минуту — вкладка может жить сутками.
+function showToday() {
+  const d = new Date();
+  const p = (n) => String(n).padStart(2, "0");
+  $("#today").textContent = `${p(d.getDate())}.${p(d.getMonth() + 1)}.${d.getFullYear()}`;
+}
+
 async function boot() {
   trackTopHeight();
+  showToday();
+  setInterval(showToday, 60000);
   const s = await settings.load();
   setLang(s.lang);
   applyI18n();

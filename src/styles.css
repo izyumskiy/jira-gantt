@@ -67,6 +67,7 @@ input[type="search"] { min-width: 320px; }
 .tabs { display: flex; gap: 4px; }
 .tab { border-radius: 4px; }
 .tab.active { background: var(--accent-soft); border-color: #b3d4ff; color: var(--accent); font-weight: 600; }
+.today { align-self: center; margin-left: 10px; padding: 0 6px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .lang { display: flex; align-items: center; gap: 6px; color: var(--muted); }
 .muted { color: var(--muted); }
@@ -105,6 +106,11 @@ main { padding: 14px 16px 40px; }
 .idates { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; white-space: nowrap; font-size: 12px; }
 .idate { font-variant-numeric: tabular-nums; }
 .idate-empty { color: var(--muted); }
+/* Срок в ближайшие 14 дней (или уже прошёл) у незавершённого эпика — вся строка красная. */
+.item.due-soon { background: #ffebe6; }
+.item.due-soon:hover { background: #ffd9d0; }
+.item.due-soon .isum, .item.due-soon .iprj { color: #bf2600; }
+.idate-due { color: #bf2600; font-weight: 700; }
 
 /* Шапка списка: липнет под верхней панелью (её высоту задаёт JS в --top-h). */
 .item.list-head {
@@ -443,6 +449,9 @@ textarea { font: inherit; padding: 5px 8px; border: 1px solid var(--line); borde
   .team-table th { background: #262c31; }
   .gantt th.c-sprint.backlog, .gantt td.c-backlog { background: #262c31; }
   .item.list-head, .item.list-head:hover { background: #262c31; }
+  .item.due-soon { background: #4f1c14; }
+  .item.due-soon:hover { background: #5c241a; }
+  .item.due-soon .isum, .item.due-soon .iprj, .idate-due { color: #ffbdad; }
   .chip { background: #2c333a; }
   .gantt thead th, .gantt thead .c-name { background: #262c31; }
   .g-row.group { background: #252b30; }
