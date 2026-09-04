@@ -7,6 +7,7 @@ import * as sync from "./sync.js";
 import * as agg from "./agg.js";
 import * as gantt from "./gantt.js";
 import * as team from "./team.js";
+import { classify } from "./status.js";
 
 const $ = (sel) => document.querySelector(sel);
 const state = { results: [], selected: new Set(), boards: [] };
@@ -66,10 +67,20 @@ function epicRow(epic, checked, index) {
   const sum = document.createElement("span");
   sum.className = "isum";
   sum.textContent = epic.summary;
+  // Статус эпика — тот же лейбл и палитра, что на «Ганте по эпикам».
+  const status = document.createElement("span");
+  status.className = "istatus";
+  if (epic.statusName) {
+    const lz = document.createElement("span");
+    lz.className = `lozenge lz-s-${classify(epic.statusName, epic.statusCategory).id}`;
+    lz.textContent = epic.statusName;
+    lz.title = epic.statusName;
+    status.append(lz);
+  }
   const prj = document.createElement("span");
   prj.className = "iprj";
   prj.textContent = epic.projectName || epic.projectKey || "";
-  row.append(num, cb, key, sum, prj);
+  row.append(num, cb, key, sum, status, prj);
   return row;
 }
 
