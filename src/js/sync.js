@@ -12,20 +12,37 @@ export async function detectFields() {
   const custom = (suffix) =>
     find((f) => f.schema && typeof f.schema.custom === "string" && f.schema.custom.endsWith(suffix));
 
+  const byName = (...names) => find((f) => names.includes(String(f.name || "").trim().toLowerCase()));
+
   const fields = {
+    version: FIELDS_VERSION,
     epicLink: custom("gh-epic-link") || find((f) => f.name === "Epic Link"),
     sprint: custom("gh-sprint") || find((f) => f.name === "Sprint"),
-    storyPoints: find((f) => f.name === "Story Points" || f.name === "Story point estimate")
+    storyPoints: find((f) => f.name === "Story Points" || f.name === "Story point estimate"),
+    // Плановые даты — кастомные поля; ищем по типовым названиям (англ./рус.).
+    plannedStart: byName("planned start", "planned start date", "плановое начало", "плановая дата начала", "target start"),
+    plannedEnd: byName("planned end", "planned end date", "плановое завершение", "плановая дата завершения", "target end")
   };
   await settings.save({ fields });
   return fields;
 }
 
+const FIELDS_VERSION = 2;
+
 async function ensureFields() {
   const s = settings.get();
-  if (s.fields.epicLink && s.fields.sprint) return s.fields;
+  if (s.fields.epicLink && s.fields.sprint && (s.fields.version || 0) >= FIELDS_VERSION) return s.fields;
   return detectFields();
 }
+
+// Поля эпика для списка на вкладке «Поиск эпиков».
+function epicFieldList() {
+  const f = settings.get().fields;
+  return ["summary", "project", "status", "updated", "created", "duedate", f.plannedStart, f.plannedEnd].filter(Boolean);
+}
+
+// Дата из Jira: у duedate/кастомных полей — «YYYY-MM-DD», у created — ISO с временем. Храним как есть.
+const dateOf = (v) => (typeof v === "string" && v ? v : "");
 
 // ---------- разбор спринтов ----------
 
@@ -123,11 +140,13 @@ export async function searchEpics(query) {
     jql += ` AND (${parts.join(" OR ")})`;
   }
   jql += " ORDER BY updated DESC";
-  const issues = await jira.search(jql, ["summary", "project", "status", "updated"]);
+  await ensureFields();
+  const issues = await jira.search(jql, epicFieldList());
   return issues.map(mapEpic);
 }
 
 function mapEpic(i) {
+  const f = settings.get().fields;
   return {
     key: i.key,
     id: i.id,
@@ -136,7 +155,11 @@ function mapEpic(i) {
     projectName: i.fields.project?.name || "",
     statusName: i.fields.status?.name || "",
     statusCategory: i.fields.status?.statusCategory?.key || "",
-    statusColor: i.fields.status?.statusCategory?.colorName || ""
+    statusColor: i.fields.status?.statusCategory?.colorName || "",
+    created: dateOf(i.fields.created),
+    dueDate: dateOf(i.fields.duedate),
+    plannedStart: f.plannedStart ? dateOf(i.fields[f.plannedStart]) : "",
+    plannedEnd: f.plannedEnd ? dateOf(i.fields[f.plannedEnd]) : ""
   };
 }
 
@@ -145,7 +168,7 @@ async function refreshEpics(keys) {
   const fresh = [];
   for (let i = 0; i < keys.length; i += 50) {
     const chunk = keys.slice(i, i + 50);
-    const issues = await jira.search(`key in (${chunk.join(",")})`, ["summary", "project", "status"]);
+    const issues = await jira.search(`key in (${chunk.join(",")})`, epicFieldList());
     fresh.push(...issues.map(mapEpic));
   }
   if (fresh.length) await db.putAll(db.STORES.epics, fresh);

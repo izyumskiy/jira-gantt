@@ -43,6 +43,41 @@ function showTab(name) {
 
 // ---------- поиск эпиков ----------
 
+// Дата Jira («2026-09-03» или ISO с временем) → «03.09.26»; пусто → прочерк.
+function fmtDay(v) {
+  if (!v) return t("dash");
+  const d = new Date(v.length === 10 ? `${v}T00:00:00` : v);
+  if (Number.isNaN(+d)) return t("dash");
+  const p = (n) => String(n).padStart(2, "0");
+  return `${p(d.getDate())}.${p(d.getMonth() + 1)}.${String(d.getFullYear()).slice(-2)}`;
+}
+
+// Четыре даты эпика: создан, плановое начало, плановое завершение, срок исполнения.
+function epicDates(epic) {
+  const box = document.createElement("span");
+  box.className = "idates";
+  const items = [
+    ["search.created", "search.createdFull", epic.created],
+    ["search.plannedStart", "search.plannedStartFull", epic.plannedStart],
+    ["search.plannedEnd", "search.plannedEndFull", epic.plannedEnd],
+    ["search.due", "search.dueFull", epic.dueDate]
+  ];
+  for (const [label, full, value] of items) {
+    const item = document.createElement("span");
+    item.className = "idate" + (value ? "" : " empty");
+    item.title = `${t(full)}: ${fmtDay(value)}`;
+    const k = document.createElement("span");
+    k.className = "idate-k";
+    k.textContent = t(label);
+    const v = document.createElement("span");
+    v.className = "idate-v";
+    v.textContent = fmtDay(value);
+    item.append(k, v);
+    box.append(item);
+  }
+  return box;
+}
+
 function epicRow(epic, checked, index) {
   const row = document.createElement("label");
   row.className = "item";
@@ -80,7 +115,7 @@ function epicRow(epic, checked, index) {
   const prj = document.createElement("span");
   prj.className = "iprj";
   prj.textContent = epic.projectName || epic.projectKey || "";
-  row.append(num, cb, key, sum, status, prj);
+  row.append(num, cb, key, sum, epicDates(epic), status, prj);
   return row;
 }
 
@@ -254,7 +289,9 @@ function renderDetected() {
   $("#detected").textContent = t("set.detected", {
     e: f.epicLink || t("dash"),
     s: f.sprint || t("dash"),
-    p: f.storyPoints || t("dash")
+    p: f.storyPoints || t("dash"),
+    ps: f.plannedStart || t("dash"),
+    pe: f.plannedEnd || t("dash")
   });
 }
 

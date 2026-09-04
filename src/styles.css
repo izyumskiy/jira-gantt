@@ -90,7 +90,7 @@ main { padding: 14px 16px 40px; }
 .list { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
 .item {
   display: grid;
-  grid-template-columns: 34px 22px 120px 1fr 140px 200px;
+  grid-template-columns: 34px 22px 110px 1fr 380px 140px 160px;
   align-items: center;
   gap: 8px;
   padding: 6px 10px;
@@ -101,6 +101,11 @@ main { padding: 14px 16px 40px; }
 .item:hover { background: #f7f8fa; }
 .inum { color: var(--muted); text-align: right; }
 .istatus { overflow: hidden; white-space: nowrap; }
+.idates { display: flex; gap: 12px; white-space: nowrap; font-size: 11px; }
+.idate { display: inline-flex; flex-direction: column; line-height: 1.2; }
+.idate-k { color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .02em; }
+.idate-v { font-variant-numeric: tabular-nums; }
+.idate.empty .idate-v { color: var(--muted); }
 .status-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; margin: 0 0 8px; min-height: 0; }
 .status-summary:empty { display: none; }
 .ssum-total { color: var(--muted); }

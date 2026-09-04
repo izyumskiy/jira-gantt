@@ -11,7 +11,8 @@ export const DEFAULTS = {
   infoSystems: [], // справочник информационных систем для вкладки «Команда»
   boardId: "",
   boardName: "",
-  fields: { epicLink: "", sprint: "", storyPoints: "" },
+  // version растёт, когда добавляются новые определяемые поля — тогда detectFields запускается заново.
+  fields: { version: 0, epicLink: "", sprint: "", storyPoints: "", plannedStart: "", plannedEnd: "" },
   lastSync: 0
 };
 
