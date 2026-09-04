@@ -267,6 +267,12 @@ check("колонка секции стала 264px", getComputedStyle(document.
   getComputedStyle(document.documentElement).getPropertyValue("--col-w"));
 check("в заголовке секции перечислены спринты обеих команд",
   [...document.querySelectorAll("#g1 thead .c-sprint")][0].querySelectorAll(".sp-item").length === 2);
+const heads = [...document.querySelectorAll("#g1 thead .c-sprint")].map((th) => th.textContent);
+check("в заголовках секций нет дат", heads.every((h) => !/\d{2}\.\d{2}/.test(h)), heads.join(" | "));
+check("текущая секция помечена словом «текущий», без дат", [...document.querySelectorAll("#g1 thead .c-sprint")][0].querySelector(".sp-name")?.textContent === t("gantt.current"),
+  [...document.querySelectorAll("#g1 thead .c-sprint")][0].querySelector(".sp-name")?.textContent);
+check("у второй секции подписи нет — только спринты", ![...document.querySelectorAll("#g1 thead .c-sprint")][1].querySelector(".sp-name"));
+check("секция без дат подписана «Без дат»", [...document.querySelectorAll("#g1 thead .c-sprint")].at(-1).querySelector(".sp-name")?.textContent === t("gantt.noDates"));
 check("легенда команд отрисована", document.querySelectorAll("#g1 .legend-item").length === 2);
 const left = [...document.querySelectorAll("#g1 .g-row.group .badge.b-left")].map((b) => b.textContent);
 check("жёлтый баллон «осталось» у каждого эпика", left.length === 5 && left[0] === "4", left.join(" "));

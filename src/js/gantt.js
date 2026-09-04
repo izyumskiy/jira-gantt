@@ -3,7 +3,7 @@
 // жёлтую (целевые эпики) и серую (прочие эпики) части пропорционально объёму. Вложенные строки
 // рисуются тонкими голубыми отрезками — по одному на каждый спринт секции.
 import { t } from "./i18n.js";
-import { fmtEstimate, fmtDate, sectionLabel } from "./agg.js";
+import { fmtEstimate, NO_DATES_ID } from "./agg.js";
 import * as settings from "./settings.js";
 import { cfId, escapeJql } from "./jira.js";
 
@@ -151,7 +151,9 @@ export function render(container, model, { mode }) {
   const wrap = el("div", "gantt-wrap");
   const table = el("table", "gantt");
 
-  // Заголовок: даты секции и список её спринтов с цветом команды.
+  // Заголовок секции: только имена её спринтов с цветом команды и пометка «текущий».
+  // Даты не показываем: период секции — расчётная величина с шагом в календарных днях,
+  // с реальными границами спринтов (без выходных) он расходится и только путает.
   const thead = el("thead");
   const hr = el("tr");
   const th0 = el("th", "c-name");
@@ -160,12 +162,12 @@ export function render(container, model, { mode }) {
   hr.append(th0);
   for (const sec of model.columns) {
     const th = el("th", "c-sprint" + (sec.id === model.currentId ? " current" : ""));
-    th.append(el("div", "sp-name", sectionLabel(sec)));
-    if (sec.id === model.currentId) th.append(el("div", "sp-date", t("gantt.current")));
+    if (sec.id === NO_DATES_ID) th.append(el("div", "sp-name", t("gantt.noDates")));
+    if (sec.id === model.currentId) th.append(el("div", "sp-name", t("gantt.current")));
     const list = el("div", "sp-list");
     for (const s of sec.sprints) {
       const item = el("div", "sp-item");
-      item.title = `${s.name} · ${model.teamOf(s).name}` + (s.startDate ? ` · ${fmtDate(s.startDate)} – ${fmtDate(s.endDate)}` : "");
+      item.title = `${s.name} · ${model.teamOf(s).name}`;
       item.append(dot(model.teamOf(s)), el("span", "sp-item-name", s.name));
       list.append(item);
     }
