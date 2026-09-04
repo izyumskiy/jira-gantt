@@ -366,12 +366,6 @@ function showTooltip(anchor, g, mode, model, profile = null) {
   head.append(close);
   tip.append(head);
 
-  if (mode === "assignee" && g.team) {
-    const teamLine = el("div", "tip-team");
-    teamLine.append(dot(g.team), el("span", "muted", `${t("gantt.team")}: `), el("span", null, g.team.name));
-    tip.append(teamLine);
-  }
-
   const rows = el("div", "tip-rows");
   // Каждое число — ссылка на соответствующую выборку задач в Jira.
   const line = (k, v, jql) => {
