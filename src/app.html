@@ -59,7 +59,15 @@
       </section>
 
       <!-- Вкладка 2: Гант по эпикам -->
-      <section class="page hidden" id="page-epics"></section>
+      <section class="page hidden" id="page-epics">
+        <div class="filter-bar">
+          <label>
+            <span data-i18n="gantt.filterAssignee"></span>
+            <select id="epicAssignee"></select>
+          </label>
+        </div>
+        <div id="epicsChart"></div>
+      </section>
 
       <!-- Вкладка 3: Гант по людям -->
       <section class="page hidden" id="page-people"></section>

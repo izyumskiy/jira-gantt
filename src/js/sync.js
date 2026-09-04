@@ -47,7 +47,7 @@ async function ensureFields() {
 // Поля эпика для списка на вкладке «Поиск эпиков».
 function epicFieldList() {
   const f = settings.get().fields;
-  return ["summary", "project", "status", "updated", "created", "duedate", f.plannedStart, f.plannedEnd].filter(Boolean);
+  return ["summary", "project", "status", "updated", "created", "duedate", "assignee", "reporter", f.plannedStart, f.plannedEnd].filter(Boolean);
 }
 
 // Дата из Jira: у duedate/кастомных полей — «YYYY-MM-DD», у created — ISO с временем. Храним как есть.
@@ -167,6 +167,9 @@ function mapEpic(i) {
     statusColor: i.fields.status?.statusCategory?.colorName || "",
     created: dateOf(i.fields.created),
     dueDate: dateOf(i.fields.duedate),
+    assigneeKey: i.fields.assignee ? i.fields.assignee.key || i.fields.assignee.name || "" : "",
+    assigneeName: i.fields.assignee ? i.fields.assignee.displayName || i.fields.assignee.name || "" : "",
+    reporterName: i.fields.reporter ? i.fields.reporter.displayName || i.fields.reporter.name || "" : "",
     plannedStart: f.plannedStart ? dateOf(i.fields[f.plannedStart]) : "",
     plannedEnd: f.plannedEnd ? dateOf(i.fields[f.plannedEnd]) : ""
   };

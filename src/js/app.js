@@ -112,6 +112,20 @@ function epicDates(epic) {
   return box;
 }
 
+// Исполнитель и постановщик эпика — двумя строками в одной ячейке.
+function epicPeople(epic) {
+  const box = document.createElement("span");
+  box.className = "ipeople";
+  for (const [label, value] of [["search.assignee", epic.assigneeName], ["search.reporter", epic.reporterName]]) {
+    const line = document.createElement("span");
+    line.className = "iperson" + (value ? "" : " iperson-empty");
+    line.title = `${t(label)}: ${value || t("dash")}`;
+    line.textContent = value || t("dash");
+    box.append(line);
+  }
+  return box;
+}
+
 // Шапка списка эпиков: та же сетка, что у строк; липнет под верхней панелью при прокрутке.
 function listHead() {
   const head = document.createElement("div");
@@ -129,7 +143,10 @@ function listHead() {
     c.title = t(full);
     dates.append(c);
   }
-  head.append(cell("inum", "#"), cell("", ""), cell("ikey", t("search.col.key")), cell("isum", t("search.col.name")), dates, cell("istatus", t("search.col.status")), cell("iprj", t("search.col.project")));
+  const people = document.createElement("span");
+  people.className = "ipeople";
+  people.append(cell("iperson", t("search.assignee")), cell("iperson", t("search.reporter")));
+  head.append(cell("inum", "#"), cell("", ""), cell("ikey", t("search.col.key")), cell("isum", t("search.col.name")), dates, people, cell("istatus", t("search.col.status")), cell("iprj", t("search.col.project")));
   return head;
 }
 
@@ -171,7 +188,7 @@ function epicRow(epic, checked, index) {
   const prj = document.createElement("span");
   prj.className = "iprj";
   prj.textContent = epic.projectName || epic.projectKey || "";
-  row.append(num, cb, key, sum, epicDates(epic), status, prj);
+  row.append(num, cb, key, sum, epicDates(epic), epicPeople(epic), status, prj);
   return row;
 }
 
@@ -311,6 +328,41 @@ async function refreshHeader() {
 
 // ---------- диаграммы ----------
 
+const NO_ASSIGNEE = "__none__";
+
+// Выпадающий список исполнителей эпиков: «все», затем люди по алфавиту, затем «без исполнителя».
+function renderEpicAssigneeFilter(epics) {
+  const sel = $("#epicAssignee");
+  const current = settings.get().epicAssigneeFilter || "";
+  sel.textContent = "";
+  const add = (value, label) => {
+    const o = document.createElement("option");
+    o.value = value;
+    o.textContent = label;
+    sel.append(o);
+  };
+  add("", t("gantt.filterAll"));
+  const people = new Map();
+  let unassigned = 0;
+  for (const e of epics) {
+    if (e.assigneeKey) {
+      if (!people.has(e.assigneeKey)) people.set(e.assigneeKey, { name: e.assigneeName || e.assigneeKey, count: 0 });
+      people.get(e.assigneeKey).count += 1;
+    } else unassigned += 1;
+  }
+  for (const [key, p] of [...people.entries()].sort((a, b) => a[1].name.localeCompare(b[1].name))) add(key, `${p.name} (${p.count})`);
+  if (unassigned) add(NO_ASSIGNEE, `${t("gantt.filterNone")} (${unassigned})`);
+  // Выбранного человека могло не остаться в выгрузке — тогда фильтр сбрасывается на «все».
+  sel.value = [...sel.options].some((o) => o.value === current) ? current : "";
+  if (sel.value !== current) settings.save({ epicAssigneeFilter: "" });
+}
+
+function epicMatchesFilter(epic, filter) {
+  if (!filter) return true;
+  if (filter === NO_ASSIGNEE) return !epic.assigneeKey;
+  return epic.assigneeKey === filter;
+}
+
 async function drawGantt(mode, container) {
   try {
     const [issues, others, sprints, epics, boards, profiles] = await Promise.all([
@@ -321,9 +373,21 @@ async function drawGantt(mode, container) {
       db.all(db.STORES.boards),
       db.all(db.STORES.people)
     ]);
-    const model = agg.buildModel({ issues, others, sprints, epics, boards, mode });
+    let target = container;
+    let epicsShown = epics;
+    let issuesShown = issues;
+    if (mode === "epic") {
+      // Фильтр по исполнителю эпика: диаграмма строится только по подходящим эпикам и их задачам.
+      renderEpicAssigneeFilter(epics);
+      const filter = settings.get().epicAssigneeFilter || "";
+      epicsShown = epics.filter((e) => epicMatchesFilter(e, filter));
+      const keep = new Set(epicsShown.map((e) => e.key));
+      issuesShown = issues.filter((i) => keep.has(i.epicKey));
+      target = $("#epicsChart");
+    }
+    const model = agg.buildModel({ issues: issuesShown, others, sprints, epics: epicsShown, boards, mode });
     // Профили с вкладки «Команда» (роль, статус, системы) нужны только на вкладке по людям.
-    gantt.render(container, model, { mode, profiles: mode === "assignee" ? profiles : [] });
+    gantt.render(target, model, { mode, profiles: mode === "assignee" ? profiles : [] });
   } catch (e) {
     fail(e);
   }
@@ -507,6 +571,10 @@ async function boot() {
     renderSelCount();
   };
   $("#btnSave").onclick = doSaveSelection;
+  $("#epicAssignee").onchange = async () => {
+    await settings.save({ epicAssigneeFilter: $("#epicAssignee").value });
+    drawGantt("epic", $("#page-epics"));
+  };
   $("#btnRefresh").onclick = () => doSync({ full: false });
   $("#btnReload").onclick = () => doSync({ full: true });
 

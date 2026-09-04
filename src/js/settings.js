@@ -14,6 +14,7 @@ export const DEFAULTS = {
   // version растёт, когда добавляются новые определяемые поля — тогда detectFields запускается заново.
   fields: { version: 0, epicLink: "", sprint: "", storyPoints: "", plannedStart: "", plannedEnd: "" },
   dateFields: [], // все поля типа дата/дата-время из Jira — для ручного выбора плановых дат
+  epicAssigneeFilter: "", // фильтр «Ганта по эпикам» по исполнителю эпика: "" — все, "__none__" — без исполнителя
   lastSync: 0
 };
 
