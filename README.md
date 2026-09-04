@@ -187,7 +187,8 @@ Jira Server через REST отдаёт только цвет **категор�
 
 | Файл | Ответственность |
 |---|---|
-| `manifest.json` | MV3: `storage`, `optional_host_permissions`, service worker |
+| `manifest.json` | MV3: `storage`, `optional_host_permissions`, service worker, иконки |
+| `icons/` | Иконка расширения: `icon.svg` — исходник, `icon16/32/48/128.png` — растр (рисуется PIL-скриптом по тем же координатам) |
 | `src/background.js` | Клик по иконке → открыть/сфокусировать вкладку приложения |
 | `src/app.html`, `src/styles.css` | Разметка и оформление (светлая и тёмная темы) |
 | `src/js/app.js` | Композиция: вкладки, поиск эпиков, синхронизация, настройки |
