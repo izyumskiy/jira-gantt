@@ -225,6 +225,7 @@ function applyFilter(list) {
 function filterControls() {
   const box = document.createElement("span");
   box.className = "ifilters";
+  box.append(Object.assign(document.createElement("span"), { className: "ifilters-title", textContent: t("search.filters") }));
   const active = [
     ["search.filterLabel", state.filter.label, () => setFilter({ label: "" })],
     ["search.filterAssignee", state.filter.assignee, () => setFilter({ assignee: "" })]
@@ -270,13 +271,13 @@ function listHead() {
     c.title = t(full);
     dates.append(c);
   }
-  const nameCell = cell("isum isum-head", t("search.col.name"));
-  nameCell.append(filterControls());
   head.append(
-    cell("inum", "#"), cell("", ""), cell("ikey", t("search.col.key")), nameCell, dates,
+    cell("inum", "#"), cell("", ""), cell("ikey", t("search.col.key")), cell("isum", t("search.col.name")), dates,
     cell("ilabels", t("search.col.labels")),
     cell("iperson", t("search.assignee")), cell("iperson", t("search.reporter")), cell("istatus", t("search.col.status"))
   );
+  // Активные фильтры и «Снять фильтры» — второй строкой шапки во всю ширину, чтобы не зависеть от ширины колонок.
+  if (hasFilter()) head.append(filterControls());
   return head;
 }
 

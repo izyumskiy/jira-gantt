@@ -147,12 +147,22 @@ main { padding: 14px 16px 40px; }
   box-shadow: 0 8px 24px rgba(9, 30, 66, .2);
 }
 
-/* Активные фильтры и «Снять фильтры» в шапке списка. */
-.isum-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.ifilters { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; text-transform: none; letter-spacing: 0; }
-.ifilters .lchip { font-weight: 600; }
-.clear-filters { font-size: 11px; padding: 0 6px; text-transform: none; letter-spacing: 0; }
-.clear-filters:disabled { color: var(--muted); text-decoration: none; }
+/* Активные фильтры и «Снять фильтры» — вторая строка шапки списка во всю ширину. */
+.ifilters {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 5px;
+  padding-top: 5px;
+  border-top: 1px dashed var(--line);
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 400;
+}
+.ifilters-title { color: var(--muted); }
+.ifilters .lchip { font-weight: 600; max-width: none; }
+.clear-filters { font-size: 12px; padding: 0 6px; margin-left: 4px; text-transform: none; letter-spacing: 0; font-weight: 600; }
 .filter-bar { display: flex; align-items: center; gap: 14px; margin: 0 0 8px; }
 .filter-bar label { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); }
 .filter-bar select { min-width: 220px; }
