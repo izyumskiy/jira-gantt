@@ -8,7 +8,7 @@ export const DICT = {
     "search.dueToday": "Срок сегодня",
     "search.overdue": "Срок прошёл {n} дн. назад",
 
-    "tab.search": "Поиск эпиков",
+    "tab.search": "Поиск",
     "tab.epics": "По эпикам",
     "tab.people": "По людям",
     "tab.epicPeople": "По эпикам и людям",
@@ -94,8 +94,8 @@ export const DICT = {
     "set.stdReporter": "Reporter (стандартное)",
     "set.stdCreator": "Creator (стандартное)",
 
-    "toolbar.refresh": "Обновить данные",
-    "toolbar.reload": "Скачать заново",
+    "toolbar.refresh": "Обновить",
+    "toolbar.reload": "Скачать",
     "toolbar.lastSync": "Обновлено: {t}",
     "toolbar.never": "ещё не загружалось",
     "toolbar.stats": "Эпиков: {e} · задач: {i} · спринтов: {s}",
@@ -195,7 +195,7 @@ export const DICT = {
     "search.dueToday": "Due today",
     "search.overdue": "Overdue by {n} days",
 
-    "tab.search": "Epic search",
+    "tab.search": "Search",
     "tab.epics": "By epics",
     "tab.people": "By people",
     "tab.epicPeople": "By epics and people",
@@ -281,8 +281,8 @@ export const DICT = {
     "set.stdReporter": "Reporter (standard)",
     "set.stdCreator": "Creator (standard)",
 
-    "toolbar.refresh": "Refresh data",
-    "toolbar.reload": "Full re-download",
+    "toolbar.refresh": "Refresh",
+    "toolbar.reload": "Download",
     "toolbar.lastSync": "Updated: {t}",
     "toolbar.never": "never loaded",
     "toolbar.stats": "Epics: {e} · issues: {i} · sprints: {s}",
