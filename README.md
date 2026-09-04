@@ -1,4 +1,4 @@
-# Jira Gantt — расширение Chrome
+# Jira OhMyGant — расширение Chrome
 
 Диаграмма Ганта по спринтам для локальной Jira (Atlassian Jira Server 9.8.0).
 Задачи выбранных эпиков скачиваются в локальную базу IndexedDB, диаграмма

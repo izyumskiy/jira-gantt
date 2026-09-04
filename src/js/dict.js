@@ -1,7 +1,7 @@
 // Словарь подписей интерфейса. Все тексты — только отсюда.
 export const DICT = {
   ru: {
-    "app.title": "Jira Gantt",
+    "app.title": "Jira OhMyGant",
     "lang.label": "Язык",
     "app.today": "Сегодня",
     "search.dueSoon": "Срок через {n} дн.",
@@ -161,7 +161,7 @@ export const DICT = {
   },
 
   en: {
-    "app.title": "Jira Gantt",
+    "app.title": "Jira OhMyGant",
     "lang.label": "Language",
     "app.today": "Today",
     "search.dueSoon": "Due in {n} days",

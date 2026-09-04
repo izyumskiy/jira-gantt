@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "Jira Gantt",
+  "name": "Jira OhMyGant",
   "version": "0.1.0",
   "description": "Диаграмма Ганта по эпикам и исполнителям для локальной Jira (Server 9.x)",
   "permissions": [
@@ -14,7 +14,7 @@
     "service_worker": "src/background.js"
   },
   "action": {
-    "default_title": "Jira Gantt",
+    "default_title": "Jira OhMyGant",
     "default_icon": {
       "16": "icons/icon16.png",
       "32": "icons/icon32.png"
