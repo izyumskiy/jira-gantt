@@ -33,6 +33,7 @@ function fail(e) {
 // ---------- вкладки ----------
 
 function showTab(name) {
+  applyTopHeight(); // содержимое верхней панели меняется — её высота тоже
   document.querySelectorAll(".tab").forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
   document.querySelectorAll(".page").forEach((p) => p.classList.add("hidden"));
   $(`#page-${name}`).classList.remove("hidden");
@@ -52,30 +53,47 @@ function fmtDay(v) {
   return `${p(d.getDate())}.${p(d.getMonth() + 1)}.${String(d.getFullYear()).slice(-2)}`;
 }
 
-// Четыре даты эпика: создан, плановое начало, плановое завершение, срок исполнения.
+const DATE_COLS = [
+  ["search.created", "search.createdFull", (e) => e.created],
+  ["search.plannedStart", "search.plannedStartFull", (e) => e.plannedStart],
+  ["search.plannedEnd", "search.plannedEndFull", (e) => e.plannedEnd],
+  ["search.due", "search.dueFull", (e) => e.dueDate]
+];
+
+// Четыре даты эпика: создан, плановое начало, плановое завершение, срок исполнения. Подписи — в шапке списка.
 function epicDates(epic) {
   const box = document.createElement("span");
   box.className = "idates";
-  const items = [
-    ["search.created", "search.createdFull", epic.created],
-    ["search.plannedStart", "search.plannedStartFull", epic.plannedStart],
-    ["search.plannedEnd", "search.plannedEndFull", epic.plannedEnd],
-    ["search.due", "search.dueFull", epic.dueDate]
-  ];
-  for (const [label, full, value] of items) {
+  for (const [, full, get] of DATE_COLS) {
+    const value = get(epic);
     const item = document.createElement("span");
     item.className = "idate" + (value ? "" : " idate-empty"); // не «empty»: это глобальная плашка «Нет данных»
     item.title = `${t(full)}: ${fmtDay(value)}`;
-    const k = document.createElement("span");
-    k.className = "idate-k";
-    k.textContent = t(label);
-    const v = document.createElement("span");
-    v.className = "idate-v";
-    v.textContent = fmtDay(value);
-    item.append(k, v);
+    item.textContent = fmtDay(value);
     box.append(item);
   }
   return box;
+}
+
+// Шапка списка эпиков: та же сетка, что у строк; липнет под верхней панелью при прокрутке.
+function listHead() {
+  const head = document.createElement("div");
+  head.className = "item list-head";
+  const cell = (cls, text) => {
+    const c = document.createElement("span");
+    c.className = cls;
+    c.textContent = text;
+    return c;
+  };
+  const dates = document.createElement("span");
+  dates.className = "idates";
+  for (const [label, full] of DATE_COLS) {
+    const c = cell("idate", t(label));
+    c.title = t(full);
+    dates.append(c);
+  }
+  head.append(cell("inum", "#"), cell("", ""), cell("ikey", t("search.col.key")), cell("isum", t("search.col.name")), dates, cell("istatus", t("search.col.status")), cell("iprj", t("search.col.project")));
+  return head;
 }
 
 function epicRow(epic, checked, index) {
@@ -172,6 +190,7 @@ function renderResults() {
     box.append(p);
     return;
   }
+  box.append(listHead());
   sortEpics(state.results).forEach((e, i) => box.append(epicRow(e, state.selected.has(e.key), i)));
 }
 
@@ -180,6 +199,7 @@ async function renderStored() {
   const box = $("#storedList");
   box.textContent = "";
   renderStatusSummary($("#storedSummary"), stored);
+  if (stored.length) box.append(listHead());
   sortEpics(stored).forEach((e, i) => box.append(epicRow(e, state.selected.has(e.key), i)));
   if (!stored.length) {
     const p = document.createElement("div");
@@ -282,6 +302,29 @@ function fillSettingsForm() {
   $("#lang").value = s.lang;
   renderBoards();
   renderDetected();
+  renderDateFieldSelects();
+}
+
+// Селекты плановых полей: все поля типа «дата» из Jira + текущее значение, если его нет в списке.
+function renderDateFieldSelects() {
+  const s = settings.get();
+  for (const [sel, key] of [[$("#plannedStartField"), "plannedStart"], [$("#plannedEndField"), "plannedEnd"]]) {
+    sel.textContent = "";
+    const none = document.createElement("option");
+    none.value = "";
+    none.textContent = t("set.fieldAuto");
+    sel.append(none);
+    const list = [...(s.dateFields || [])];
+    const cur = s.fields[key];
+    if (cur && !list.some((f) => f.id === cur)) list.push({ id: cur, name: cur });
+    for (const f of list) {
+      const o = document.createElement("option");
+      o.value = f.id;
+      o.textContent = `${f.name} (${f.id})`;
+      sel.append(o);
+    }
+    sel.value = cur || "";
+  }
 }
 
 function renderDetected() {
@@ -328,6 +371,7 @@ async function saveSettingsForm() {
     hoursPerDay: Number($("#hoursPerDay").value) || 8,
     doneStatuses: $("#doneStatuses").value.trim(),
     infoSystems: team.parseSystems($("#infoSystems").value),
+    fields: { plannedStart: $("#plannedStartField").value, plannedEnd: $("#plannedEndField").value },
     boardId,
     boardName: boardId ? boardName : ""
   });
@@ -346,10 +390,32 @@ async function ensurePermission() {
 
 // ---------- запуск ----------
 
+// Верхняя панель тоже липкая; шапке списка нужно знать её высоту, чтобы встать ровно под ней.
+// Высота меняется, когда подставляются тексты (локализация) и когда панель переносится на две строки,
+// поэтому пересчитываем после applyI18n, по ResizeObserver и на всякий случай при прокрутке.
+let applyTopHeight = () => {};
+function trackTopHeight() {
+  const top = document.querySelector(".top");
+  let last = "";
+  applyTopHeight = () => {
+    const h = `${Math.ceil(top.getBoundingClientRect().height)}px`;
+    if (h !== last) {
+      last = h;
+      document.documentElement.style.setProperty("--top-h", h);
+    }
+  };
+  applyTopHeight();
+  if (window.ResizeObserver) new ResizeObserver(applyTopHeight).observe(top);
+  window.addEventListener("resize", applyTopHeight);
+  window.addEventListener("scroll", applyTopHeight, { passive: true });
+}
+
 async function boot() {
+  trackTopHeight();
   const s = await settings.load();
   setLang(s.lang);
   applyI18n();
+  applyTopHeight();
   await db.open();
 
   document.querySelectorAll(".tab").forEach((b) => (b.onclick = () => showTab(b.dataset.tab)));
@@ -358,6 +424,7 @@ async function boot() {
     await settings.save({ lang: $("#lang").value });
     setLang($("#lang").value);
     applyI18n();
+    applyTopHeight();
     fillSettingsForm();
     renderSelCount();
     renderResults();
@@ -419,6 +486,7 @@ async function boot() {
       await ensurePermission();
       await sync.detectFields();
       renderDetected();
+      renderDateFieldSelects();
       status(t("st.done"));
     } catch (e) {
       fail(e);

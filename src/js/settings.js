@@ -13,6 +13,7 @@ export const DEFAULTS = {
   boardName: "",
   // version растёт, когда добавляются новые определяемые поля — тогда detectFields запускается заново.
   fields: { version: 0, epicLink: "", sprint: "", storyPoints: "", plannedStart: "", plannedEnd: "" },
+  dateFields: [], // все поля типа дата/дата-время из Jira — для ручного выбора плановых дат
   lastSync: 0
 };
 

@@ -12,22 +12,31 @@ export async function detectFields() {
   const custom = (suffix) =>
     find((f) => f.schema && typeof f.schema.custom === "string" && f.schema.custom.endsWith(suffix));
 
-  const byName = (...names) => find((f) => names.includes(String(f.name || "").trim().toLowerCase()));
+  const norm = (v) => String(v || "").trim().toLowerCase();
+  const isDateType = (f) => ["date", "datetime"].includes(String(f.schema?.type || ""));
+  // Совпадение по имени поля ИЛИ по его JQL-имени (clauseNames) — в JQL поле зовётся «Planned Start».
+  const namesOf = (f) => [f.name, ...(f.clauseNames || [])].map(norm);
+  const dateFields = list.filter(isDateType).map((f) => ({ id: f.id, name: f.name || f.id }));
+  // Плановые даты: сначала среди полей типа «дата» (в Jira бывают одноимённые поля разных типов), потом среди всех.
+  const byName = (...names) => {
+    const wanted = names.map(norm);
+    const hit = (pool) => pool.find((f) => namesOf(f).some((n) => wanted.includes(n)));
+    return (hit(list.filter(isDateType)) || hit(list) || {}).id || "";
+  };
 
   const fields = {
     version: FIELDS_VERSION,
     epicLink: custom("gh-epic-link") || find((f) => f.name === "Epic Link"),
     sprint: custom("gh-sprint") || find((f) => f.name === "Sprint"),
     storyPoints: find((f) => f.name === "Story Points" || f.name === "Story point estimate"),
-    // Плановые даты — кастомные поля; ищем по типовым названиям (англ./рус.).
     plannedStart: byName("planned start", "planned start date", "плановое начало", "плановая дата начала", "target start"),
     plannedEnd: byName("planned end", "planned end date", "плановое завершение", "плановая дата завершения", "target end")
   };
-  await settings.save({ fields });
+  await settings.save({ fields, dateFields });
   return fields;
 }
 
-const FIELDS_VERSION = 2;
+const FIELDS_VERSION = 3;
 
 async function ensureFields() {
   const s = settings.get();

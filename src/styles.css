@@ -87,7 +87,8 @@ main { padding: 14px 16px 40px; }
 .hint { color: var(--muted); margin: 0 0 12px; }
 .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 8px 0; }
 
-.list { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+/* overflow: clip, а не hidden — hidden делает контейнер «прокруткой» для sticky-шапки, и она перестаёт липнуть к странице. */
+.list { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; overflow: clip; }
 .item {
   display: grid;
   grid-template-columns: 34px 22px 110px 1fr 380px 140px 160px;
@@ -101,11 +102,28 @@ main { padding: 14px 16px 40px; }
 .item:hover { background: #f7f8fa; }
 .inum { color: var(--muted); text-align: right; }
 .istatus { overflow: hidden; white-space: nowrap; }
-.idates { display: flex; gap: 12px; white-space: nowrap; font-size: 11px; }
-.idate { display: inline-flex; flex-direction: column; line-height: 1.2; }
-.idate-k { color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .02em; }
-.idate-v { font-variant-numeric: tabular-nums; }
-.idate-empty .idate-v { color: var(--muted); }
+.idates { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; white-space: nowrap; font-size: 12px; }
+.idate { font-variant-numeric: tabular-nums; }
+.idate-empty { color: var(--muted); }
+
+/* Шапка списка: липнет под верхней панелью (её высоту задаёт JS в --top-h). */
+.item.list-head {
+  position: sticky;
+  top: var(--top-h, 46px);
+  z-index: 5;
+  background: #fafbfc;
+  cursor: default;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: .03em;
+  color: var(--muted);
+  font-weight: 600;
+  padding-top: 5px;
+  padding-bottom: 5px;
+}
+.item.list-head:hover { background: #fafbfc; }
+.item.list-head .ikey, .item.list-head .iprj { color: var(--muted); font-weight: 600; }
+.item.list-head .idates { font-size: 10px; }
 .status-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; margin: 0 0 8px; min-height: 0; }
 .status-summary:empty { display: none; }
 .ssum-total { color: var(--muted); }
@@ -400,6 +418,7 @@ textarea { font: inherit; padding: 5px 8px; border: 1px solid var(--line); borde
   button.primary { color: #10233f; }
   input, select, textarea { background: #2c333a; color: var(--text); }
   .team-table th { background: #262c31; }
+  .item.list-head, .item.list-head:hover { background: #262c31; }
   .chip { background: #2c333a; }
   .gantt thead th, .gantt thead .c-name { background: #262c31; }
   .g-row.group { background: #252b30; }
