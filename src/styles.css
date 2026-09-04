@@ -183,6 +183,7 @@ table.gantt { border-collapse: separate; border-spacing: 0; }
   padding: 3px 8px;
 }
 .gantt thead .c-name { z-index: 4; background: #fafbfc; }
+.gantt.mode-assignee { --name-w: 456px; } /* на 20% шире: имя + роль + бейджи */
 .g-row { height: var(--row-h); }
 .g-row.group > .c-name { font-weight: 600; }
 .g-row.group { background: #fbfcfd; }
@@ -207,6 +208,16 @@ table.gantt { border-collapse: separate; border-spacing: 0; }
   text-align: left;
 }
 .glabel:hover { color: var(--accent); text-decoration: underline; }
+/* Статус сотрудника из профиля: уволен — серый, аутстаф — жёлтый (тёмный янтарь, чтобы читался на белом). */
+.glabel.p-fired { color: var(--muted); }
+.glabel.p-outstaff { color: #a16207; }
+.lozenge.lz-role { background: #e3fcef; color: #006644; }
+.tip-profile { font-weight: 400; font-size: 12px; margin-top: 4px; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.tip-profile .lozenge { margin-left: 0; }
+.tip-pstatus { color: var(--muted); }
+.tip-pstatus.p-outstaff { color: #a16207; }
+.tip-systems { width: 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.chip.static { cursor: default; }
 .indent { display: inline-block; width: 18px; }
 .plabel {
   display: inline-block;
@@ -431,6 +442,8 @@ textarea { font: inherit; padding: 5px 8px; border: 1px solid var(--line); borde
   .lozenge.lz-s-test { background: #4a3b0b; color: #f5d565; }
   .lozenge.lz-s-done { background: #164b35; color: #7ee2b8; }
   .lozenge.lz-s-other { background: #3c4147; color: #c7d1db; }
+  .lozenge.lz-role { background: #164b35; color: #7ee2b8; }
+  .glabel.p-outstaff, .tip-pstatus.p-outstaff { color: #f5d565; }
   .badge.b-left { background: #4a3b0b; color: #f5d565; }
   .badge.b-other { background: #3c4147; color: #c7d1db; }
   .part-target { background: color-mix(in srgb, #ffab00 45%, var(--panel)); color: var(--text); }

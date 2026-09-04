@@ -275,15 +275,17 @@ async function refreshHeader() {
 
 async function drawGantt(mode, container) {
   try {
-    const [issues, others, sprints, epics, boards] = await Promise.all([
+    const [issues, others, sprints, epics, boards, profiles] = await Promise.all([
       db.all(db.STORES.issues),
       db.all(db.STORES.others),
       db.all(db.STORES.sprints),
       db.all(db.STORES.epics),
-      db.all(db.STORES.boards)
+      db.all(db.STORES.boards),
+      db.all(db.STORES.people)
     ]);
     const model = agg.buildModel({ issues, others, sprints, epics, boards, mode });
-    gantt.render(container, model, { mode });
+    // Профили с вкладки «Команда» (роль, статус, системы) нужны только на вкладке по людям.
+    gantt.render(container, model, { mode, profiles: mode === "assignee" ? profiles : [] });
   } catch (e) {
     fail(e);
   }

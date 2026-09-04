@@ -6,6 +6,7 @@ import { t } from "./i18n.js";
 import { fmtEstimate, NO_DATES_ID } from "./agg.js";
 import * as settings from "./settings.js";
 import { cfId, escapeJql } from "./jira.js";
+import { normName } from "./team.js";
 
 const collapsed = { epic: new Set(), assignee: new Set() };
 
@@ -111,7 +112,10 @@ function emptyCells(n) {
   return out;
 }
 
-export function render(container, model, { mode }) {
+export function render(container, model, opts) {
+  const { mode, profiles = [] } = opts;
+  // Профили людей (вкладка «Команда») — по нормализованному имени.
+  const profileOf = new Map(profiles.map((p) => [p.name, p]));
   container.textContent = "";
 
   if (!model.groups.length) {
@@ -129,11 +133,11 @@ export function render(container, model, { mode }) {
   const collapse = el("button", "link", t("gantt.collapseAll"));
   expand.onclick = () => {
     collapsed[mode].clear();
-    render(container, model, { mode });
+    render(container, model, opts);
   };
   collapse.onclick = () => {
     model.groups.forEach((g) => collapsed[mode].add(g.key));
-    render(container, model, { mode });
+    render(container, model, opts);
   };
   bar.append(expand, collapse);
   if (model.teams.length) {
@@ -149,7 +153,7 @@ export function render(container, model, { mode }) {
   container.append(bar);
 
   const wrap = el("div", "gantt-wrap");
-  const table = el("table", "gantt");
+  const table = el("table", `gantt mode-${mode}`); // на вкладке по людям колонка имён шире
 
   // Заголовок секции: только имена её спринтов с цветом команды и пометка «текущий».
   // Даты не показываем: период секции — расчётная величина с шагом в календарных днях,
@@ -203,14 +207,20 @@ export function render(container, model, { mode }) {
     const twisty = el("button", "twisty", isCollapsed ? "▸" : "▾");
     twisty.onclick = () => {
       isCollapsed ? collapsed[mode].delete(g.key) : collapsed[mode].add(g.key);
-      render(container, model, { mode });
+      render(container, model, opts);
     };
     if (mode === "epic") name.append(el("span", "gnum", `${index + 1}.`));
-    const label = el("button", "glabel", g.label);
-    label.title = g.label;
-    label.onclick = (e) => showTooltip(e.currentTarget, g, mode, model);
+    const profile = mode === "assignee" ? profileOf.get(normName(g.label)) || null : null;
+    const label = el("button", "glabel" + (profile && profile.status ? ` p-${profile.status}` : ""), g.label);
+    label.title = g.label + (profile && profile.status ? ` · ${t(`pstatus.${profile.status}`)}` : "");
+    label.onclick = (e) => showTooltip(e.currentTarget, g, mode, model, profile);
     name.append(twisty, label);
     if (g.status && g.status.name) name.append(lozenge(g.status));
+    if (profile && profile.role) {
+      const role = el("span", "lozenge lz-role", t(`role.${profile.role}`));
+      role.title = t("team.role");
+      name.append(role);
+    }
     name.append(
       badges(g.count, g.sum, {
         left: mode === "epic" ? g.other : null,
@@ -322,7 +332,7 @@ document.addEventListener("click", (e) => {
   if (tip && !tip.contains(e.target) && !e.target.closest(".glabel")) closeTooltip();
 });
 
-function showTooltip(anchor, g, mode, model) {
+function showTooltip(anchor, g, mode, model, profile = null) {
   closeTooltip();
   tip = el("div", "tooltip");
   const scope = scopeJql(g, mode);
@@ -336,6 +346,19 @@ function showTooltip(anchor, g, mode, model) {
     const teamLine = el("div", "tip-team");
     teamLine.append(dot(g.team), el("span", null, `${t("gantt.team")}: ${g.team.name}`));
     title.append(teamLine);
+  }
+  // Свойства из профиля «Команды»: роль, статус и информационные системы.
+  if (mode === "assignee") {
+    const meta = el("div", "tip-profile");
+    if (profile && profile.role) meta.append(el("span", "lozenge lz-role", t(`role.${profile.role}`)));
+    if (profile && profile.status) meta.append(el("span", `tip-pstatus p-${profile.status}`, t(`pstatus.${profile.status}`)));
+    const sys = el("div", "tip-systems");
+    sys.append(el("span", "tip-k", `${t("tip.systems")}: `));
+    const list = profile && profile.systems && profile.systems.length ? profile.systems : null;
+    if (list) for (const name of list) sys.append(el("span", "chip on static", name));
+    else sys.append(el("span", "muted", t("tip.noSystems")));
+    meta.append(sys);
+    title.append(meta);
   }
   const close = el("button", "tip-close", "×");
   close.title = t("tip.close");

@@ -235,8 +235,13 @@ check("i18n en", t("gantt.epic") === "Epic");
 setLang("ru");
 check("i18n ru", t("gantt.epic") === "Эпик");
 
+// Профили с вкладки «Команда»: Ivan уволен, Olga — аутстаф, у Petr профиля нет.
+const peopleProfiles = [
+  { name: "ivan", displayName: "Ivan", role: "developer", status: "fired", systems: ["CRM", "Billing"] },
+  { name: "olga", displayName: "Olga", role: "qa", status: "outstaff", systems: [] }
+];
 gantt.render(document.getElementById("g1"), m1, { mode: "epic" });
-gantt.render(document.getElementById("g2"), m2, { mode: "assignee" });
+gantt.render(document.getElementById("g2"), m2, { mode: "assignee", profiles: peopleProfiles });
 
 // 7. отрисовка
 const lz = document.querySelectorAll("#g1 .lozenge");
@@ -244,7 +249,7 @@ check("лейбл статуса у каждого эпика", lz.length === m1
 const lzClasses = [...lz].map((n) => n.className.replace("lozenge ", ""));
 check("свой класс на каждый статус", new Set(lzClasses).size === 5, lzClasses.join(" "));
 check("первым идёт эпик в работе", lz[0].textContent === "В работе", lz[0].textContent);
-check("в Ганте по людям лейблов нет", document.querySelectorAll("#g2 .lozenge").length === 0);
+check("в Ганте по людям лейблов статуса нет (только роли)", document.querySelectorAll("#g2 .lozenge:not(.lz-role)").length === 0);
 
 const nums = [...document.querySelectorAll("#g1 .gnum")].map((n) => n.textContent);
 check("эпики пронумерованы подряд", nums.join(" ") === "1. 2. 3. 4. 5.", nums.join(" "));
@@ -294,6 +299,20 @@ check("«Прочие» у Ivan: 1 задача / 8ч, голубой отрез
   ivanRow.nextElementSibling && [...document.querySelectorAll("#g2 .g-row.others")][0].querySelector(".bar.nested .bar-sprint")?.textContent === "Sprint 2");
 check("серый бейдж прочих у человека (8ч = 1д)", ivanRow.querySelector(".badge.b-other")?.textContent === "+1 · 1д", ivanRow.querySelector(".badge.b-other")?.textContent);
 check("у эпиков серого бейджа нет", document.querySelectorAll("#g1 .badge.b-other").length === 0);
+// профиль человека на вкладке по людям: цвет имени, лейбл роли, ширина колонки
+const labelOf = (name) => [...document.querySelectorAll("#g2 .glabel")].find((b) => b.textContent === name);
+check("уволенный — серое имя (класс p-fired)", labelOf("Ivan").classList.contains("p-fired") && getComputedStyle(labelOf("Ivan")).color === getComputedStyle(document.querySelector("#g2 .gantt-bar .legend-title")).color,
+  `${labelOf("Ivan").className} / ${getComputedStyle(labelOf("Ivan")).color}`);
+check("аутстаф — жёлтое имя (класс p-outstaff)", labelOf("Olga").classList.contains("p-outstaff") && getComputedStyle(labelOf("Olga")).color === "rgb(161, 98, 7)", getComputedStyle(labelOf("Olga")).color);
+check("без профиля — обычное имя", !labelOf("Petr").className.includes("p-"));
+const roleOf = (name) => labelOf(name).parentElement.querySelector(".lozenge.lz-role");
+check("зелёный лейбл роли у Ivan и Olga", roleOf("Ivan")?.textContent === "Developer" && roleOf("Olga")?.textContent === "QA" && !roleOf("Petr"),
+  `${roleOf("Ivan")?.textContent} / ${roleOf("Olga")?.textContent}`);
+check("лейбл роли зелёный", getComputedStyle(roleOf("Ivan")).backgroundColor === "rgb(227, 252, 239)", getComputedStyle(roleOf("Ivan")).backgroundColor);
+check("на вкладке по людям колонка имён на 20% шире (456px)",
+  Math.round(document.querySelector("#g2 thead .c-name").getBoundingClientRect().width) === 456 && Math.round(document.querySelector("#g1 thead .c-name").getBoundingClientRect().width) === 380,
+  `${document.querySelector("#g2 thead .c-name").getBoundingClientRect().width} / ${document.querySelector("#g1 thead .c-name").getBoundingClientRect().width}`);
+check("на вкладке по эпикам лейблов роли нет", document.querySelectorAll("#g1 .lz-role").length === 0);
 const teamRows = [...document.querySelectorAll("#g2 .g-row.team .tlabel")].map((n) => n.textContent);
 check("строки команд на вкладке по людям", teamRows.join(",") === "Alpha,Beta,Без команды", teamRows.join(","));
 
@@ -321,6 +340,15 @@ document.querySelector("#g2 .glabel").click();
 const aHrefs = [...document.querySelectorAll(".tooltip a")].map((a) => decodeURIComponent(a.href));
 check("подсказка по исполнителю ссылается на assignee", aHrefs.filter((h) => h.includes("/issues/")).every((h) => h.includes('assignee = "ivan"')), aHrefs[0]);
 check("в подсказке исполнителя указана команда", document.querySelector(".tooltip .tip-team")?.textContent.includes("Alpha"));
+check("в подсказке Ivan — информационные системы CRM и Billing",
+  [...document.querySelectorAll(".tooltip .tip-systems .chip")].map((c) => c.textContent).join(",") === "CRM,Billing",
+  [...document.querySelectorAll(".tooltip .tip-systems .chip")].map((c) => c.textContent).join(","));
+check("в подсказке Ivan — роль и статус", document.querySelector(".tooltip .tip-profile .lz-role")?.textContent === "Developer" && document.querySelector(".tooltip .tip-pstatus")?.textContent === t("pstatus.fired"));
+document.querySelector(".tip-close").click();
+labelOf("Petr").click();
+check("у человека без профиля — «не указаны»", document.querySelector(".tooltip .tip-systems")?.textContent.includes(t("tip.noSystems")) && !document.querySelector(".tooltip .lz-role"));
+document.querySelector(".tip-close").click();
+labelOf("Ivan").click();
 check("в подсказке исполнителя — строка прочих эпиков", [...document.querySelectorAll(".tooltip .tip-row")].some((r) => r.textContent.includes(t("tip.others")) && r.textContent.includes("1 · 1д")));
 check("ссылка прочих — открытые/будущие спринты без целевых эпиков",
   aHrefs.some((h) => h.includes("sprint in openSprints() OR sprint in futureSprints()") && h.includes("cf[10100] not in (EP-1,EP-2,EP-3,EP-4,EP-5)")),
