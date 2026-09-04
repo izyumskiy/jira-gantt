@@ -225,12 +225,31 @@ await settings.save({ infoSystems: [] });
 const m3 = agg.buildModel({ issues, others, sprints, epics, boards, mode: "epicPeople" });
 check("epicPeople: группы — те же эпики в том же порядке", m3.groups.map((g) => g.key).join(",") === m1.groups.map((g) => g.key).join(","), m3.groups.map((g) => g.key).join(","));
 const ep1p = m3.groups.find((g) => g.key === "EP-1");
-check("epicPeople: вложенные строки — исполнители", ep1p.projects.map((p) => p.label).sort().join(",") === "Ivan,Olga,Petr,Без исполнителя", ep1p.projects.map((p) => p.label).join(","));
+check("epicPeople: вложенные строки — исполнители (A-4 без спринта и готова → «Без исполнителя» скрыт)",
+  ep1p.projects.map((p) => p.label).sort().join(",") === "Ivan,Olga,Petr", ep1p.projects.map((p) => p.label).join(","));
 check("epicPeople: ключ вложенной строки — ключ исполнителя", ep1p.projects.some((p) => p.key === "ivan"));
 check("epicPeople: итоги эпика совпадают с «Гантом по эпикам»", ep1p.count === ep1.count && ep1p.sum === ep1.sum && ep1p.backlog.count === ep1.backlog.count);
 check("epicPeople: Ivan в EP-1 — 3 задачи (2 в секции 0)", ep1p.projects.find((p) => p.key === "ivan")?.count === 3 && ep1p.projects.find((p) => p.key === "ivan")?.cells.get("sec:0")?.count === 2);
 check("epicPeople: статус эпика и сортировка сохранены", ep1p.status?.id === "progress" && m3.childKind === "person");
 check("epicPeople: «прочие» не учитываются", m3.groups.every((g) => g.otherCount === 0));
+// внутри эпика — только люди с задачами в текущем/будущих спринтах или в бэклоге
+const m3f = agg.buildModel({
+  issues: [
+    mk("F-1", "EP-1", "AAA", "Ivan", 2, 8, "prog"),     // текущий спринт → виден
+    mk("F-2", "EP-1", "AAA", "Zed", 1, 4, "prog"),      // только закрытый спринт → скрыт
+    mk("F-3", "EP-1", "AAA", "Yan", null, 2, "done"),   // без спринта, но готово → скрыт
+    mk("F-4", "EP-1", "AAA", "Kim", null, 2, "new"),    // без спринта, не готово (бэклог) → виден
+    mk("F-5", "EP-1", "AAA", "Lee", 9, 1, "new")        // будущий спринт без дат → виден
+  ],
+  sprints, epics, boards, mode: "epicPeople"
+});
+const f1 = m3f.groups.find((g) => g.key === "EP-1");
+check("epicPeople: скрыты люди только с закрытыми спринтами или готовыми задачами без спринта",
+  f1.projects.map((p) => p.label).sort().join(",") === "Ivan,Kim,Lee", f1.projects.map((p) => p.label).join(","));
+check("epicPeople: итоги эпика при этом по всем задачам", f1.count === 5 && f1.sum === 17 * H, `${f1.count} / ${f1.sum / H}`);
+const m1f = agg.buildModel({ issues: [mk("F-2", "EP-1", "AAA", "Zed", 1, 4, "prog")], sprints, epics, boards, mode: "epic" });
+check("на «По эпикам» проекты не отсеиваются", m1f.groups[0].projects.length === 1);
+
 const g3 = document.createElement("div");
 document.body.append(g3);
 let clicked = null;

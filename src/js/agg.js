@@ -329,6 +329,14 @@ export function buildModel({ issues, others = [], sprints, epics, boards = [], m
     }
   }
 
+  // «По эпикам и людям»: внутри эпика показываем только людей с задачами в секциях диаграммы
+  // (текущий и будущие спринты) или в бэклоге (без спринта, не готово). Итоги эпика — по всем задачам.
+  if (mode === "epicPeople") {
+    for (const g of groups.values()) {
+      for (const [key, p] of g.projects) if (!p.cells.size && !p.backlog.count) g.projects.delete(key);
+    }
+  }
+
   const list = [...groups.values()].map((g) => {
     let team = teamsInfo.none;
     let best = 0;
