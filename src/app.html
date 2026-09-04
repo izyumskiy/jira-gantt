@@ -1,0 +1,144 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Jira Gantt</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="top">
+      <div class="brand" data-i18n="app.title">Jira Gantt</div>
+
+      <nav class="tabs">
+        <button class="tab active" data-tab="search" data-i18n="tab.search"></button>
+        <button class="tab" data-tab="epics" data-i18n="tab.epics"></button>
+        <button class="tab" data-tab="people" data-i18n="tab.people"></button>
+        <button class="tab" data-tab="team" data-i18n="tab.team"></button>
+        <button class="tab" data-tab="settings" data-i18n="tab.settings"></button>
+      </nav>
+
+      <div class="spacer"></div>
+
+      <div class="toolbar">
+        <span id="stats" class="muted"></span>
+        <span id="lastSync" class="muted"></span>
+        <button id="btnRefresh" class="primary" data-i18n="toolbar.refresh"></button>
+        <button id="btnReload" data-i18n="toolbar.reload"></button>
+        <label class="lang">
+          <span data-i18n="lang.label"></span>
+          <select id="lang">
+            <option value="ru">Русский</option>
+            <option value="en">English</option>
+          </select>
+        </label>
+      </div>
+    </header>
+
+    <div id="status" class="status hidden"></div>
+
+    <main>
+      <!-- Вкладка 1: поиск и выбор эпиков -->
+      <section class="page" id="page-search">
+        <p class="hint" data-i18n="search.hint"></p>
+        <div class="row">
+          <input id="q" type="search" data-i18n-ph="search.placeholder" />
+          <button id="btnFind" class="primary" data-i18n="search.find"></button>
+          <button id="btnSelectAll" data-i18n="search.selectAll"></button>
+          <button id="btnClear" data-i18n="search.clear"></button>
+          <div class="spacer"></div>
+          <span id="selCount" class="muted"></span>
+          <button id="btnSave" class="primary" data-i18n="search.save"></button>
+        </div>
+        <h3 data-i18n="search.stored"></h3>
+        <div id="storedList" class="list"></div>
+        <h3 data-i18n="search.results"></h3>
+        <div id="results" class="list"></div>
+      </section>
+
+      <!-- Вкладка 2: Гант по эпикам -->
+      <section class="page hidden" id="page-epics"></section>
+
+      <!-- Вкладка 3: Гант по людям -->
+      <section class="page hidden" id="page-people"></section>
+
+      <!-- Вкладка 4: команда — свойства людей -->
+      <section class="page hidden" id="page-team"></section>
+
+      <!-- Вкладка 5: настройки -->
+      <section class="page hidden" id="page-settings">
+        <div class="card">
+          <h3 data-i18n="set.connection"></h3>
+          <label class="field">
+            <span data-i18n="set.baseUrl"></span>
+            <input id="baseUrl" type="url" placeholder="https://jira.company.local" />
+            <small class="muted" data-i18n="set.baseUrlHint"></small>
+          </label>
+          <label class="field">
+            <span data-i18n="set.pat"></span>
+            <input id="pat" type="password" autocomplete="off" />
+            <small class="muted" data-i18n="set.patHint"></small>
+          </label>
+          <div class="row">
+            <button id="btnGrant" data-i18n="set.grant"></button>
+            <button id="btnTest" data-i18n="set.test"></button>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3 data-i18n="set.fields"></h3>
+          <label class="field">
+            <span data-i18n="set.estimateField"></span>
+            <select id="estimateField">
+              <option value="original" data-i18n="set.estimate.original"></option>
+              <option value="remaining" data-i18n="set.estimate.remaining"></option>
+              <option value="points" data-i18n="set.estimate.points"></option>
+            </select>
+          </label>
+          <label class="field narrow">
+            <span data-i18n="set.hoursPerDay"></span>
+            <input id="hoursPerDay" type="number" min="1" max="24" step="1" />
+          </label>
+          <label class="field">
+            <span data-i18n="set.doneStatuses"></span>
+            <input id="doneStatuses" type="text" placeholder="On Prod, Sign off" />
+            <small class="muted" data-i18n="set.doneStatusesHint"></small>
+          </label>
+          <label class="field">
+            <span data-i18n="set.infoSystems"></span>
+            <textarea id="infoSystems" rows="4" placeholder="CRM&#10;Billing&#10;Mobile app"></textarea>
+            <small class="muted" data-i18n="set.infoSystemsHint"></small>
+          </label>
+          <div class="row">
+            <button id="btnDetect" data-i18n="set.detect"></button>
+            <span id="detected" class="muted"></span>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3 data-i18n="set.sprints"></h3>
+          <label class="field">
+            <span data-i18n="set.board"></span>
+            <select id="board"></select>
+            <small class="muted" data-i18n="set.boardHint"></small>
+          </label>
+          <div class="row">
+            <button id="btnBoards" data-i18n="set.loadBoards"></button>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3 data-i18n="set.danger"></h3>
+          <div class="row">
+            <button id="btnWipe" class="danger" data-i18n="set.wipe"></button>
+          </div>
+        </div>
+
+        <div class="row">
+          <button id="btnSaveSettings" class="primary" data-i18n="set.save"></button>
+        </div>
+      </section>
+    </main>
+
+    <script type="module" src="js/app.js"></script>
+  </body>
+</html>

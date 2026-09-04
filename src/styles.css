@@ -1,0 +1,408 @@
+:root {
+  --bg: #f5f6f8;
+  --panel: #ffffff;
+  --line: #dfe3ea;
+  --text: #172b4d;
+  --muted: #6b778c;
+  --accent: #0052cc;
+  --accent-soft: #deebff;
+  --bar: #4c9aff;
+  --bar-strong: #0065ff;
+  --danger: #de350b;
+  --ok: #006644;
+  --row-h: 34px;
+  --name-w: 380px;
+  --col-w: 264px;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font: 13px/1.45 -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+  color: var(--text);
+  background: var(--bg);
+}
+
+button {
+  font: inherit;
+  padding: 5px 10px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: #fff;
+  color: var(--text);
+  cursor: pointer;
+}
+button:hover { background: #f0f2f5; }
+button:disabled { opacity: .5; cursor: default; }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+button.primary:hover { background: #0747a6; }
+button.danger { color: var(--danger); border-color: #ffbdad; }
+button.link { border: none; background: none; color: var(--accent); padding: 2px 6px; }
+
+input, select {
+  font: inherit;
+  padding: 5px 8px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: #fff;
+  color: var(--text);
+}
+input[type="search"] { min-width: 320px; }
+
+.top {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 8px 16px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  flex-wrap: wrap;
+}
+.brand { font-weight: 600; font-size: 15px; }
+.spacer { flex: 1; }
+.tabs { display: flex; gap: 4px; }
+.tab { border-radius: 4px; }
+.tab.active { background: var(--accent-soft); border-color: #b3d4ff; color: var(--accent); font-weight: 600; }
+.toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.lang { display: flex; align-items: center; gap: 6px; color: var(--muted); }
+.muted { color: var(--muted); }
+.hidden { display: none !important; }
+
+.status {
+  padding: 7px 16px;
+  background: #eae6ff;
+  border-bottom: 1px solid var(--line);
+  position: sticky;
+  top: 46px;
+  z-index: 15;
+}
+.status.error { background: #ffebe6; color: var(--danger); }
+
+main { padding: 14px 16px 40px; }
+.page > h3 { margin: 18px 0 8px; font-size: 13px; text-transform: uppercase; letter-spacing: .03em; color: var(--muted); }
+.hint { color: var(--muted); margin: 0 0 12px; }
+.row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 8px 0; }
+
+.list { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+.item {
+  display: grid;
+  grid-template-columns: 34px 22px 120px 1fr 200px;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--line);
+  cursor: pointer;
+}
+.item:last-child { border-bottom: none; }
+.item:hover { background: #f7f8fa; }
+.inum { color: var(--muted); text-align: right; }
+.ikey { color: var(--accent); font-weight: 600; }
+.isum { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.iprj { color: var(--muted); text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.empty { padding: 18px; color: var(--muted); }
+
+/* ----- настройки ----- */
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 12px 14px; margin-bottom: 12px; max-width: 760px; }
+.card h3 { margin: 0 0 10px; font-size: 13px; text-transform: uppercase; letter-spacing: .03em; color: var(--muted); }
+.field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; max-width: 520px; }
+.field.narrow { max-width: 180px; }
+.field > span { font-weight: 600; }
+
+/* ----- диаграмма ----- */
+.gantt-bar { display: flex; gap: 6px; margin-bottom: 6px; }
+.gantt-wrap {
+  overflow: auto;
+  max-height: calc(100vh - 150px);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+}
+table.gantt { border-collapse: separate; border-spacing: 0; }
+.gantt th, .gantt td { border-bottom: 1px solid var(--line); border-right: 1px solid var(--line); }
+
+.gantt thead th {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  background: #fafbfc;
+  padding: 6px 8px;
+  text-align: left;
+  vertical-align: top;
+  font-weight: 600;
+}
+.gantt th.c-sprint { width: var(--col-w); min-width: var(--col-w); }
+.gantt th.c-sprint.current { background: var(--accent-soft); }
+.sp-date { font-weight: 600; white-space: nowrap; }
+.sp-item { display: flex; align-items: center; color: var(--muted); font-weight: 400; font-size: 11px; line-height: 1.4; }
+.sp-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: calc(var(--col-w) - 30px); }
+.th-hint { color: var(--muted); font-weight: 400; }
+
+.gantt .c-name {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  background: var(--panel);
+  width: var(--name-w);
+  min-width: var(--name-w);
+  max-width: var(--name-w);
+  padding: 3px 8px;
+}
+.gantt thead .c-name { z-index: 4; background: #fafbfc; }
+.g-row { height: var(--row-h); }
+.g-row.group > .c-name { font-weight: 600; }
+.g-row.group { background: #fbfcfd; }
+.g-row.proj > .c-name { background: var(--panel); }
+.g-row:hover > td { background: #f4f7fb; }
+
+.twisty { border: none; background: none; padding: 0 6px 0 0; color: var(--muted); cursor: pointer; }
+.gnum { color: var(--muted); margin-right: 5px; font-weight: 400; }
+.glabel {
+  border: none;
+  background: none;
+  padding: 0;
+  color: var(--text);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  max-width: 170px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
+  text-align: left;
+}
+.glabel:hover { color: var(--accent); text-decoration: underline; }
+.indent { display: inline-block; width: 18px; }
+.plabel {
+  display: inline-block;
+  max-width: 210px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
+}
+/* Статус эпика: лейбл в стиле Jira, цвет по категории статуса. */
+.lozenge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  vertical-align: bottom;
+  max-width: 110px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: #dfe1e6;
+  color: #42526e;
+}
+.lozenge.lz-s-new { background: #eae6ff; color: #403294; }
+.lozenge.lz-s-todo { background: #dfe1e6; color: #42526e; }
+.lozenge.lz-s-progress { background: #deebff; color: #0747a6; }
+.lozenge.lz-s-test { background: #fff0b3; color: #172b4d; }
+.lozenge.lz-s-done { background: #e3fcef; color: #006644; }
+.lozenge.lz-s-other { background: #dfe1e6; color: #42526e; }
+
+.badges { float: right; display: inline-flex; gap: 4px; }
+.badge { font-size: 11px; padding: 1px 6px; border-radius: 9px; background: #ebecf0; color: var(--muted); white-space: nowrap; }
+.badge.b-sum { background: var(--accent-soft); color: var(--accent); }
+.badge.b-left { background: #fff0b3; color: #172b4d; font-weight: 700; }
+.badge.b-other { background: #dfe1e6; color: #42526e; }
+
+.c-cell { padding: 3px 4px; width: var(--col-w); min-width: var(--col-w); vertical-align: middle; }
+.c-empty { background: transparent; }
+
+/* Цвета команд: --tc задаёт и точку в легенде, и заливку отрезка. */
+.tc-0 { --tc: #4c9aff; }
+.tc-1 { --tc: #00b8d9; }
+.tc-2 { --tc: #8777d9; }
+.tc-3 { --tc: #36b37e; }
+.tc-4 { --tc: #ff991f; }
+.tc-5 { --tc: #e774bb; }
+.tc-6 { --tc: #ff5630; }
+.tc-7 { --tc: #8993a4; }
+.tc-none { --tc: #a5adba; }
+.bar-group { --tc: #ffc400; }
+
+.dot {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--tc, #a5adba);
+  margin-right: 5px;
+  vertical-align: middle;
+  flex: none;
+}
+
+.stack { display: flex; flex-direction: column; gap: 2px; }
+.bar {
+  position: relative;
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 2px 7px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--tc, #a5adba) 16%, var(--panel));
+  color: var(--text);
+  overflow: hidden;
+  white-space: nowrap;
+}
+.bar::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: var(--fill, 100%);
+  background: var(--tc, #a5adba);
+  opacity: .38;
+}
+.bar > span { position: relative; }
+.bar-count { font-weight: 600; }
+/* Группирующая строка эпика — одна жёлтая полоса на секцию. */
+.bar.bar-group { padding: 3px 7px; }
+.bar.bar-group::before { opacity: .55; }
+
+/* Полоса человека: жёлтая часть — целевые эпики, серая — прочие; ширины пропорциональны объёму. */
+.bar.bar-split { padding: 0; background: transparent; gap: 0; }
+.bar.bar-split::before { display: none; }
+.part {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 3px 7px;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+.part-target { background: color-mix(in srgb, #ffc400 55%, var(--panel)); }
+.part-other { background: color-mix(in srgb, #a5adba 45%, var(--panel)); color: var(--muted); }
+.part-other .bar-count { color: var(--text); }
+
+/* Вложенные строки (проекты, «Прочие») — тонкие голубые отрезки, по одному на спринт. */
+.bar.nested {
+  --tc: #4c9aff;
+  padding: 1px 6px;
+  font-size: 11px;
+  min-height: 16px;
+  line-height: 14px;
+  border-radius: 2px;
+}
+.bar.nested::before { opacity: .28; }
+.bar-sprint { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--muted); }
+.plabel-others { color: var(--muted); font-style: italic; }
+
+.g-row.team { background: color-mix(in srgb, var(--accent) 6%, var(--panel)); }
+.g-row.team > .c-name { font-weight: 700; background: color-mix(in srgb, var(--accent) 6%, var(--panel)); }
+.tlabel { vertical-align: middle; }
+
+.legend { display: inline-flex; align-items: center; gap: 12px; margin-left: 14px; flex-wrap: wrap; }
+.legend-title { color: var(--muted); }
+.legend-item { display: inline-flex; align-items: center; gap: 2px; }
+.tlabel { text-transform: uppercase; letter-spacing: .03em; font-size: 11px; }
+
+/* Список спринтов секции в шапке. */
+.sp-list { margin-top: 3px; display: flex; flex-direction: column; gap: 1px; }
+.sp-item { display: flex; align-items: center; font-weight: 400; font-size: 11px; color: var(--text); white-space: nowrap; }
+.sp-item-name { overflow: hidden; text-overflow: ellipsis; max-width: calc(var(--col-w) - 30px); }
+.tip-team { font-weight: 400; font-size: 12px; color: var(--muted); margin-top: 2px; display: flex; align-items: center; }
+
+/* ----- вкладка «Команда» ----- */
+textarea { font: inherit; padding: 5px 8px; border: 1px solid var(--line); border-radius: 4px; background: #fff; color: var(--text); resize: vertical; }
+.team-wrap { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; overflow: auto; }
+.team-table { border-collapse: collapse; width: 100%; }
+.team-table th, .team-table td { padding: 6px 10px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+.team-table th { background: #fafbfc; font-weight: 600; white-space: nowrap; position: sticky; top: 0; }
+.team-table tr:last-child td { border-bottom: none; }
+.team-table tr.stale td { color: var(--muted); }
+.tnum { color: var(--muted); width: 32px; text-align: right; }
+.tname-main { font-weight: 600; }
+.small { font-size: 11px; }
+.tissues { white-space: nowrap; }
+.tissues .badge { margin-right: 4px; }
+.team-select { min-width: 150px; }
+.tactions { width: 30px; text-align: center; }
+.chips { display: flex; flex-wrap: wrap; gap: 4px; max-width: 420px; }
+.chip {
+  padding: 1px 8px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+.chip:hover { border-color: var(--accent); color: var(--accent); }
+.chip.on { background: var(--accent-soft); border-color: #b3d4ff; color: var(--accent); font-weight: 600; }
+
+/* ----- подсказка ----- */
+.tooltip {
+  position: fixed;
+  z-index: 50;
+  min-width: 320px;
+  max-width: 460px;
+  max-height: 70vh;
+  overflow: auto;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(9, 30, 66, .2);
+  padding: 10px 12px;
+}
+.tip-head { display: flex; justify-content: space-between; gap: 10px; align-items: flex-start; margin-bottom: 8px; }
+.tip-close { border: none; background: none; font-size: 16px; line-height: 1; color: var(--muted); cursor: pointer; }
+.tip-rows { display: flex; flex-direction: column; gap: 3px; }
+.tip-row { display: flex; justify-content: space-between; gap: 12px; }
+.tip-k { color: var(--muted); }
+.tip-v { font-weight: 600; }
+.tooltip a.tip-link { color: var(--accent); text-decoration: none; }
+.tooltip a.tip-link:hover { text-decoration: underline; }
+.tip-head a.tip-link { color: var(--accent); }
+.tip-sub { margin: 10px 0 4px; color: var(--muted); text-transform: uppercase; font-size: 11px; letter-spacing: .03em; }
+.tip-table { width: 100%; border-collapse: collapse; }
+.tip-table td { padding: 3px 0; border-top: 1px solid var(--line); }
+.tp-num { text-align: right; white-space: nowrap; padding-left: 10px !important; }
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1d2125;
+    --panel: #22272b;
+    --line: #3c4147;
+    --text: #dee4ea;
+    --muted: #9aa5b1;
+    --accent: #579dff;
+    --accent-soft: #1c3053;
+    --bar: #1d4d8f;
+    --bar-strong: #2a6fd6;
+  }
+  button { background: #2c333a; }
+  button:hover { background: #343b43; }
+  button.primary { color: #10233f; }
+  input, select, textarea { background: #2c333a; color: var(--text); }
+  .team-table th { background: #262c31; }
+  .chip { background: #2c333a; }
+  .gantt thead th, .gantt thead .c-name { background: #262c31; }
+  .g-row.group { background: #252b30; }
+  .item:hover, .g-row:hover > td { background: #272e34; }
+  .badge { background: #333a41; }
+  .lozenge { background: #3c4147; color: #c7d1db; }
+  .lozenge.lz-s-new { background: #352c63; color: #b8acf6; }
+  .lozenge.lz-s-todo { background: #3c4147; color: #c7d1db; }
+  .lozenge.lz-s-progress { background: #1c3053; color: #9cc4ff; }
+  .lozenge.lz-s-test { background: #4a3b0b; color: #f5d565; }
+  .lozenge.lz-s-done { background: #164b35; color: #7ee2b8; }
+  .lozenge.lz-s-other { background: #3c4147; color: #c7d1db; }
+  .badge.b-left { background: #4a3b0b; color: #f5d565; }
+  .badge.b-other { background: #3c4147; color: #c7d1db; }
+  .part-target { background: color-mix(in srgb, #ffab00 45%, var(--panel)); color: var(--text); }
+  .part-other { background: color-mix(in srgb, #8993a4 40%, var(--panel)); }
+  .status { background: #2b2f4a; }
+  .status.error { background: #442726; color: #ff9c8f; }
+}

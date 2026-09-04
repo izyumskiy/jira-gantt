@@ -1,0 +1,25 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Jira Gantt — self test</title>
+    <link rel="stylesheet" href="../src/styles.css" />
+    <style>
+      main { padding: 16px; }
+      .t-ok { color: #006644; }
+      .t-fail { color: #de350b; font-weight: 700; }
+      #log { font-family: ui-monospace, monospace; white-space: pre-wrap; margin-bottom: 20px; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h2>Self test</h2>
+      <div id="log"></div>
+      <h2>Гант по эпикам</h2>
+      <div id="g1"></div>
+      <h2>Гант по людям</h2>
+      <div id="g2"></div>
+    </main>
+    <script type="module" src="selftest.js"></script>
+  </body>
+</html>

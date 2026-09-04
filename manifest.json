@@ -1,0 +1,10 @@
+{
+  "manifest_version": 3,
+  "name": "Jira Gantt",
+  "version": "0.1.0",
+  "description": "Диаграмма Ганта по эпикам и исполнителям для локальной Jira (Server 9.x)",
+  "permissions": ["storage"],
+  "optional_host_permissions": ["http://*/*", "https://*/*"],
+  "background": { "service_worker": "src/background.js" },
+  "action": { "default_title": "Jira Gantt" }
+}
