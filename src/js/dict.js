@@ -45,6 +45,7 @@ export const DICT = {
     "search.selectAll": "Выбрать все",
     "search.clear": "Снять выбор",
     "search.stored": "Сохранённые эпики",
+    "search.total": "Всего: {n}",
 
     "toolbar.refresh": "Обновить данные",
     "toolbar.reload": "Скачать заново",
@@ -178,6 +179,7 @@ export const DICT = {
     "search.selectAll": "Select all",
     "search.clear": "Clear selection",
     "search.stored": "Saved epics",
+    "search.total": "Total: {n}",
 
     "toolbar.refresh": "Refresh data",
     "toolbar.reload": "Full re-download",

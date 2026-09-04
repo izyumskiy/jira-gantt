@@ -84,6 +84,44 @@ function epicRow(epic, checked, index) {
   return row;
 }
 
+// Порядок как на «Ганте по эпикам»: по статусу (в работе → тест → сделать → new → готово), внутри — по названию.
+function sortEpics(list) {
+  return [...list].sort(
+    (a, b) =>
+      classify(a.statusName, a.statusCategory).rank - classify(b.statusName, b.statusCategory).rank ||
+      (a.summary || "").localeCompare(b.summary || "", undefined, { sensitivity: "base" }) ||
+      a.key.localeCompare(b.key)
+  );
+}
+
+// Сводка над списком: всего эпиков и сколько в каждом статусе (в том же порядке, что и список).
+function renderStatusSummary(box, list) {
+  box.textContent = "";
+  if (!list.length) return;
+  const counts = new Map();
+  for (const e of list) {
+    const name = e.statusName || t("dash");
+    if (!counts.has(name)) counts.set(name, { name, id: classify(e.statusName, e.statusCategory).id, rank: classify(e.statusName, e.statusCategory).rank, count: 0 });
+    counts.get(name).count += 1;
+  }
+  const total = document.createElement("span");
+  total.className = "ssum-total";
+  total.textContent = t("search.total", { n: list.length });
+  box.append(total);
+  for (const c of [...counts.values()].sort((a, b) => a.rank - b.rank || a.name.localeCompare(b.name))) {
+    const item = document.createElement("span");
+    item.className = "ssum-item";
+    const lz = document.createElement("span");
+    lz.className = `lozenge lz-s-${c.id}`;
+    lz.textContent = c.name;
+    const n = document.createElement("span");
+    n.className = "ssum-count";
+    n.textContent = String(c.count);
+    item.append(lz, n);
+    box.append(item);
+  }
+}
+
 function renderSelCount() {
   $("#selCount").textContent = t("search.selected", { n: state.selected.size });
 }
@@ -91,6 +129,7 @@ function renderSelCount() {
 function renderResults() {
   const box = $("#results");
   box.textContent = "";
+  renderStatusSummary($("#resultsSummary"), state.results);
   if (!state.results.length) {
     const p = document.createElement("div");
     p.className = "empty";
@@ -98,14 +137,15 @@ function renderResults() {
     box.append(p);
     return;
   }
-  state.results.forEach((e, i) => box.append(epicRow(e, state.selected.has(e.key), i)));
+  sortEpics(state.results).forEach((e, i) => box.append(epicRow(e, state.selected.has(e.key), i)));
 }
 
 async function renderStored() {
   const stored = await sync.selectedEpics();
   const box = $("#storedList");
   box.textContent = "";
-  stored.forEach((e, i) => box.append(epicRow(e, state.selected.has(e.key), i)));
+  renderStatusSummary($("#storedSummary"), stored);
+  sortEpics(stored).forEach((e, i) => box.append(epicRow(e, state.selected.has(e.key), i)));
   if (!stored.length) {
     const p = document.createElement("div");
     p.className = "empty";

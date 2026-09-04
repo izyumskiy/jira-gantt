@@ -101,6 +101,12 @@ main { padding: 14px 16px 40px; }
 .item:hover { background: #f7f8fa; }
 .inum { color: var(--muted); text-align: right; }
 .istatus { overflow: hidden; white-space: nowrap; }
+.status-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; margin: 0 0 8px; min-height: 0; }
+.status-summary:empty { display: none; }
+.ssum-total { color: var(--muted); }
+.ssum-item { display: inline-flex; align-items: center; gap: 5px; }
+.ssum-item .lozenge { margin-left: 0; }
+.ssum-count { font-weight: 600; }
 .istatus .lozenge { margin-left: 0; max-width: 130px; }
 .ikey { color: var(--accent); font-weight: 600; }
 .isum { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
