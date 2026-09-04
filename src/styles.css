@@ -92,7 +92,7 @@ main { padding: 14px 16px 40px; }
 .list { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; overflow: clip; }
 .item {
   display: grid;
-  grid-template-columns: 34px 22px 100px 1fr 340px 170px 130px 130px;
+  grid-template-columns: 34px 22px 100px 1fr 340px 150px 150px 140px;
   align-items: center;
   gap: 8px;
   padding: 6px 10px;
@@ -106,10 +106,9 @@ main { padding: 14px 16px 40px; }
 .idates { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; white-space: nowrap; font-size: 12px; }
 .idate { font-variant-numeric: tabular-nums; }
 .idate-empty { color: var(--muted); }
-.ipeople { display: flex; flex-direction: column; gap: 1px; font-size: 12px; line-height: 1.25; min-width: 0; }
-.iperson { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.iperson { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; min-width: 0; }
 .iperson-empty { color: var(--muted); }
-.list-head .ipeople { font-size: 10px; }
+.list-head .iperson { font-size: 10px; }
 .filter-bar { display: flex; align-items: center; gap: 14px; margin: 0 0 8px; }
 .filter-bar label { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); }
 .filter-bar select { min-width: 220px; }

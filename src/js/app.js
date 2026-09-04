@@ -112,18 +112,13 @@ function epicDates(epic) {
   return box;
 }
 
-// Исполнитель и постановщик эпика — двумя строками в одной ячейке.
-function epicPeople(epic) {
-  const box = document.createElement("span");
-  box.className = "ipeople";
-  for (const [label, value] of [["search.assignee", epic.assigneeName], ["search.reporter", epic.reporterName]]) {
-    const line = document.createElement("span");
-    line.className = "iperson" + (value ? "" : " iperson-empty");
-    line.title = `${t(label)}: ${value || t("dash")}`;
-    line.textContent = value || t("dash");
-    box.append(line);
-  }
-  return box;
+// Исполнитель или постановщик эпика — отдельная ячейка строки.
+function epicPerson(label, value) {
+  const cell = document.createElement("span");
+  cell.className = "iperson" + (value ? "" : " iperson-empty");
+  cell.title = `${t(label)}: ${value || t("dash")}`;
+  cell.textContent = value || t("dash");
+  return cell;
 }
 
 // Шапка списка эпиков: та же сетка, что у строк; липнет под верхней панелью при прокрутке.
@@ -143,10 +138,10 @@ function listHead() {
     c.title = t(full);
     dates.append(c);
   }
-  const people = document.createElement("span");
-  people.className = "ipeople";
-  people.append(cell("iperson", t("search.assignee")), cell("iperson", t("search.reporter")));
-  head.append(cell("inum", "#"), cell("", ""), cell("ikey", t("search.col.key")), cell("isum", t("search.col.name")), dates, people, cell("istatus", t("search.col.status")), cell("iprj", t("search.col.project")));
+  head.append(
+    cell("inum", "#"), cell("", ""), cell("ikey", t("search.col.key")), cell("isum", t("search.col.name")), dates,
+    cell("iperson", t("search.assignee")), cell("iperson", t("search.reporter")), cell("istatus", t("search.col.status"))
+  );
   return head;
 }
 
@@ -185,10 +180,12 @@ function epicRow(epic, checked, index) {
     lz.title = epic.statusName;
     status.append(lz);
   }
-  const prj = document.createElement("span");
-  prj.className = "iprj";
-  prj.textContent = epic.projectName || epic.projectKey || "";
-  row.append(num, cb, key, sum, epicDates(epic), epicPeople(epic), status, prj);
+  row.append(
+    num, cb, key, sum, epicDates(epic),
+    epicPerson("search.assignee", epic.assigneeName),
+    epicPerson("search.reporter", epic.reporterName),
+    status
+  );
   return row;
 }
 
@@ -407,6 +404,7 @@ function fillSettingsForm() {
   renderBoards();
   renderDetected();
   renderDateFieldSelects();
+  renderUserFieldSelects();
 }
 
 // Селекты плановых полей: все поля типа «дата» из Jira + текущее значение, если его нет в списке.
@@ -428,6 +426,30 @@ function renderDateFieldSelects() {
       sel.append(o);
     }
     sel.value = cur || "";
+  }
+}
+
+// Селекты полей «исполнитель/постановщик эпика»: стандартные assignee/reporter/creator + поля-пользователи из Jira.
+function renderUserFieldSelects() {
+  const s = settings.get();
+  const standard = [
+    ["assignee", t("set.stdAssignee")],
+    ["reporter", t("set.stdReporter")],
+    ["creator", t("set.stdCreator")]
+  ];
+  for (const [sel, key, dflt] of [[$("#epicAssigneeField"), "epicAssignee", "assignee"], [$("#epicReporterField"), "epicReporter", "reporter"]]) {
+    sel.textContent = "";
+    const cur = s.fields[key] || dflt;
+    const list = [...standard];
+    for (const f of s.userFields || []) if (!list.some(([id]) => id === f.id)) list.push([f.id, `${f.name} (${f.id})`]);
+    if (!list.some(([id]) => id === cur)) list.push([cur, cur]);
+    for (const [id, label] of list) {
+      const o = document.createElement("option");
+      o.value = id;
+      o.textContent = label;
+      sel.append(o);
+    }
+    sel.value = cur;
   }
 }
 
@@ -475,7 +497,12 @@ async function saveSettingsForm() {
     hoursPerDay: Number($("#hoursPerDay").value) || 8,
     doneStatuses: $("#doneStatuses").value.trim(),
     infoSystems: team.parseSystems($("#infoSystems").value),
-    fields: { plannedStart: $("#plannedStartField").value, plannedEnd: $("#plannedEndField").value },
+    fields: {
+      plannedStart: $("#plannedStartField").value,
+      plannedEnd: $("#plannedEndField").value,
+      epicAssignee: $("#epicAssigneeField").value || "assignee",
+      epicReporter: $("#epicReporterField").value || "reporter"
+    },
     boardId,
     boardName: boardId ? boardName : ""
   });
@@ -604,6 +631,7 @@ async function boot() {
       await sync.detectFields();
       renderDetected();
       renderDateFieldSelects();
+      renderUserFieldSelects();
       status(t("st.done"));
     } catch (e) {
       fail(e);

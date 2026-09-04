@@ -17,6 +17,9 @@ export async function detectFields() {
   // Совпадение по имени поля ИЛИ по его JQL-имени (clauseNames) — в JQL поле зовётся «Planned Start».
   const namesOf = (f) => [f.name, ...(f.clauseNames || [])].map(norm);
   const dateFields = list.filter(isDateType).map((f) => ({ id: f.id, name: f.name || f.id }));
+  // Поля-пользователи (одиночные и множественные) — для выбора исполнителя/постановщика эпика.
+  const isUserType = (f) => ["user"].includes(String(f.schema?.type || "")) || String(f.schema?.items || "") === "user";
+  const userFields = list.filter(isUserType).map((f) => ({ id: f.id, name: f.name || f.id }));
   // Плановые даты: сначала среди полей типа «дата» (в Jira бывают одноимённые поля разных типов), потом среди всех.
   const byName = (...names) => {
     const wanted = names.map(norm);
@@ -30,13 +33,16 @@ export async function detectFields() {
     sprint: custom("gh-sprint") || find((f) => f.name === "Sprint"),
     storyPoints: find((f) => f.name === "Story Points" || f.name === "Story point estimate"),
     plannedStart: byName("planned start", "planned start date", "плановое начало", "плановая дата начала", "target start"),
-    plannedEnd: byName("planned end", "planned end date", "плановое завершение", "плановая дата завершения", "target end")
+    plannedEnd: byName("planned end", "planned end date", "плановое завершение", "плановая дата завершения", "target end"),
+    // Выбор пользователя не сбрасываем: он задаётся вручную в настройках.
+    epicAssignee: settings.get().fields.epicAssignee || "assignee",
+    epicReporter: settings.get().fields.epicReporter || "reporter"
   };
-  await settings.save({ fields, dateFields });
+  await settings.save({ fields, dateFields, userFields });
   return fields;
 }
 
-const FIELDS_VERSION = 3;
+const FIELDS_VERSION = 4;
 
 async function ensureFields() {
   const s = settings.get();
@@ -47,7 +53,21 @@ async function ensureFields() {
 // Поля эпика для списка на вкладке «Поиск эпиков».
 function epicFieldList() {
   const f = settings.get().fields;
-  return ["summary", "project", "status", "updated", "created", "duedate", "assignee", "reporter", f.plannedStart, f.plannedEnd].filter(Boolean);
+  return [
+    "summary", "project", "status", "updated", "created", "duedate",
+    f.epicAssignee || "assignee", f.epicReporter || "reporter",
+    f.plannedStart, f.plannedEnd
+  ].filter(Boolean);
+}
+
+// Пользователь из поля Jira: объект или (у множественных полей) массив — тогда имена через запятую.
+function userOf(v) {
+  const list = Array.isArray(v) ? v : v ? [v] : [];
+  const users = list.filter((u) => u && typeof u === "object");
+  return {
+    key: users.length ? users[0].key || users[0].name || "" : "",
+    name: users.map((u) => u.displayName || u.name || "").filter(Boolean).join(", ")
+  };
 }
 
 // Дата из Jira: у duedate/кастомных полей — «YYYY-MM-DD», у created — ISO с временем. Храним как есть.
@@ -167,9 +187,9 @@ function mapEpic(i) {
     statusColor: i.fields.status?.statusCategory?.colorName || "",
     created: dateOf(i.fields.created),
     dueDate: dateOf(i.fields.duedate),
-    assigneeKey: i.fields.assignee ? i.fields.assignee.key || i.fields.assignee.name || "" : "",
-    assigneeName: i.fields.assignee ? i.fields.assignee.displayName || i.fields.assignee.name || "" : "",
-    reporterName: i.fields.reporter ? i.fields.reporter.displayName || i.fields.reporter.name || "" : "",
+    assigneeKey: userOf(i.fields[f.epicAssignee || "assignee"]).key,
+    assigneeName: userOf(i.fields[f.epicAssignee || "assignee"]).name,
+    reporterName: userOf(i.fields[f.epicReporter || "reporter"]).name,
     plannedStart: f.plannedStart ? dateOf(i.fields[f.plannedStart]) : "",
     plannedEnd: f.plannedEnd ? dateOf(i.fields[f.plannedEnd]) : ""
   };
