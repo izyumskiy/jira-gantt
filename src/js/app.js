@@ -765,6 +765,35 @@ function trackTopHeight() {
   window.addEventListener("scroll", applyTopHeight, { passive: true });
 }
 
+const AUTHOR = { name: "Alexander Izyumskiy", email: "izumsky@gmail.com" };
+
+// Всплывашка «о плагине» при наведении на логотип: версия из манифеста и автор.
+function renderAbout() {
+  const box = $("#about");
+  box.textContent = "";
+  let version = "dev";
+  try {
+    version = chrome.runtime.getManifest().version || version;
+  } catch {
+    // dev-страница без chrome.runtime — оставляем «dev»
+  }
+  const line = (label, node) => {
+    const row = document.createElement("div");
+    row.className = "about-row";
+    const k = document.createElement("span");
+    k.className = "about-k";
+    k.textContent = `${label}: `;
+    row.append(k, node);
+    return row;
+  };
+  const v = document.createElement("span");
+  v.textContent = version;
+  const a = document.createElement("a");
+  a.href = `mailto:${AUTHOR.email}`;
+  a.textContent = `${AUTHOR.name} · ${AUTHOR.email}`;
+  box.append(line(t("about.version"), v), line(t("about.author"), a));
+}
+
 // Текущая дата в шапке (дд.мм.гггг); обновляется раз в минуту — вкладка может жить сутками.
 function showToday() {
   const d = new Date();
@@ -780,6 +809,7 @@ async function boot() {
   setLang(s.lang);
   applyI18n();
   applyTopHeight();
+  renderAbout();
   await db.open();
 
   document.querySelectorAll(".tab").forEach((b) => (b.onclick = () => showTab(b.dataset.tab)));
@@ -789,6 +819,7 @@ async function boot() {
     setLang($("#lang").value);
     applyI18n();
     applyTopHeight();
+    renderAbout();
     fillSettingsForm();
     renderSelCount();
     renderResults();
