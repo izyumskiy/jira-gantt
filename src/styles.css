@@ -315,6 +315,8 @@ table.gantt { border-collapse: separate; border-spacing: 0; }
 .indent { display: inline-block; width: 18px; }
 .plabel-link { border: none; background: none; padding: 0; font: inherit; color: var(--accent); cursor: pointer; text-align: left; }
 .plabel-link:hover { text-decoration: underline; }
+.plabel-link.p-fired { color: var(--muted); }
+.plabel-link.p-outstaff { color: #a16207; }
 .g-row.proj.hl > .c-name { background: var(--accent-soft); }
 .g-row.proj.hl .plabel-link { font-weight: 700; }
 .plabel {
@@ -560,7 +562,7 @@ textarea { font: inherit; padding: 5px 8px; border: 1px solid var(--line); borde
   .lozenge.lz-s-done { background: #164b35; color: #7ee2b8; }
   .lozenge.lz-s-other { background: #3c4147; color: #c7d1db; }
   .lozenge.lz-role { background: #164b35; color: #7ee2b8; }
-  .glabel.p-outstaff, .tip-pstatus.p-outstaff { color: #f5d565; }
+  .glabel.p-outstaff, .tip-pstatus.p-outstaff, .plabel-link.p-outstaff { color: #f5d565; }
   .badge.b-left { background: #4a3b0b; color: #f5d565; }
   .badge.b-other { background: #3c4147; color: #c7d1db; }
   .part-target { background: color-mix(in srgb, #ffab00 45%, var(--panel)); color: var(--text); }

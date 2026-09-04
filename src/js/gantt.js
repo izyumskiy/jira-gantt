@@ -306,8 +306,10 @@ export function render(container, model, opts) {
       let plabel;
       if (model.childKind === "person" && onChildClick) {
         // Имя человека — кнопка: раскрывает его эпики, остальные сворачивает.
-        plabel = el("button", "plabel plabel-link", p.label);
-        plabel.title = t("gantt.personClick", { name: p.label });
+        // Статус из профиля «Команды»: уволенный — серым, аутстаф — жёлтым (как на «По людям»).
+        const prof = profileOf.get(normName(p.label));
+        plabel = el("button", "plabel plabel-link" + (prof && prof.status ? ` p-${prof.status}` : ""), p.label);
+        plabel.title = t("gantt.personClick", { name: p.label }) + (prof && prof.status ? ` · ${t(`pstatus.${prof.status}`)}` : "");
         plabel.onclick = () => onChildClick(p.key, p.label);
       } else {
         plabel = el("span", "plabel", p.label);

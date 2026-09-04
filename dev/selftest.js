@@ -221,6 +221,12 @@ await settings.save({ infoSystems: ["Billing"] });
 check("справочник систем дополняется выбранными у людей", systemsList(merged).join("|") === "Billing|CRM", systemsList(merged).join("|"));
 await settings.save({ infoSystems: [] });
 
+// Профили с вкладки «Команда»: Ivan уволен, Olga — аутстаф, у Petr профиля нет.
+const peopleProfiles = [
+  { name: "ivan", displayName: "Ivan", role: "developer", status: "fired", systems: ["CRM", "Billing"] },
+  { name: "olga", displayName: "Olga", role: "qa", status: "outstaff", systems: [] }
+];
+
 // 4c. модель «эпики → исполнители» (Гант по эпикам и людям)
 const m3 = agg.buildModel({ issues, others, sprints, epics, boards, mode: "epicPeople" });
 check("epicPeople: группы — те же эпики в том же порядке", m3.groups.map((g) => g.key).join(",") === m1.groups.map((g) => g.key).join(","), m3.groups.map((g) => g.key).join(","));
@@ -253,7 +259,11 @@ check("на «По эпикам» проекты не отсеиваются", m
 const g3 = document.createElement("div");
 document.body.append(g3);
 let clicked = null;
-gantt.render(g3, m3, { mode: "epicPeople", highlightChild: "ivan", onChildClick: (k, n) => (clicked = `${k}:${n}`) });
+gantt.render(g3, m3, { mode: "epicPeople", highlightChild: "ivan", profiles: peopleProfiles, onChildClick: (k, n) => (clicked = `${k}:${n}`) });
+const nameBtn = (n) => [...g3.querySelectorAll(".plabel-link")].find((b) => b.textContent === n);
+check("epicPeople: уволенный Ivan — серым (p-fired)", nameBtn("Ivan")?.classList.contains("p-fired") && getComputedStyle(nameBtn("Ivan")).color !== getComputedStyle(nameBtn("Petr")).color,
+  `${nameBtn("Ivan")?.className} / ${getComputedStyle(nameBtn("Ivan")).color} vs ${getComputedStyle(nameBtn("Petr")).color}`);
+check("epicPeople: аутстаф Olga — жёлтым, Petr без профиля — обычный", nameBtn("Olga")?.classList.contains("p-outstaff") && !nameBtn("Petr")?.className.includes("p-"));
 check("epicPeople: колонка «Бэклог» и нумерация как у эпиков", g3.querySelectorAll("thead .c-sprint.backlog").length === 1 && g3.querySelectorAll(".gnum").length === m3.groups.length);
 check("epicPeople: имена людей — кнопки", g3.querySelectorAll(".g-row.proj .plabel-link").length > 0);
 check("epicPeople: лейблов с цифрами нет ни у эпиков, ни у людей", g3.querySelectorAll(".badges").length === 0, String(g3.querySelectorAll(".badges").length));
@@ -282,11 +292,6 @@ check("i18n en", t("gantt.epic") === "Epic");
 setLang("ru");
 check("i18n ru", t("gantt.epic") === "Эпик");
 
-// Профили с вкладки «Команда»: Ivan уволен, Olga — аутстаф, у Petr профиля нет.
-const peopleProfiles = [
-  { name: "ivan", displayName: "Ivan", role: "developer", status: "fired", systems: ["CRM", "Billing"] },
-  { name: "olga", displayName: "Olga", role: "qa", status: "outstaff", systems: [] }
-];
 gantt.render(document.getElementById("g1"), m1, { mode: "epic" });
 gantt.render(document.getElementById("g2"), m2, { mode: "assignee", profiles: peopleProfiles });
 

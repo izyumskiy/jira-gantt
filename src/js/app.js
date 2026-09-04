@@ -598,7 +598,7 @@ async function drawGantt(mode, container) {
       target = byPeople ? $("#epicPeopleChart") : $("#epicsChart");
     }
     const model = agg.buildModel({ issues: issuesShown, others, sprints, epics: epicsShown, boards, mode });
-    const opts = { mode, profiles: mode === "assignee" ? profiles : [] }; // профили нужны только по людям
+    const opts = { mode, profiles: mode === "epic" ? [] : profiles }; // профили нужны там, где есть люди
     if (mode === "epicPeople") {
       applyPersonFilter(model);
       renderPersonFilterNote();
