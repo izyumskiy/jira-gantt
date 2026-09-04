@@ -261,7 +261,7 @@ check("полосы групп — жёлтые (.bar-group), у проекто�
   document.querySelectorAll("#g1 .g-row.proj .bar-group").length === 0);
 const firstProjBars = [...[...document.querySelectorAll("#g1 .g-row.proj")][0].querySelectorAll(".c-cell")[0].querySelectorAll(".bar")];
 check("у проекта в секции 0 два вложенных голубых отрезка",
-  firstProjBars.length === 2 && firstProjBars.every((b) => b.className === "bar nested"),
+  firstProjBars.length === 2 && firstProjBars.every((b) => b.classList.contains("nested") && !b.classList.contains("bar-group")),
   firstProjBars.map((b) => b.className).join("|"));
 check("в отрезках подписаны спринты", firstProjBars.map((b) => b.querySelector(".bar-sprint").textContent).join("|") === "Sprint 2|B-Sprint 1",
   firstProjBars.map((b) => b.querySelector(".bar-sprint").textContent).join("|"));
@@ -277,7 +277,7 @@ check("в заголовках секций нет дат", heads.every((h) => !
 check("текущая секция помечена словом «текущий», без дат", [...document.querySelectorAll("#g1 thead .c-sprint")][0].querySelector(".sp-name")?.textContent === t("gantt.current"),
   [...document.querySelectorAll("#g1 thead .c-sprint")][0].querySelector(".sp-name")?.textContent);
 check("у второй секции подписи нет — только спринты", ![...document.querySelectorAll("#g1 thead .c-sprint")][1].querySelector(".sp-name"));
-check("секция без дат подписана «Без дат»", [...document.querySelectorAll("#g1 thead .c-sprint")].at(-1).querySelector(".sp-name")?.textContent === t("gantt.noDates"));
+check("секция без дат подписана «Без дат»", [...document.querySelectorAll("#g1 thead .c-sprint:not(.backlog)")].at(-1).querySelector(".sp-name")?.textContent === t("gantt.noDates"));
 check("легенда команд отрисована", document.querySelectorAll("#g1 .legend-item").length === 2);
 const left = [...document.querySelectorAll("#g1 .g-row.group .badge.b-left")].map((b) => b.textContent);
 check("жёлтый баллон «осталось» у каждого эпика", left.length === 5 && left[0] === "4", left.join(" "));
@@ -313,6 +313,34 @@ check("на вкладке по людям колонка имён на 20% ши
   Math.round(document.querySelector("#g2 thead .c-name").getBoundingClientRect().width) === 456 && Math.round(document.querySelector("#g1 thead .c-name").getBoundingClientRect().width) === 380,
   `${document.querySelector("#g2 thead .c-name").getBoundingClientRect().width} / ${document.querySelector("#g1 thead .c-name").getBoundingClientRect().width}`);
 check("на вкладке по эпикам лейблов роли нет", document.querySelectorAll("#g1 .lz-role").length === 0);
+
+// бэклог: колонка справа, задачи без спринта и не готово
+check("EP-1 бэклог: 1 задача / 5ч (A-6; готовая A-4 не считается)", ep1.backlog.count === 1 && ep1.backlog.sum === 5 * H && ep1.backlog.issues[0].key === "A-6",
+  JSON.stringify([ep1.backlog.count, ep1.backlog.sum / H]));
+const g1Heads = [...document.querySelectorAll("#g1 thead .c-sprint")];
+check("колонка «Бэклог» — последняя на вкладке по эпикам", g1Heads.at(-1).classList.contains("backlog") && g1Heads.at(-1).textContent.includes(t("gantt.backlog")));
+check("на вкладке по людям колонки «Бэклог» нет", document.querySelectorAll("#g2 thead .c-sprint.backlog").length === 0);
+const ep1Row = [...document.querySelectorAll("#g1 .g-row.group")][0];
+const backlogBar = ep1Row.querySelector("td.c-backlog .bar");
+check("у EP-1 в бэклоге жёлтая полоса 1 · 5ч", backlogBar?.classList.contains("bar-group") && backlogBar.textContent === "15ч", backlogBar?.textContent);
+const aaaRow = ep1Row.nextElementSibling;
+check("у проекта AAA в бэклоге голубой отрезок", aaaRow.querySelector("td.c-backlog .bar.nested")?.textContent.includes("5ч"));
+check("число ячеек в строке = секции + бэклог", ep1Row.querySelectorAll("td").length === 1 + m1.columns.length + 1);
+
+// клик по жёлтой полосе — список задач со ссылками
+ep1Row.querySelectorAll(".c-cell")[0].querySelector(".bar-group").click();
+let issueRows = [...document.querySelectorAll(".tooltip.tip-issues .issues-table tr")];
+check("по клику на полосу EP-1 в секции 0 — 3 задачи", issueRows.length === 3, String(issueRows.length));
+check("задачи отсортированы по ключу", issueRows.map((r) => r.querySelector(".ti-key").textContent).join(",") === "A-1,A-2,A-7", issueRows.map((r) => r.querySelector(".ti-key").textContent).join(","));
+check("ключ и название ведут в Jira в новой вкладке", issueRows.every((r) => r.querySelector(".ti-key a")?.target === "_blank" && r.querySelector(".ti-key a").href.endsWith("/browse/" + r.querySelector(".ti-key").textContent)));
+check("готовая задача помечена", issueRows.find((r) => r.querySelector(".ti-key").textContent === "A-1")?.classList.contains("issue-done"));
+check("заголовок окна — эпик и спринты секции", document.querySelector(".tooltip.tip-issues strong").textContent.includes("Sprint 2") && document.querySelector(".tooltip.tip-issues strong").textContent.includes("EP-1"));
+check("окно не закрылось от собственного клика", !!document.querySelector(".tooltip.tip-issues"));
+backlogBar.click();
+issueRows = [...document.querySelectorAll(".tooltip.tip-issues .issues-table tr")];
+check("клик по бэклогу — задача A-6", issueRows.length === 1 && issueRows[0].querySelector(".ti-key").textContent === "A-6");
+document.querySelector(".tip-close").click();
+check("окно закрывается крестиком", !document.querySelector(".tooltip"));
 const teamRows = [...document.querySelectorAll("#g2 .g-row.team .tlabel")].map((n) => n.textContent);
 check("строки команд на вкладке по людям", teamRows.join(",") === "Alpha,Beta,Без команды", teamRows.join(","));
 

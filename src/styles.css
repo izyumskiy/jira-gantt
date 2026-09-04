@@ -167,6 +167,10 @@ table.gantt { border-collapse: separate; border-spacing: 0; }
 }
 .gantt th.c-sprint { width: var(--col-w); min-width: var(--col-w); }
 .gantt th.c-sprint.current { background: var(--accent-soft); }
+.gantt th.c-sprint.backlog { background: #f4f5f7; border-left: 2px solid var(--line); }
+.gantt td.c-backlog { border-left: 2px solid var(--line); background: #fafbfc; }
+.bar.clickable { cursor: pointer; }
+.bar.clickable:hover { outline: 1px solid var(--accent); outline-offset: -1px; }
 .sp-date { font-weight: 600; white-space: nowrap; }
 .sp-item { display: flex; align-items: center; color: var(--muted); font-weight: 400; font-size: 11px; line-height: 1.4; }
 .sp-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: calc(var(--col-w) - 30px); }
@@ -408,6 +412,14 @@ textarea { font: inherit; padding: 5px 8px; border: 1px solid var(--line); borde
 .tooltip a.tip-link:hover { text-decoration: underline; }
 .tip-head a.tip-link { color: var(--accent); }
 .tip-sub { margin: 10px 0 4px; color: var(--muted); text-transform: uppercase; font-size: 11px; letter-spacing: .03em; }
+.tip-sub-title { font-weight: 400; font-size: 12px; color: var(--muted); }
+.tooltip.tip-issues { min-width: 420px; max-width: 640px; }
+.issues-table .ti-key { white-space: nowrap; vertical-align: top; padding-right: 8px; font-weight: 600; }
+.issues-table .ti-summary { width: 100%; }
+.issues-table .ti-summary-link { color: var(--text); text-decoration: none; }
+.issues-table .ti-summary-link:hover { color: var(--accent); text-decoration: underline; }
+.issues-table .ti-status { color: var(--muted); font-size: 11px; }
+.issues-table tr.issue-done .ti-summary-link { color: var(--muted); text-decoration: line-through; }
 .tip-table { width: 100%; border-collapse: collapse; }
 .tip-table td { padding: 3px 0; border-top: 1px solid var(--line); }
 .tp-num { text-align: right; white-space: nowrap; padding-left: 10px !important; }
@@ -429,6 +441,7 @@ textarea { font: inherit; padding: 5px 8px; border: 1px solid var(--line); borde
   button.primary { color: #10233f; }
   input, select, textarea { background: #2c333a; color: var(--text); }
   .team-table th { background: #262c31; }
+  .gantt th.c-sprint.backlog, .gantt td.c-backlog { background: #262c31; }
   .item.list-head, .item.list-head:hover { background: #262c31; }
   .chip { background: #2c333a; }
   .gantt thead th, .gantt thead .c-name { background: #262c31; }

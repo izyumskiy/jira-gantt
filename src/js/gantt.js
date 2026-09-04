@@ -3,7 +3,7 @@
 // жёлтую (целевые эпики) и серую (прочие эпики) части пропорционально объёму. Вложенные строки
 // рисуются тонкими голубыми отрезками — по одному на каждый спринт секции.
 import { t } from "./i18n.js";
-import { fmtEstimate, NO_DATES_ID } from "./agg.js";
+import { fmtEstimate, NO_DATES_ID, BACKLOG_ID } from "./agg.js";
 import * as settings from "./settings.js";
 import { cfId, escapeJql } from "./jira.js";
 import { normName } from "./team.js";
@@ -52,12 +52,21 @@ function numbers(count, sum) {
   return [el("span", "bar-count", String(count)), el("span", "bar-sum", fmtEstimate(sum))];
 }
 
-// Жёлтая полоса-итог эпика.
-function groupBar(cell, maxCell) {
-  const bar = el("div", "bar bar-group");
+// Жёлтая полоса-итог эпика; по клику — список задач ячейки.
+function groupBar(cell, maxCell, title) {
+  const bar = el("div", "bar bar-group clickable");
   bar.style.setProperty("--fill", fillOf(cell.sum || cell.count, maxCell));
   bar.append(...numbers(cell.count, cell.sum));
+  bar.title = t("gantt.clickIssues");
+  bar.onclick = (e) => showIssues(e.currentTarget, title, cell.issues);
   return bar;
+}
+
+// Подпись секции для заголовка списка задач: имена её спринтов.
+function sectionTitle(sec) {
+  if (sec.id === BACKLOG_ID) return t("gantt.backlog");
+  if (sec.id === NO_DATES_ID) return t("gantt.noDates");
+  return sec.sprints.map((s) => s.name).join(", ") || t("gantt.current");
 }
 
 // Полоса человека: слева жёлтая часть (целевые эпики), справа серая (прочие), ширины — по объёму.
@@ -88,7 +97,7 @@ function splitBar(target, other) {
 }
 
 // Вложенная строка (проект, «Прочие»): тонкий голубой отрезок на каждый спринт секции.
-function nestedCell(cell, section, model) {
+function nestedCell(cell, section, model, rowLabel) {
   const td = el("td", "c-cell");
   if (!cell || !cell.count) return td;
   const stack = el("div", "stack");
@@ -96,13 +105,26 @@ function nestedCell(cell, section, model) {
     const part = cell.bySprint.get(s.id);
     if (!part) continue;
     const team = model.teamOf(s);
-    const bar = el("div", "bar nested");
+    const bar = el("div", "bar nested clickable");
     bar.style.setProperty("--fill", fillOf(part.sum || part.count, model.maxCell));
     bar.title = `${s.name} · ${team.name}`;
     bar.append(el("span", "bar-sprint", s.name), ...numbers(part.count, part.sum));
+    bar.onclick = (e) => showIssues(e.currentTarget, `${rowLabel} · ${s.name}`, part.issues);
     stack.append(bar);
   }
   td.append(stack);
+  return td;
+}
+
+// Ячейка бэклога вложенной строки: один голубой отрезок без имени спринта.
+function backlogNested(cell, model, rowLabel) {
+  const td = el("td", "c-cell c-backlog");
+  if (!cell || !cell.count) return td;
+  const bar = el("div", "bar nested clickable");
+  bar.style.setProperty("--fill", fillOf(cell.sum || cell.count, model.maxCell));
+  bar.append(el("span", "bar-sprint", t("gantt.backlog")), ...numbers(cell.count, cell.sum));
+  bar.onclick = (e) => showIssues(e.currentTarget, `${rowLabel} · ${t("gantt.backlog")}`, cell.issues);
+  td.append(bar);
   return td;
 }
 
@@ -178,6 +200,15 @@ export function render(container, model, opts) {
     th.append(list);
     hr.append(th);
   }
+  // Справа от спринтов — «Бэклог»: задачи без спринта и не в статусе «Готово».
+  const showBacklog = mode === "epic";
+  if (showBacklog) {
+    const th = el("th", "c-sprint backlog");
+    th.append(el("div", "sp-name", t("gantt.backlog")));
+    th.append(el("div", "sp-date", t("gantt.backlogHint")));
+    hr.append(th);
+  }
+  const extraCols = showBacklog ? 1 : 0;
   thead.append(hr);
   table.append(thead);
 
@@ -197,7 +228,7 @@ export function render(container, model, opts) {
           members.reduce((n, x) => n + x.sum, 0)
         )
       );
-      tr.append(td, ...emptyCells(model.columns.length));
+      tr.append(td, ...emptyCells(model.columns.length + extraCols));
       tbody.append(tr);
     }
 
@@ -235,8 +266,13 @@ export function render(container, model, opts) {
         const split = splitBar(cell, g.otherCells.get(sec.id));
         if (split) td.append(split);
       } else if (cell && cell.count) {
-        td.append(groupBar(cell, model.maxCell));
+        td.append(groupBar(cell, model.maxCell, `${g.label} · ${sectionTitle(sec)}`));
       }
+      tr.append(td);
+    }
+    if (showBacklog) {
+      const td = el("td", "c-cell c-backlog");
+      if (g.backlog.count) td.append(groupBar(g.backlog, model.maxCell, `${g.label} · ${t("gantt.backlog")}`));
       tr.append(td);
     }
     tbody.append(tr);
@@ -247,7 +283,8 @@ export function render(container, model, opts) {
       const pname = el("td", "c-name");
       pname.append(el("span", "indent"), el("span", "plabel", p.label), badges(p.count, p.sum));
       ptr.append(pname);
-      for (const sec of model.columns) ptr.append(nestedCell(p.cells.get(sec.id), sec, model));
+      for (const sec of model.columns) ptr.append(nestedCell(p.cells.get(sec.id), sec, model, `${g.label} · ${p.label}`));
+      if (showBacklog) ptr.append(backlogNested(p.backlog, model, `${g.label} · ${p.label}`));
       tbody.append(ptr);
     }
     // «Прочие» — задачи человека в эпиках вне выбранных.
@@ -258,7 +295,7 @@ export function render(container, model, opts) {
       olabel.title = t("gantt.othersHint");
       oname.append(el("span", "indent"), olabel, badges(g.otherCount, g.otherSum));
       otr.append(oname);
-      for (const sec of model.columns) otr.append(nestedCell(g.otherCells.get(sec.id), sec, model));
+      for (const sec of model.columns) otr.append(nestedCell(g.otherCells.get(sec.id), sec, model, `${g.label} · ${t("gantt.others")}`));
       tbody.append(otr);
     }
   });
@@ -329,8 +366,45 @@ function closeTooltip() {
 }
 document.addEventListener("keydown", (e) => e.key === "Escape" && closeTooltip());
 document.addEventListener("click", (e) => {
-  if (tip && !tip.contains(e.target) && !e.target.closest(".glabel")) closeTooltip();
+  if (tip && !tip.contains(e.target) && !e.target.closest(".glabel") && !e.target.closest(".bar.clickable")) closeTooltip();
 });
+
+// Список задач ячейки: ключ со ссылкой в Jira, название, статус, оценка.
+function showIssues(anchor, title, issues) {
+  closeTooltip();
+  tip = el("div", "tooltip tip-issues");
+  const head = el("div", "tip-head");
+  const strong = el("strong", null, title);
+  strong.append(el("div", "tip-sub-title", t("tip.issuesCount", { n: issues.length })));
+  head.append(strong);
+  const close = el("button", "tip-close", "×");
+  close.title = t("tip.close");
+  close.onclick = closeTooltip;
+  head.append(close);
+  tip.append(head);
+
+  const tbl = el("table", "tip-table issues-table");
+  const sorted = [...issues].sort((a, b) => a.key.localeCompare(b.key, undefined, { numeric: true }));
+  for (const it of sorted) {
+    const tr = el("tr", it.done ? "issue-done" : "");
+    const keyCell = el("td", "ti-key");
+    keyCell.append(maybeLink(it.key, browseUrl(it.key), "tip-link"));
+    const sumCell = el("td", "ti-summary");
+    const summaryLink = maybeLink(it.summary || t("dash"), browseUrl(it.key), "ti-summary-link");
+    summaryLink.title = it.summary;
+    sumCell.append(summaryLink);
+    if (it.statusName) sumCell.append(el("div", "ti-status", it.statusName + (it.assigneeName ? ` · ${it.assigneeName}` : "")));
+    tr.append(keyCell, sumCell, el("td", "tp-num", fmtEstimate(it.estimate)));
+    tbl.append(tr);
+  }
+  tip.append(tbl);
+
+  document.body.append(tip);
+  const r = anchor.getBoundingClientRect();
+  const top = Math.min(window.innerHeight - tip.offsetHeight - 12, r.bottom + 6);
+  tip.style.top = `${Math.max(8, top)}px`;
+  tip.style.left = `${Math.max(8, Math.min(window.innerWidth - tip.offsetWidth - 12, r.left))}px`;
+}
 
 function showTooltip(anchor, g, mode, model, profile = null) {
   closeTooltip();

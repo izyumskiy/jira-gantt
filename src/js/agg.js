@@ -170,18 +170,38 @@ function buildTeams(sprints, boards) {
 
 // ---------- модель ----------
 
+// Ячейка хранит и список задач — для всплывающего окна по клику на полосу.
 function emptyCell() {
-  return { count: 0, sum: 0, bySprint: new Map() };
+  return { count: 0, sum: 0, bySprint: new Map(), issues: [] };
 }
 
-function addTo(cell, sprintId, est) {
+function addTo(cell, sprintId, est, brief) {
   cell.count += 1;
   cell.sum += est;
-  if (!cell.bySprint.has(sprintId)) cell.bySprint.set(sprintId, { count: 0, sum: 0 });
+  cell.issues.push(brief);
+  if (sprintId == null) return;
+  if (!cell.bySprint.has(sprintId)) cell.bySprint.set(sprintId, { count: 0, sum: 0, issues: [] });
   const part = cell.bySprint.get(sprintId);
   part.count += 1;
   part.sum += est;
+  part.issues.push(brief);
 }
+
+// Краткая карточка задачи для списков.
+function briefOf(issue, est, done) {
+  return {
+    key: issue.key,
+    summary: issue.summary || "",
+    statusName: issue.statusName || "",
+    statusCategory: issue.statusCategory || "",
+    assigneeName: issue.assigneeName || "",
+    sprintName: issue.sprintName || "",
+    estimate: est,
+    done
+  };
+}
+
+export const BACKLOG_ID = "sec:backlog";
 
 // mode: "epic" | "assignee"; others — задачи людей вне целевых эпиков (учитываются только по людям).
 export function buildModel({ issues, others = [], sprints, epics, boards = [], mode }) {
@@ -228,6 +248,8 @@ export function buildModel({ issues, others = [], sprints, epics, boards = [], m
         doneStatuses: new Set(),
         openStatuses: new Set(),
         cells: new Map(),
+        // Бэклог: задачи без спринта и не в статусе «Готово».
+        backlog: emptyCell(),
         projects: new Map(),
         // Прочие эпики человека: итоги, ячейки по секциям и разбивка по эпикам.
         otherCount: 0,
@@ -247,19 +269,22 @@ export function buildModel({ issues, others = [], sprints, epics, boards = [], m
 
     const pk = issue.projectKey || t("dash");
     if (!g.projects.has(pk)) {
-      g.projects.set(pk, { key: pk, label: issue.projectName || pk, count: 0, sum: 0, noSprint: 0, cells: new Map() });
+      g.projects.set(pk, { key: pk, label: issue.projectName || pk, count: 0, sum: 0, noSprint: 0, cells: new Map(), backlog: emptyCell() });
     }
     const p = g.projects.get(pk);
     p.count += 1;
     p.sum += est;
 
+    const brief = briefOf(issue, est, done);
     if (issue.sprintId == null) {
-      // Выполненную задачу вне спринта считать нечего — в «хвосте» остаются только незакрытые.
+      // Выполненную задачу вне спринта считать нечего — в бэклог идут только незакрытые.
       if (!done) {
         g.noSprint += 1;
         p.noSprint += 1;
+        addTo(g.backlog, null, est, brief);
+        addTo(p.backlog, null, est, brief);
       }
-      continue; // задачи вне спринтов на график не влияют
+      continue; // задачи вне спринтов на секции не влияют
     }
 
     // Команда человека — доска, где лежит больше всего его задач (включая закрытые спринты).
@@ -270,7 +295,7 @@ export function buildModel({ issues, others = [], sprints, epics, boards = [], m
     if (!secId) continue; // прошлые спринты вне таймлайна
     for (const bag of [g.cells, p.cells]) {
       if (!bag.has(secId)) bag.set(secId, emptyCell());
-      addTo(bag.get(secId), issue.sprintId, est);
+      addTo(bag.get(secId), issue.sprintId, est, brief);
     }
   }
 
@@ -292,7 +317,7 @@ export function buildModel({ issues, others = [], sprints, epics, boards = [], m
       const secId = sectionOfSprint.get(issue.sprintId);
       if (!secId) continue;
       if (!g.otherCells.has(secId)) g.otherCells.set(secId, emptyCell());
-      addTo(g.otherCells.get(secId), issue.sprintId, est);
+      addTo(g.otherCells.get(secId), issue.sprintId, est, briefOf(issue, est, isDone(issue)));
     }
   }
 
@@ -325,7 +350,10 @@ export function buildModel({ issues, others = [], sprints, epics, boards = [], m
   // Максимум по ячейкам проектов — для относительной заливки полос.
   let max = 0;
   for (const g of list) {
-    for (const p of g.projects) for (const c of p.cells.values()) max = Math.max(max, c.sum || c.count);
+    for (const p of g.projects) {
+      for (const c of p.cells.values()) max = Math.max(max, c.sum || c.count);
+      max = Math.max(max, p.backlog.sum || p.backlog.count);
+    }
     for (const c of g.otherCells.values()) max = Math.max(max, c.sum || c.count);
   }
 
