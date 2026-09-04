@@ -64,7 +64,7 @@ function epicDates(epic) {
   ];
   for (const [label, full, value] of items) {
     const item = document.createElement("span");
-    item.className = "idate" + (value ? "" : " empty");
+    item.className = "idate" + (value ? "" : " idate-empty"); // не «empty»: это глобальная плашка «Нет данных»
     item.title = `${t(full)}: ${fmtDay(value)}`;
     const k = document.createElement("span");
     k.className = "idate-k";

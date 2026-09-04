@@ -105,7 +105,7 @@ main { padding: 14px 16px 40px; }
 .idate { display: inline-flex; flex-direction: column; line-height: 1.2; }
 .idate-k { color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .02em; }
 .idate-v { font-variant-numeric: tabular-nums; }
-.idate.empty .idate-v { color: var(--muted); }
+.idate-empty .idate-v { color: var(--muted); }
 .status-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; margin: 0 0 8px; min-height: 0; }
 .status-summary:empty { display: none; }
 .ssum-total { color: var(--muted); }
