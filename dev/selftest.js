@@ -304,6 +304,15 @@ check("исполнители не нумеруются", document.querySelector
 check("на «По эпикам» и «По людям» лейблы с цифрами остались",
   document.querySelectorAll("#g1 .g-row.group .badges").length === m1.groups.length && document.querySelectorAll("#g2 .g-row.group .badges").length === m2.groups.length);
 
+// зелёная заливка — доля готовых задач по оценке
+const ep1Sec0Bar = [...document.querySelectorAll("#g1 .g-row.group")][0].querySelectorAll(".c-cell")[0].querySelector(".bar-group");
+check("заливка полосы EP-1 в секции 0 = доля готовых по оценке (8ч из 18ч → 44%)", ep1Sec0Bar.style.getPropertyValue("--fill") === "44%" && ep1Sec0Bar.dataset.done === "1/3",
+  `${ep1Sec0Bar.style.getPropertyValue("--fill")} / ${ep1Sec0Bar.dataset.done}`);
+check("заливка полосы бэклога — 0% (там нет готовых)", [...document.querySelectorAll("#g1 .g-row.group")][0].querySelector("td.c-backlog .bar").style.getPropertyValue("--fill") === "0%");
+check("вложенный отрезок Sprint 2 у AAA: 8ч из 12ч готово → 67%",
+  [...document.querySelectorAll("#g1 .g-row.proj")][0].querySelectorAll(".c-cell")[0].querySelector(".bar").style.getPropertyValue("--fill") === "67%",
+  [...document.querySelectorAll("#g1 .g-row.proj")][0].querySelectorAll(".c-cell")[0].querySelector(".bar").style.getPropertyValue("--fill"));
+check("легенда про зелёную заливку", document.querySelector("#g1 .legend-done")?.textContent.includes(t("gantt.legendDone")));
 check("полосы групп — жёлтые (.bar-group), у проектов их нет",
   document.querySelectorAll("#g1 .g-row.group .bar").length > 0 &&
   [...document.querySelectorAll("#g1 .g-row.group .bar")].every((b) => b.classList.contains("bar-group")) &&

@@ -48,9 +48,18 @@ function badges(count, sum, { left = null, other = null } = {}) {
   return wrap;
 }
 
-function fillOf(value, maxCell) {
-  const weight = maxCell ? Math.max(0.12, value / maxCell) : 1;
-  return `${Math.round(weight * 100)}%`;
+// Доля готовых задач в ячейке: по оценке, а если оценок нет — по количеству. Это и есть зелёная заливка.
+function doneShare(issues) {
+  const total = issues.reduce((n, i) => n + (i.estimate || 0), 0);
+  if (total > 0) return issues.reduce((n, i) => n + (i.done ? i.estimate || 0 : 0), 0) / total;
+  return issues.length ? issues.filter((i) => i.done).length / issues.length : 0;
+}
+
+function applyDone(bar, issues) {
+  const done = issues.filter((i) => i.done).length;
+  bar.style.setProperty("--fill", `${Math.round(doneShare(issues) * 100)}%`);
+  bar.dataset.done = `${done}/${issues.length}`;
+  return t("gantt.doneShare", { done, total: issues.length });
 }
 
 function numbers(count, sum) {
@@ -60,9 +69,9 @@ function numbers(count, sum) {
 // Жёлтая полоса-итог эпика; по клику — список задач ячейки.
 function groupBar(cell, maxCell, title) {
   const bar = el("div", "bar bar-group clickable");
-  bar.style.setProperty("--fill", fillOf(cell.sum || cell.count, maxCell));
+  const doneText = applyDone(bar, cell.issues);
   bar.append(...numbers(cell.count, cell.sum));
-  bar.title = t("gantt.clickIssues");
+  bar.title = `${doneText} · ${t("gantt.clickIssues")}`;
   bar.onclick = (e) => showIssues(e.currentTarget, title, cell.issues);
   return bar;
 }
@@ -111,8 +120,8 @@ function nestedCell(cell, section, model, rowLabel) {
     if (!part) continue;
     const team = model.teamOf(s);
     const bar = el("div", "bar nested clickable");
-    bar.style.setProperty("--fill", fillOf(part.sum || part.count, model.maxCell));
-    bar.title = `${s.name} · ${team.name}`;
+    const doneText = applyDone(bar, part.issues);
+    bar.title = `${s.name} · ${team.name} · ${doneText}`;
     bar.append(el("span", "bar-sprint", s.name), ...numbers(part.count, part.sum));
     bar.onclick = (e) => showIssues(e.currentTarget, `${rowLabel} · ${s.name}`, part.issues);
     stack.append(bar);
@@ -126,7 +135,7 @@ function backlogNested(cell, model, rowLabel) {
   const td = el("td", "c-cell c-backlog");
   if (!cell || !cell.count) return td;
   const bar = el("div", "bar nested clickable");
-  bar.style.setProperty("--fill", fillOf(cell.sum || cell.count, model.maxCell));
+  applyDone(bar, cell.issues); // бэклог по определению не готов — заливки не будет
   bar.append(el("span", "bar-sprint", t("gantt.backlog")), ...numbers(cell.count, cell.sum));
   bar.onclick = (e) => showIssues(e.currentTarget, `${rowLabel} · ${t("gantt.backlog")}`, cell.issues);
   td.append(bar);
@@ -168,6 +177,9 @@ export function render(container, model, opts) {
     render(container, model, opts);
   };
   bar.append(expand, collapse);
+  const doneLegend = el("span", "legend legend-done");
+  doneLegend.append(el("i", "swatch swatch-done"), el("span", null, t("gantt.legendDone")));
+  bar.append(doneLegend);
   if (model.teams.length) {
     const legend = el("span", "legend");
     legend.append(el("span", "legend-title", t("gantt.teams")));

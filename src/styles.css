@@ -373,19 +373,20 @@ table.gantt { border-collapse: separate; border-spacing: 0; }
   overflow: hidden;
   white-space: nowrap;
 }
+/* Заливка слева — доля готовых задач в ячейке: зелёная у любой полосы (жёлтой и голубой). */
 .bar::before {
   content: "";
   position: absolute;
   inset: 0 auto 0 0;
-  width: var(--fill, 100%);
-  background: var(--tc, #a5adba);
-  opacity: .38;
+  width: var(--fill, 0%);
+  background: #36b37e;
+  opacity: .55;
 }
 .bar > span { position: relative; }
 .bar-count { font-weight: 600; }
 /* Группирующая строка эпика — одна жёлтая полоса на секцию. */
 .bar.bar-group { padding: 3px 7px; }
-.bar.bar-group::before { opacity: .55; }
+.bar.bar-group::before { opacity: .6; }
 
 /* Полоса человека: жёлтая часть — целевые эпики, серая — прочие; ширины пропорциональны объёму. */
 .bar.bar-split { padding: 0; background: transparent; gap: 0; }
@@ -413,7 +414,7 @@ table.gantt { border-collapse: separate; border-spacing: 0; }
   line-height: 14px;
   border-radius: 2px;
 }
-.bar.nested::before { opacity: .28; }
+.bar.nested::before { opacity: .45; }
 .bar-sprint { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--muted); }
 .plabel-others { color: var(--muted); font-style: italic; }
 
@@ -423,6 +424,9 @@ table.gantt { border-collapse: separate; border-spacing: 0; }
 
 .legend { display: inline-flex; align-items: center; gap: 12px; margin-left: 14px; flex-wrap: wrap; }
 .legend-title { color: var(--muted); }
+.legend-done { color: var(--muted); }
+.swatch { display: inline-block; width: 14px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: middle; }
+.swatch-done { background: #36b37e; opacity: .7; }
 .legend-item { display: inline-flex; align-items: center; gap: 2px; }
 .tlabel { text-transform: uppercase; letter-spacing: .03em; font-size: 11px; }
 
