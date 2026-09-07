@@ -953,10 +953,15 @@ async function boot() {
     if (!file) return;
     $("#configLog").textContent = "";
     try {
+      const cfg = configio.parseConfig(await file.text());
+      // Адрес Jira из конфига — в форму и настройки до запроса разрешения на домен.
+      if (cfg.baseUrl) {
+        $("#baseUrl").value = cfg.baseUrl;
+        configLog(t("cfg.baseUrlSet", { url: cfg.baseUrl }));
+      }
       await saveSettingsForm();
       await ensurePermission();
       configLog(t("cfg.start"));
-      const cfg = configio.parseConfig(await file.text());
       const { addedEpics } = await configio.applyConfig(cfg, { onLog: configLog });
       fillSettingsForm();
       if (addedEpics.length) {

@@ -4,6 +4,7 @@
 // Формат файла:
 // {
 //   "version": 1,
+//   "baseUrl":     "https://jira.company.local",
 //   "fields":      { "plannedStart": "customfield_10407", "plannedEnd": "Planned End",
 //                    "epicAssignee": "assignee", "epicReporter": "reporter" },
 //   "infoSystems": ["1С CRM", "..."],
@@ -34,6 +35,7 @@ export function parseConfig(text) {
   }
   if (!cfg || typeof cfg !== "object" || Array.isArray(cfg)) throw new Error(t("cfg.badJson", { msg: "object expected" }));
   return {
+    baseUrl: String(cfg.baseUrl || cfg.jiraUrl || "").trim().replace(/\/+$/, ""),
     fields: cfg.fields && typeof cfg.fields === "object" ? cfg.fields : {},
     infoSystems: Array.isArray(cfg.infoSystems) ? cfg.infoSystems : typeof cfg.infoSystems === "string" ? parseSystems(cfg.infoSystems) : [],
     epics: Array.isArray(cfg.epics) ? cfg.epics.map((k) => String(k).trim()).filter(Boolean) : [],
@@ -149,6 +151,7 @@ export async function exportConfig() {
   const rows = mergeProfiles(collectPeople(issues, others), profiles);
   return {
     version: CONFIG_VERSION,
+    baseUrl: s.baseUrl || "",
     fields: {
       plannedStart: s.fields.plannedStart || "",
       plannedEnd: s.fields.plannedEnd || "",
