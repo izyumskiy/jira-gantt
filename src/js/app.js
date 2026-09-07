@@ -464,12 +464,23 @@ async function doSync({ full = false } = {}) {
     await refreshHeader();
     // Сводка по спринтам — чтобы было видно, почему у спринта нет дат, а не гадать.
     const st = result.sprintStats;
+    const lines = [];
     if (st) {
-      const named = st.fromName ? t("st.sprintsFromName", { n: st.fromName }) : "";
-      status(t("st.sprintsSummary", { n: st.withDates + st.noDates, dated: st.withDates, undated: st.noDates, named }));
-      if (st.boardsFailed.length) status(t("st.boardsFailed", { list: st.boardsFailed.join("; ") }), "error");
+      lines.push(
+        t("st.sprintsSummary", {
+          n: st.withDates + st.noDates,
+          dated: st.withDates,
+          undated: st.noDates,
+          named: st.fromName ? t("st.sprintsFromName", { n: st.fromName }) : "",
+          failed: st.agileFailed ? t("st.sprintsFailed", { n: st.agileFailed }) : ""
+        })
+      );
+      if (st.boardsFailed.length) lines.push(t("st.boardsFailed", { list: st.boardsFailed.join("; ") }));
     }
-    if (result.othersError) status(result.othersError, "error");
+    if (result.othersError) lines.push(result.othersError);
+    // Одной строкой, чтобы сводка не перекрывалась ошибкой; ошибка красит всю строку.
+    const isError = (st && st.boardsFailed.length) || result.othersError;
+    if (lines.length) status(lines.join(" — "), isError ? "error" : "info");
     gantt.resetCollapse();
     redrawActive();
   } catch (e) {

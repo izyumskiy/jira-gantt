@@ -324,9 +324,10 @@ function toLocalIso(d) {
 // Обновление спринтов. Возвращает сводку — она уходит в строку статуса, чтобы было видно,
 // что именно перечитано и почему у спринта нет дат.
 async function refreshSprints(sprintMap) {
-  const stats = { boardsOk: 0, boardsFailed: [], agileOk: 0, agileFailed: 0, fromName: 0, withDates: 0, noDates: 0 };
+  const stats = { boardsOk: 0, boardsFailed: [], boardsSkipped: 0, agileOk: 0, agileFailed: 0, fromName: 0, withDates: 0, noDates: 0 };
+  const configured = String(settings.get().boardId || "");
   const boardIds = new Set();
-  if (settings.get().boardId) boardIds.add(String(settings.get().boardId));
+  if (configured) boardIds.add(configured);
   for (const s of sprintMap.values()) if (s.boardId) boardIds.add(String(s.boardId));
 
   for (const boardId of boardIds) {
@@ -338,9 +339,11 @@ async function refreshSprints(sprintMap) {
       }
       stats.boardsOk += 1;
     } catch (e) {
-      // Kanban-доска спринтов не отдаёт, а на чужую может не быть прав — добьём поштучно.
-      stats.boardsFailed.push(`#${boardId}: ${e && e.message ? e.message : e}`);
-      console.warn("[OhMyGant] board sprints failed", boardId, e);
+      // Доски из поля спринта (rapidViewId) часто чужие или удалённые — 404 для них норма,
+      // их спринты добираем поштучно. Об ошибке сообщаем только для доски из настроек.
+      if (boardId === configured) stats.boardsFailed.push(`#${boardId}: ${e && e.message ? e.message : e}`);
+      else stats.boardsSkipped += 1;
+      console.warn("[OhMyGant] board sprints unavailable", boardId, e && e.message ? e.message : e);
     }
   }
 
