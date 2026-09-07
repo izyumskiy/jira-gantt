@@ -544,6 +544,35 @@ check("окно сравнения открывается и на «По эпи�
 document.querySelector(".tip-close").click();
 g4.remove();
 
+// 10. комментарии эпика (Jira подменена заглушкой)
+const fakeComments = Array.from({ length: 7 }, (_, i) => ({ id: String(i), body: `Комментарий ${i + 1}`, author: { displayName: "Ivan" }, created: new Date(Date.now() - (7 - i) * day).toISOString() }));
+const added = [];
+gantt.commentsApi.list = async () => fakeComments;
+gantt.commentsApi.add = async (key, text) => { added.push({ key, text }); fakeComments.push({ id: "n", body: text, author: { displayName: "Me" }, created: new Date().toISOString() }); };
+const cmtBtn = [...document.querySelectorAll("#g1 .g-row.group")][0].querySelector(".cmt-btn");
+check("пиктограмма 💬 у каждого эпика на «По эпикам», у людей на «По людям» нет",
+  document.querySelectorAll("#g1 .g-row.group .cmt-btn").length === m1.groups.length && document.querySelectorAll("#g2 .cmt-btn").length === 0);
+cmtBtn.click();
+await new Promise((r) => setTimeout(r, 30));
+const cmtTip = document.querySelector(".tooltip.tip-comments");
+check("окно комментариев открылось с полем ввода и списком", !!cmtTip && !!cmtTip.querySelector(".cmt-input") && !!cmtTip.querySelector(".cmt-list"));
+check("показаны последние 5 из 7, новейший первым", [...cmtTip.querySelectorAll(".cmt-item .cmt-body")].map((n) => n.textContent).join(",") === "Комментарий 7,Комментарий 6,Комментарий 5,Комментарий 4,Комментарий 3",
+  [...cmtTip.querySelectorAll(".cmt-item .cmt-body")].map((n) => n.textContent).join(","));
+check("список в прокручиваемой зоне", getComputedStyle(cmtTip.querySelector(".cmt-list")).overflowY === "auto" && getComputedStyle(cmtTip.querySelector(".cmt-list")).maxHeight === "220px");
+const saveBtn = cmtTip.querySelector(".cmt-save");
+check("кнопка сохранить неактивна при пустом поле", saveBtn.disabled);
+const ta = cmtTip.querySelector(".cmt-input");
+ta.value = "Новый комментарий из теста"; ta.dispatchEvent(new Event("input"));
+check("кнопка активна после ввода", !saveBtn.disabled);
+saveBtn.click();
+await new Promise((r) => setTimeout(r, 50));
+check("сохранение ушло в Jira с ключом эпика и текстом", added.length === 1 && added[0].key === "EP-1" && added[0].text === "Новый комментарий из теста", JSON.stringify(added));
+check("после сохранения поле очищено, список обновлён, новый — первым", ta.value === "" && cmtTip.querySelector(".cmt-item .cmt-body").textContent === "Новый комментарий из теста" && cmtTip.querySelectorAll(".cmt-item").length === 5);
+check("статус «Сохранено»", cmtTip.querySelector(".cmt-note").textContent === t("cmt.saved"));
+cmtTip.querySelector(".tip-close").click();
+gantt.render(g3, m3, { mode: "epicPeople", onChildClick: () => {} });
+check("пиктограмма 💬 есть и на «По эпикам и людям»", g3.querySelectorAll(".g-row.group .cmt-btn").length === m3.groups.length);
+
 const total = document.createElement("div");
 total.className = failures ? "t-fail" : "t-ok";
 total.textContent = failures ? `${failures} FAILED` : "ALL PASSED";

@@ -5,7 +5,14 @@
 import { t } from "./i18n.js";
 import { fmtEstimate, NO_DATES_ID, BACKLOG_ID } from "./agg.js";
 import * as settings from "./settings.js";
-import { cfId, escapeJql } from "./jira.js";
+import { cfId, escapeJql, comments as jiraComments, addComment as jiraAddComment } from "./jira.js";
+
+// Комментарии эпика — через это, чтобы самопроверка могла подменить Jira заглушкой.
+export const commentsApi = {
+  list: (key) => jiraComments(key),
+  add: (key, text) => jiraAddComment(key, text)
+};
+const RECENT_COMMENTS = 5;
 import { normName } from "./team.js";
 
 const collapsed = { epic: new Set(), epicPeople: new Set(), assignee: new Set() };
@@ -368,6 +375,7 @@ export function render(container, model, opts) {
     label.onclick = (e) => showTooltip(e.currentTarget, g, mode, model, profile);
     name.append(twisty, label);
     if (g.status && g.status.name) name.append(lozenge(g.status));
+    if (epicLike && g.key) name.append(commentButton(g.key, g.label));
     if (profile && profile.role) {
       const role = el("span", "lozenge lz-role", t(`role.${profile.role}`));
       role.title = t("team.role");
@@ -452,6 +460,110 @@ function lozenge(status) {
   const node = el("span", `lozenge lz-s-${status.id || "other"}`, status.name);
   node.title = status.name;
   return node;
+}
+
+// ---------- комментарии эпика (в Jira) ----------
+
+function commentButton(key, label) {
+  const btn = el("button", "cmt-btn", "💬");
+  btn.type = "button";
+  btn.title = t("cmt.button");
+  btn.onclick = (e) => {
+    e.stopPropagation();
+    showComments(e.currentTarget, key, label);
+  };
+  return btn;
+}
+
+function fmtDateTime(iso) {
+  const d = new Date(iso);
+  if (Number.isNaN(+d)) return "";
+  const p = (n) => String(n).padStart(2, "0");
+  return `${p(d.getDate())}.${p(d.getMonth() + 1)}.${String(d.getFullYear()).slice(-2)} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+function showComments(anchor, key, label) {
+  closeTooltip();
+  tip = el("div", "tooltip tip-comments");
+  const head = el("div", "tip-head");
+  const strong = el("strong");
+  strong.append(maybeLink(t("cmt.title", { key }), browseUrl(key), "tip-link"));
+  strong.append(el("div", "tip-sub-title", label));
+  head.append(strong);
+  const close = el("button", "tip-close", "×");
+  close.title = t("tip.close");
+  close.onclick = closeTooltip;
+  head.append(close);
+  tip.append(head);
+
+  // Ввод нового комментария.
+  const form = el("div", "cmt-form");
+  const ta = el("textarea", "cmt-input");
+  ta.placeholder = t("cmt.placeholder");
+  ta.rows = 3;
+  const save = el("button", "primary cmt-save", t("cmt.save"));
+  save.type = "button";
+  save.disabled = true;
+  const note = el("span", "muted small cmt-note");
+  ta.oninput = () => (save.disabled = !ta.value.trim());
+  form.append(ta, save, note);
+  tip.append(form);
+
+  // Последние комментарии — в прокручиваемой зоне.
+  const listTitle = el("div", "tip-sub", t("cmt.recent", { n: RECENT_COMMENTS }));
+  const list = el("div", "cmt-list");
+  tip.append(listTitle, list);
+
+  const renderList = (all) => {
+    list.textContent = "";
+    const recent = [...all]
+      .sort((a, b) => new Date(b.created) - new Date(a.created))
+      .slice(0, RECENT_COMMENTS);
+    if (!recent.length) {
+      list.append(el("div", "muted", t("cmt.empty")));
+      return;
+    }
+    for (const c of recent) {
+      const item = el("div", "cmt-item");
+      const meta = el("div", "cmt-meta");
+      meta.append(el("span", "cmt-author", c.author?.displayName || c.author?.name || t("dash")), el("span", "muted", fmtDateTime(c.created)));
+      item.append(meta, el("div", "cmt-body", c.body || ""));
+      list.append(item);
+    }
+  };
+  const load = async () => {
+    list.textContent = "";
+    list.append(el("div", "muted", t("cmt.loading")));
+    try {
+      renderList(await commentsApi.list(key));
+    } catch (e) {
+      list.textContent = "";
+      list.append(el("div", "cmt-error", t("cmt.error", { msg: e && e.message ? e.message : e })));
+    }
+  };
+  save.onclick = async () => {
+    const text = ta.value.trim();
+    if (!text) return;
+    save.disabled = true;
+    note.textContent = t("cmt.saving");
+    try {
+      await commentsApi.add(key, text);
+      ta.value = "";
+      note.textContent = t("cmt.saved");
+      await load();
+    } catch (e) {
+      note.textContent = t("cmt.error", { msg: e && e.message ? e.message : e });
+      save.disabled = false;
+    }
+  };
+  load();
+
+  document.body.append(tip);
+  const r = anchor.getBoundingClientRect();
+  const top = Math.min(window.innerHeight - tip.offsetHeight - 12, r.bottom + 6);
+  tip.style.top = `${Math.max(8, top)}px`;
+  tip.style.left = `${Math.max(8, Math.min(window.innerWidth - tip.offsetWidth - 12, r.left))}px`;
+  ta.focus();
 }
 
 // ---------- сравнение с коллегами: кто может подменить ----------
@@ -593,7 +705,7 @@ function closeTooltip() {
 }
 document.addEventListener("keydown", (e) => e.key === "Escape" && closeTooltip());
 document.addEventListener("click", (e) => {
-  if (tip && !tip.contains(e.target) && !e.target.closest(".glabel") && !e.target.closest(".bar.clickable") && !e.target.closest(".cmp-btn")) closeTooltip();
+  if (tip && !tip.contains(e.target) && !e.target.closest(".glabel") && !e.target.closest(".bar.clickable") && !e.target.closest(".cmp-btn") && !e.target.closest(".cmt-btn")) closeTooltip();
 });
 
 // Список задач ячейки: ключ со ссылкой в Jira, название, статус, оценка.

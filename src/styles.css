@@ -320,6 +320,21 @@ table.gantt { border-collapse: separate; border-spacing: 0; }
 .plabel-link.p-fired { color: var(--muted); }
 /* Пиктограмма «кто может подменить» рядом с именем. */
 .cmp-btn { border: none; background: none; padding: 0 4px; margin-left: 4px; color: var(--muted); font-size: 13px; line-height: 1; cursor: pointer; vertical-align: middle; }
+/* Пиктограмма «прокомментировать» у эпика и окно комментариев. */
+.cmt-btn { border: none; background: none; padding: 0 3px; margin-left: 4px; font-size: 12px; line-height: 1; cursor: pointer; vertical-align: middle; opacity: .7; }
+.cmt-btn:hover { opacity: 1; }
+.tooltip.tip-comments { min-width: 420px; max-width: 560px; }
+.cmt-form { display: grid; grid-template-columns: 1fr auto; gap: 6px 8px; align-items: start; }
+.cmt-input { grid-column: 1 / -1; width: 100%; box-sizing: border-box; resize: vertical; min-height: 60px; }
+.cmt-note { grid-column: 1; align-self: center; }
+.cmt-save { grid-column: 2; }
+.cmt-list { max-height: 220px; overflow-y: auto; border: 1px solid var(--line); border-radius: 4px; padding: 4px 8px; }
+.cmt-item { padding: 6px 0; border-bottom: 1px solid var(--line); }
+.cmt-item:last-child { border-bottom: none; }
+.cmt-meta { display: flex; justify-content: space-between; gap: 10px; font-size: 11px; margin-bottom: 2px; }
+.cmt-author { font-weight: 600; }
+.cmt-body { white-space: pre-wrap; word-break: break-word; font-size: 12px; }
+.cmt-error { color: #bf2600; }
 .cmp-btn:hover { color: var(--accent); }
 .tooltip.tip-compare { min-width: 420px; max-width: 640px; }
 .cmp-table .tp-name { white-space: nowrap; vertical-align: top; padding-right: 10px; }

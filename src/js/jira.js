@@ -17,7 +17,8 @@ function baseUrl() {
 }
 
 async function once(url, opts, auth) {
-  const headers = { Accept: "application/json" };
+  // X-Atlassian-Token: no-check — иначе Jira Server отвергает POST под cookie-сессией (XSRF).
+  const headers = { Accept: "application/json", "X-Atlassian-Token": "no-check" };
   if (opts.body) headers["Content-Type"] = "application/json";
   if (auth === "pat") headers.Authorization = `Bearer ${settings.get().pat}`;
   return fetch(url, {
@@ -117,6 +118,16 @@ export async function boardSprints(boardId) {
     startAt += page.values.length;
   }
   return out;
+}
+
+// Комментарии задачи (эпика): все, сортировку делаем на клиенте — orderBy есть не во всех версиях.
+export async function comments(issueKey) {
+  const page = await request(`/rest/api/2/issue/${encodeURIComponent(issueKey)}/comment?maxResults=1000`);
+  return page && Array.isArray(page.comments) ? page.comments : [];
+}
+
+export function addComment(issueKey, text) {
+  return request(`/rest/api/2/issue/${encodeURIComponent(issueKey)}/comment`, { method: "POST", body: { body: text } });
 }
 
 // Один спринт по id — так обновляем даты, даже если ни одна задача не менялась.
