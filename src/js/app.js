@@ -785,16 +785,30 @@ function trackTopHeight() {
 
 const AUTHOR = { name: "Alexander Izyumskiy", email: "izumsky@gmail.com" };
 
+// Версия: читаем manifest.json с диска — chrome.runtime.getManifest() отдаёт манифест, загруженный
+// при старте расширения, и после обновления кода показывает старую версию до перезагрузки расширения.
+async function currentVersion() {
+  try {
+    const res = await fetch(chrome.runtime.getURL("manifest.json"), { cache: "no-store" });
+    if (res.ok) {
+      const m = await res.json();
+      if (m && m.version) return m.version;
+    }
+  } catch {
+    // dev-страница или недоступный файл — ниже запасной вариант
+  }
+  try {
+    return chrome.runtime.getManifest().version || "dev";
+  } catch {
+    return "dev";
+  }
+}
+
 // Всплывашка «о плагине» при наведении на логотип: версия из манифеста и автор.
-function renderAbout() {
+async function renderAbout() {
   const box = $("#about");
   box.textContent = "";
-  let version = "dev";
-  try {
-    version = chrome.runtime.getManifest().version || version;
-  } catch {
-    // dev-страница без chrome.runtime — оставляем «dev»
-  }
+  const version = await currentVersion();
   const line = (label, node) => {
     const row = document.createElement("div");
     row.className = "about-row";
@@ -827,7 +841,7 @@ async function boot() {
   setLang(s.lang);
   applyI18n();
   applyTopHeight();
-  renderAbout();
+  renderAbout().catch(() => {});
   await db.open();
 
   document.querySelectorAll(".tab").forEach((b) => (b.onclick = () => showTab(b.dataset.tab)));
@@ -837,7 +851,7 @@ async function boot() {
     setLang($("#lang").value);
     applyI18n();
     applyTopHeight();
-    renderAbout();
+    renderAbout().catch(() => {});
     fillSettingsForm();
     renderSelCount();
     renderResults();
