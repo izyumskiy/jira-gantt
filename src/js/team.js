@@ -7,7 +7,7 @@ import * as settings from "./settings.js";
 import * as agg from "./agg.js";
 import { fmtEstimate } from "./agg.js";
 
-export const ROLES = ["developer", "frontend", "backend", "onec", "qa", "analytic", "teamlead", "support", "pm", "devops"];
+export const ROLES = ["developer", "frontend", "backend", "onec", "qa", "analytic", "teamlead", "support", "pm", "devops", "sysadm"];
 export const STATUSES = ["staff", "outstaff", "fired"];
 
 // Ключ сопоставления: имя без регистра, лишних пробелов и «ё».
