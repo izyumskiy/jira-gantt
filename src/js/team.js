@@ -46,6 +46,18 @@ export function mergeProfiles(people, profiles) {
   return rows;
 }
 
+// Сводка по ролям: только люди из выгрузки, без уволенных и аутстафа. Без роли — отдельной строкой.
+export function roleSummary(rows) {
+  const counted = rows.filter((r) => r.loaded && r.status !== "fired" && r.status !== "outstaff");
+  const byRole = new Map(ROLES.map((r) => [r, 0]));
+  let noRole = 0;
+  for (const r of counted) {
+    if (r.role && byRole.has(r.role)) byRole.set(r.role, byRole.get(r.role) + 1);
+    else noRole += 1;
+  }
+  return { total: counted.length, roles: [...byRole].filter(([, n]) => n > 0).map(([role, n]) => ({ role, n })), noRole };
+}
+
 export async function saveProfile(row) {
   await db.putAll(db.STORES.people, [
     {
@@ -142,6 +154,24 @@ export async function render(container, { notify = () => {} } = {}) {
     container.append(el("div", "empty", t("team.empty")));
     return;
   }
+
+  // Сводка по ролям над таблицей.
+  const summary = roleSummary(rows);
+  const sum = el("div", "status-summary team-summary");
+  const total = el("span", "ssum-total", t("team.summaryTotal", { n: summary.total }));
+  total.title = t("team.summaryHint");
+  sum.append(total);
+  for (const { role, n } of summary.roles) {
+    const item = el("span", "ssum-item");
+    item.append(el("span", "lozenge lz-role", t(`role.${role}`)), el("span", "ssum-count", String(n)));
+    sum.append(item);
+  }
+  if (summary.noRole) {
+    const item = el("span", "ssum-item");
+    item.append(el("span", "lozenge lz-s-other", t("team.noRole")), el("span", "ssum-count", String(summary.noRole)));
+    sum.append(item);
+  }
+  container.append(sum);
 
   // Команда (доска) и объёмы — из той же модели, что и «Гант по людям».
   const model = agg.buildModel({ issues, others, sprints, epics, boards, mode: "assignee" });

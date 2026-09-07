@@ -11,7 +11,7 @@ import * as agg from "../src/js/agg.js";
 import * as gantt from "../src/js/gantt.js";
 import { parseSprint, datesFromName } from "../src/js/sync.js";
 import { classify, isDoneStatus } from "../src/js/status.js";
-import { collectPeople, mergeProfiles, parseSystems, systemsList, normName } from "../src/js/team.js";
+import { collectPeople, mergeProfiles, parseSystems, systemsList, normName, roleSummary } from "../src/js/team.js";
 
 const log = document.getElementById("log");
 
@@ -226,6 +226,15 @@ check("у новых людей пустой профиль", merged.find((r) =>
 check("профиль ушедшего из выгрузки сохранён с пометкой", merged.find((r) => r.name === "maria")?.loaded === false, JSON.stringify(merged.map((r) => `${r.name}:${r.loaded}`)));
 check("порядок: сначала выгрузка, потом остальные", merged.map((r) => r.name).join(",") === "ivan,olga,petr,maria", merged.map((r) => r.name).join(","));
 check("parseSystems: строки/запятые/дубли", parseSystems("CRM\nBilling, crm ;Mobile").join("|") === "CRM|Billing|Mobile", parseSystems("CRM\nBilling, crm ;Mobile").join("|"));
+const rs = roleSummary([
+  { name: "a", loaded: true, role: "developer", status: "staff" },
+  { name: "b", loaded: true, role: "developer", status: "" },
+  { name: "c", loaded: true, role: "qa", status: "outstaff" },      // аутстаф — не считаем
+  { name: "d", loaded: true, role: "developer", status: "fired" },  // уволен — не считаем
+  { name: "e", loaded: true, role: "", status: "staff" },           // без роли
+  { name: "f", loaded: false, role: "devops", status: "staff" }     // не в выгрузке — не считаем
+]);
+check("сводка по ролям: без уволенных, аутстафа и ушедших из выгрузки", rs.total === 3 && rs.roles.map((x) => `${x.role}:${x.n}`).join(",") === "developer:2" && rs.noRole === 1, JSON.stringify(rs));
 await settings.save({ infoSystems: ["Billing"] });
 check("справочник систем дополняется выбранными у людей", systemsList(merged).join("|") === "Billing|CRM", systemsList(merged).join("|"));
 await settings.save({ infoSystems: [] });

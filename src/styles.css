@@ -220,6 +220,8 @@ main { padding: 14px 16px 40px; }
 .ssum-item { display: inline-flex; align-items: center; gap: 5px; }
 .ssum-item .lozenge { margin-left: 0; }
 .ssum-count { font-weight: 600; }
+.team-summary { margin-bottom: 10px; }
+.team-summary .lozenge { margin-left: 0; }
 .istatus .lozenge { margin-left: 0; max-width: 130px; }
 .ikey { color: var(--accent); font-weight: 600; }
 .isum { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
