@@ -373,6 +373,7 @@ export function render(container, model, opts) {
       role.title = t("team.role");
       name.append(role);
     }
+    if (mode === "assignee" && g.key) name.append(compareButton(g.label, profile, profiles));
     // На «По эпикам и людям» цифры не показываем — только дерево и полосы (итоги есть в подсказке).
     const showBadges = mode !== "epicPeople";
     if (showBadges) {
@@ -421,6 +422,7 @@ export function render(container, model, opts) {
         plabel = el("span", "plabel", p.label);
       }
       pname.append(el("span", "indent"), plabel);
+      if (model.childKind === "person" && p.key) pname.append(compareButton(p.label, profileOf.get(normName(p.label)) || null, profiles));
       if (showBadges) pname.append(badges(p.count, p.sum));
       ptr.append(pname);
       for (const sec of model.columns) ptr.append(nestedCell(p.cells.get(sec.id), sec, model, `${g.label} · ${p.label}`));
@@ -450,6 +452,90 @@ function lozenge(status) {
   const node = el("span", `lozenge lz-s-${status.id || "other"}`, status.name);
   node.title = status.name;
   return node;
+}
+
+// ---------- сравнение с коллегами: кто может подменить ----------
+
+function compareButton(name, profile, profiles) {
+  const btn = el("button", "cmp-btn", "⇄");
+  btn.type = "button";
+  btn.title = t("cmp.button");
+  btn.onclick = (e) => {
+    e.stopPropagation();
+    showCompare(e.currentTarget, name, profile, profiles);
+  };
+  return btn;
+}
+
+// Кандидаты: та же роль, хотя бы одна общая система, не уволен, не сам; по числу общих систем.
+export function standIns(profile, profiles) {
+  if (!profile || !profile.role || !(profile.systems || []).length) return { candidates: [], uncovered: [] };
+  const mine = new Set(profile.systems);
+  const candidates = profiles
+    .filter((p) => p.name !== profile.name && p.role === profile.role && p.status !== "fired")
+    .map((p) => ({ profile: p, common: (p.systems || []).filter((x) => mine.has(x)) }))
+    .filter((c) => c.common.length)
+    .sort((a, b) => b.common.length - a.common.length || a.profile.displayName.localeCompare(b.profile.displayName));
+  const covered = new Set(candidates.flatMap((c) => c.common));
+  return { candidates, uncovered: profile.systems.filter((x) => !covered.has(x)) };
+}
+
+function showCompare(anchor, name, profile, profiles) {
+  closeTooltip();
+  tip = el("div", "tooltip tip-compare");
+  const head = el("div", "tip-head");
+  const strong = el("strong", null, t("cmp.title", { name }));
+  head.append(strong);
+  const close = el("button", "tip-close", "×");
+  close.title = t("tip.close");
+  close.onclick = closeTooltip;
+  head.append(close);
+  tip.append(head);
+
+  if (!profile || !profile.role || !(profile.systems || []).length) {
+    tip.append(el("div", "muted", t("cmp.noProfile")));
+  } else {
+    const me = el("div", "tip-profile");
+    me.append(el("span", "lozenge lz-role", t(`role.${profile.role}`)));
+    for (const sName of profile.systems) me.append(el("span", "chip on static", sName));
+    tip.append(me);
+
+    const { candidates, uncovered } = standIns(profile, profiles);
+    tip.append(el("div", "tip-sub", t("cmp.candidates")));
+    if (!candidates.length) {
+      tip.append(el("div", "muted", t("cmp.none")));
+    } else {
+      const tbl = el("table", "tip-table cmp-table");
+      for (const c of candidates) {
+        const tr = el("tr");
+        const who = el("td", "tp-name");
+        who.append(el("div", "cmp-name" + (c.profile.status ? ` p-${c.profile.status}` : ""), c.profile.displayName));
+        if (c.profile.status === "outstaff") who.append(el("div", "small muted", t("pstatus.outstaff")));
+        const sys = el("td", "cmp-systems");
+        const common = new Set(c.common);
+        // Сначала общие (подсвечены), потом остальные системы кандидата серым.
+        for (const sName of [...c.common, ...(c.profile.systems || []).filter((x) => !common.has(x))]) {
+          sys.append(el("span", "chip static" + (common.has(sName) ? " on" : ""), sName));
+        }
+        tr.append(who, sys, el("td", "tp-num", t("cmp.common", { n: c.common.length })));
+        tbl.append(tr);
+      }
+      tip.append(tbl);
+    }
+
+    const unc = el("div", "cmp-uncovered");
+    unc.append(el("span", "tip-k", `${t("cmp.uncovered")}: `));
+    if (uncovered.length) for (const sName of uncovered) unc.append(el("span", "chip static uncovered", sName));
+    else unc.append(el("span", "muted", t("cmp.allCovered")));
+    tip.append(unc);
+  }
+  tip.append(el("div", "small muted cmp-criteria", t("cmp.criteria")));
+
+  document.body.append(tip);
+  const r = anchor.getBoundingClientRect();
+  const top = Math.min(window.innerHeight - tip.offsetHeight - 12, r.bottom + 6);
+  tip.style.top = `${Math.max(8, top)}px`;
+  tip.style.left = `${Math.max(8, Math.min(window.innerWidth - tip.offsetWidth - 12, r.left))}px`;
 }
 
 // ---------- ссылки в Jira ----------
@@ -507,7 +593,7 @@ function closeTooltip() {
 }
 document.addEventListener("keydown", (e) => e.key === "Escape" && closeTooltip());
 document.addEventListener("click", (e) => {
-  if (tip && !tip.contains(e.target) && !e.target.closest(".glabel") && !e.target.closest(".bar.clickable")) closeTooltip();
+  if (tip && !tip.contains(e.target) && !e.target.closest(".glabel") && !e.target.closest(".bar.clickable") && !e.target.closest(".cmp-btn")) closeTooltip();
 });
 
 // Список задач ячейки: ключ со ссылкой в Jira, название, статус, оценка.

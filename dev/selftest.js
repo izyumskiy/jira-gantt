@@ -501,6 +501,49 @@ check("таблица прочих эпиков со ссылкой на эпи�
 document.querySelector(".tip-close").click();
 document.querySelector("#g1 .glabel").click();
 
+// 9. «кто может подменить»
+const cmpProfiles = [
+  { name: "ivan", displayName: "Ivan", role: "developer", status: "staff", systems: ["CRM", "Billing", "Mobile"] },
+  { name: "petr", displayName: "Petr", role: "developer", status: "staff", systems: ["CRM", "Web"] },
+  { name: "olga", displayName: "Olga", role: "developer", status: "outstaff", systems: ["Billing", "CRM"] },
+  { name: "kim", displayName: "Kim", role: "developer", status: "staff", systems: ["Web"] },        // нет общих систем
+  { name: "zed", displayName: "Zed", role: "qa", status: "staff", systems: ["CRM"] },              // другая роль
+  { name: "lee", displayName: "Lee", role: "developer", status: "fired", systems: ["CRM", "Mobile"] } // уволен
+];
+const si = gantt.standIns(cmpProfiles[0], cmpProfiles);
+check("standIns: та же роль, общие системы, без уволенных; по числу общих", si.candidates.map((c) => `${c.profile.displayName}:${c.common.join("+")}`).join(",") === "Olga:Billing+CRM,Petr:CRM",
+  si.candidates.map((c) => `${c.profile.displayName}:${c.common.join("+")}`).join(","));
+check("standIns: системы без замены — Mobile", si.uncovered.join(",") === "Mobile", si.uncovered.join(","));
+check("standIns: без роли/систем — пусто", gantt.standIns({ name: "x", role: "", systems: ["CRM"] }, cmpProfiles).candidates.length === 0);
+
+const g4 = document.createElement("div");
+document.body.append(g4);
+gantt.render(g4, m2, { mode: "assignee", profiles: cmpProfiles });
+const cmpBtnOf = (n) => [...g4.querySelectorAll(".g-row.group")].find((r) => r.querySelector(".glabel").textContent === n)?.querySelector(".cmp-btn");
+check("пиктограмма ⇄ у каждого человека на «По людям»", g4.querySelectorAll(".g-row.group .cmp-btn").length === m2.groups.filter((g) => g.key).length && !cmpBtnOf("Без исполнителя"));
+cmpBtnOf("Ivan").click();
+const cmpTip = document.querySelector(".tooltip.tip-compare");
+check("окно «Замена для Ivan» открылось и не закрылось от своего клика", !!cmpTip && cmpTip.textContent.includes(t("cmp.title", { name: "Ivan" })));
+const rowsCmp = [...cmpTip.querySelectorAll(".cmp-table tr")];
+check("кандидаты: Olga (2 общих), Petr (1); Kim, Zed, Lee отсутствуют", rowsCmp.map((r) => r.querySelector(".cmp-name").textContent).join(",") === "Olga,Petr", rowsCmp.map((r) => r.querySelector(".cmp-name").textContent).join(","));
+check("общие системы подсвечены, остальные — нет", [...rowsCmp[1].querySelectorAll(".chip")].map((c) => `${c.textContent}${c.classList.contains("on") ? "*" : ""}`).join(",") === "CRM*,Web",
+  [...rowsCmp[1].querySelectorAll(".chip")].map((c) => `${c.textContent}${c.classList.contains("on") ? "*" : ""}`).join(","));
+check("аутстаф-кандидат помечен", rowsCmp[0].querySelector(".cmp-name").classList.contains("p-outstaff"));
+check("системы без замены: Mobile", [...cmpTip.querySelectorAll(".cmp-uncovered .chip")].map((c) => c.textContent).join(",") === "Mobile");
+cmpTip.querySelector(".tip-close").click();
+cmpBtnOf("Petr").click();
+check("у Petr без замены — Web (Kim той же роли, но Web общий) → все покрыты? нет: Kim имеет Web",
+  [...document.querySelectorAll(".tooltip.tip-compare .cmp-table .cmp-name")].map((n) => n.textContent).join(",") === "Ivan,Kim,Olga" && document.querySelector(".tooltip.tip-compare .cmp-uncovered").textContent.includes(t("cmp.allCovered")),
+  [...document.querySelectorAll(".tooltip.tip-compare .cmp-table .cmp-name")].map((n) => n.textContent).join(","));
+document.querySelector(".tip-close").click();
+// на «По эпикам и людям» — тоже
+gantt.render(g3, m3, { mode: "epicPeople", profiles: cmpProfiles, onChildClick: () => {} });
+check("пиктограмма ⇄ у людей внутри эпиков", g3.querySelectorAll(".g-row.proj .cmp-btn").length > 0);
+g3.querySelector(".g-row.proj .cmp-btn").click();
+check("окно сравнения открывается и на «По эпикам и людям»", !!document.querySelector(".tooltip.tip-compare"));
+document.querySelector(".tip-close").click();
+g4.remove();
+
 const total = document.createElement("div");
 total.className = failures ? "t-fail" : "t-ok";
 total.textContent = failures ? `${failures} FAILED` : "ALL PASSED";

@@ -318,6 +318,17 @@ table.gantt { border-collapse: separate; border-spacing: 0; }
 .plabel-link { border: none; background: none; padding: 0; font: inherit; color: var(--accent); cursor: pointer; text-align: left; }
 .plabel-link:hover { text-decoration: underline; }
 .plabel-link.p-fired { color: var(--muted); }
+/* Пиктограмма «кто может подменить» рядом с именем. */
+.cmp-btn { border: none; background: none; padding: 0 4px; margin-left: 4px; color: var(--muted); font-size: 13px; line-height: 1; cursor: pointer; vertical-align: middle; }
+.cmp-btn:hover { color: var(--accent); }
+.tooltip.tip-compare { min-width: 420px; max-width: 640px; }
+.cmp-table .tp-name { white-space: nowrap; vertical-align: top; padding-right: 10px; }
+.cmp-name { font-weight: 600; }
+.cmp-name.p-outstaff { color: #a16207; }
+.cmp-systems { display: flex; flex-wrap: wrap; gap: 4px; padding: 4px 0; }
+.cmp-uncovered { margin-top: 10px; display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.chip.static.uncovered { border-color: #ffbdad; background: #ffebe6; color: #bf2600; }
+.cmp-criteria { margin-top: 8px; }
 .plabel-link.p-outstaff { color: #a16207; }
 .g-row.proj.hl > .c-name { background: var(--accent-soft); }
 .g-row.proj.hl .plabel-link { font-weight: 700; }
