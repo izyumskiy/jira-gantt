@@ -89,9 +89,10 @@ export async function applyConfig(cfg, { onLog = () => {} } = {}) {
       log(t("cfg.error", { msg: e.message }));
     }
   }
-  const systems = [...new Set([...(settings.get().infoSystems || []), ...cfg.infoSystems.map((x) => String(x).trim()).filter(Boolean)])];
+  // Конфиг — источник истины: справочник систем берём из него целиком (старый не смешиваем).
+  const systems = [...new Set(cfg.infoSystems.map((x) => String(x).trim()).filter(Boolean))];
   await settings.save({ fields, infoSystems: systems });
-  if (cfg.infoSystems.length) log(t("cfg.systemsSet", { n: cfg.infoSystems.length, total: systems.length }));
+  log(t("cfg.systemsSet", { n: systems.length }));
 
   // 2. Эпики: находим в Jira и добавляем к сохранённым.
   let addedEpics = [];

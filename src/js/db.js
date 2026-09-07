@@ -111,6 +111,11 @@ export async function clearAll() {
   for (const s of Object.values(STORES)) if (s !== STORES.people) await clear(s);
 }
 
+// Полная очистка, включая профили людей — перед импортом конфигурации.
+export async function clearEverything() {
+  for (const s of Object.values(STORES)) await clear(s);
+}
+
 export async function metaGet(k, dflt = null) {
   const row = await getOne(STORES.meta, k);
   return row ? row.v : dflt;

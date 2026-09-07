@@ -12,7 +12,8 @@ import * as gantt from "../src/js/gantt.js";
 import { parseSprint, datesFromName } from "../src/js/sync.js";
 import { classify, isDoneStatus } from "../src/js/status.js";
 import { collectPeople, mergeProfiles, parseSystems, systemsList, normName, roleSummary } from "../src/js/team.js";
-import { parseConfig, exportConfig } from "../src/js/configio.js";
+import { parseConfig, exportConfig, applyConfig } from "../src/js/configio.js";
+import * as dbm from "../src/js/db.js";
 
 const log = document.getElementById("log");
 
@@ -324,6 +325,20 @@ check("parseConfig: битый JSON — понятная ошибка", badJson.
 await settings.save({ infoSystems: ["1С CRM"], fields: { plannedStart: "customfield_10407", plannedEnd: "customfield_10408", epicAssignee: "assignee", epicReporter: "reporter" } });
 const ec = await exportConfig();
 check("exportConfig: версия, адрес Jira, поля, системы, эпики, люди", ec.version === 1 && ec.baseUrl === settings.get().baseUrl && ec.fields.plannedStart === "customfield_10407" && ec.infoSystems.join() === "1С CRM" && Array.isArray(ec.epics) && Array.isArray(ec.people), JSON.stringify(ec).slice(0, 200));
+await settings.save({ infoSystems: [], fields: { plannedStart: "", plannedEnd: "", epicAssignee: "assignee", epicReporter: "reporter" } });
+
+// применение без Jira (поля по id, эпиков нет): база очищается, справочник заменяется, профили создаются
+await dbm.putAll(dbm.STORES.people, [{ name: "старый", displayName: "Старый", role: "qa", status: "staff", systems: ["Legacy"] }]);
+await settings.save({ infoSystems: ["Legacy"] });
+await dbm.clearEverything();
+check("clearEverything очищает и профили", (await dbm.all(dbm.STORES.people)).length === 0);
+const applyLog = [];
+await applyConfig(parseConfig(JSON.stringify({ fields: { plannedStart: "customfield_1" }, infoSystems: ["A", "B"], people: [{ name: "Новый", role: "1C dev", status: "Аутстаф", systems: ["A", "C"] }] })), { onLog: (m) => applyLog.push(m) });
+check("applyConfig: справочник систем заменён конфигом + системы людей", settings.get().infoSystems.join(",") === "A,B,C", settings.get().infoSystems.join(","));
+const newProf = (await dbm.all(dbm.STORES.people)).find((p) => p.name === "новый");
+check("applyConfig: профиль создан, роль и статус по подписям", newProf?.role === "onec" && newProf?.status === "outstaff" && newProf.systems.join() === "A,C", JSON.stringify(newProf));
+check("applyConfig: поле по id записано", settings.get().fields.plannedStart === "customfield_1");
+await dbm.clearEverything();
 await settings.save({ infoSystems: [], fields: { plannedStart: "", plannedEnd: "", epicAssignee: "assignee", epicReporter: "reporter" } });
 
 // 5. форматирование оценок

@@ -967,13 +967,22 @@ async function boot() {
       configLog(t("st.connecting"));
       const me = await jira.myself();
       configLog(t("st.ok", { name: me.displayName || me.name }));
+      // Импорт начинает с чистого листа: вся локальная база, включая профили, и фильтры.
+      await db.clearEverything();
+      state.selected.clear();
+      state.results = [];
+      state.filter = { label: "", assignee: "" };
+      state.personFilter = null;
+      await settings.save({ lastSync: 0, epicAssigneeFilter: "" });
+      configLog(t("cfg.wiped"));
       configLog(t("cfg.start"));
       const { addedEpics } = await configio.applyConfig(cfg, { onLog: configLog });
       fillSettingsForm();
+      addedEpics.forEach((k) => state.selected.add(k));
+      await renderStored();
+      renderResults();
+      renderSelCount();
       if (addedEpics.length) {
-        addedEpics.forEach((k) => state.selected.add(k));
-        await renderStored();
-        renderSelCount();
         configLog(t("cfg.syncing"));
         await doSync({ full: true });
       }
