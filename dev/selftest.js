@@ -12,6 +12,7 @@ import * as gantt from "../src/js/gantt.js";
 import { parseSprint, datesFromName } from "../src/js/sync.js";
 import { classify, isDoneStatus } from "../src/js/status.js";
 import { collectPeople, mergeProfiles, parseSystems, systemsList, normName, roleSummary } from "../src/js/team.js";
+import { parseConfig, exportConfig } from "../src/js/configio.js";
 
 const log = document.getElementById("log");
 
@@ -312,6 +313,18 @@ check("epicPeople: setCollapsed сворачивает указанные эпи
   `${ep1Row3.nextElementSibling?.className} / ${ep1Row3.querySelector(".twisty").textContent}`);
 gantt.resetCollapse();
 g3.remove();
+
+// 4d. загрузчик конфигурации — разбор и экспорт
+const pc = parseConfig(JSON.stringify({ fields: { plannedStart: "customfield_10407" }, infoSystems: "1С CRM\nСБИС", epics: [" prj-1 ", "PRJ-2"], people: [{ name: "Иван" }, { bad: 1 }] }));
+check("parseConfig: поля, системы строкой, эпики с обрезкой, люди без имени отброшены",
+  pc.fields.plannedStart === "customfield_10407" && pc.infoSystems.join("|") === "1С CRM|СБИС" && pc.epics.join(",") === "prj-1,PRJ-2" && pc.people.length === 1, JSON.stringify(pc));
+let badJson = "";
+try { parseConfig("{oops"); } catch (e) { badJson = e.message; }
+check("parseConfig: битый JSON — понятная ошибка", badJson.startsWith(t("cfg.badJson", { msg: "" }).slice(0, 12)), badJson);
+await settings.save({ infoSystems: ["1С CRM"], fields: { plannedStart: "customfield_10407", plannedEnd: "customfield_10408", epicAssignee: "assignee", epicReporter: "reporter" } });
+const ec = await exportConfig();
+check("exportConfig: версия, поля, системы, эпики, люди", ec.version === 1 && ec.fields.plannedStart === "customfield_10407" && ec.infoSystems.join() === "1С CRM" && Array.isArray(ec.epics) && Array.isArray(ec.people), JSON.stringify(ec).slice(0, 200));
+await settings.save({ infoSystems: [], fields: { plannedStart: "", plannedEnd: "", epicAssignee: "assignee", epicReporter: "reporter" } });
 
 // 5. форматирование оценок
 check("fmtEstimate 4ч", agg.fmtEstimate(4 * H) === "4ч", agg.fmtEstimate(4 * H));

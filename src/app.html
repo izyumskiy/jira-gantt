@@ -175,6 +175,17 @@
         </div>
 
         <div class="card">
+          <h3 data-i18n="set.config"></h3>
+          <small class="muted" data-i18n="set.configHint"></small>
+          <div class="row">
+            <input id="configFile" type="file" accept="application/json,.json" />
+            <button id="btnConfigApply" class="primary" data-i18n="set.configApply"></button>
+            <button id="btnConfigExport" data-i18n="set.configExport"></button>
+          </div>
+          <pre id="configLog" class="config-log hidden"></pre>
+        </div>
+
+        <div class="card">
           <h3 data-i18n="set.danger"></h3>
           <div class="row">
             <button id="btnWipe" class="danger" data-i18n="set.wipe"></button>

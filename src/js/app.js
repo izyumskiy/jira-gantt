@@ -8,6 +8,7 @@ import * as agg from "./agg.js";
 import * as gantt from "./gantt.js";
 import * as team from "./team.js";
 import { classify, isDoneStatus } from "./status.js";
+import * as configio from "./configio.js";
 
 const $ = (sel) => document.querySelector(sel);
 const state = {
@@ -939,6 +940,56 @@ async function boot() {
     }
   };
   $("#btnSaveSettings").onclick = () => saveSettingsForm().catch(fail);
+
+  // Предварительная конфигурация: файл → поля и системы → эпики (с выгрузкой) → сотрудники.
+  const configLog = (line) => {
+    const box = $("#configLog");
+    box.classList.remove("hidden");
+    box.textContent += (box.textContent ? "\n" : "") + line;
+    box.scrollTop = box.scrollHeight;
+  };
+  $("#btnConfigApply").onclick = async () => {
+    const file = $("#configFile").files[0];
+    if (!file) return;
+    $("#configLog").textContent = "";
+    try {
+      await saveSettingsForm();
+      await ensurePermission();
+      configLog(t("cfg.start"));
+      const cfg = configio.parseConfig(await file.text());
+      const { addedEpics } = await configio.applyConfig(cfg, { onLog: configLog });
+      fillSettingsForm();
+      if (addedEpics.length) {
+        addedEpics.forEach((k) => state.selected.add(k));
+        await renderStored();
+        renderSelCount();
+        configLog(t("cfg.syncing"));
+        await doSync({ full: true });
+      }
+      await refreshHeader();
+      configLog(t("cfg.done"));
+      status(t("cfg.done"));
+    } catch (e) {
+      configLog(t("cfg.error", { msg: e && e.message ? e.message : e }));
+      fail(e);
+    }
+  };
+  $("#btnConfigExport").onclick = async () => {
+    try {
+      await saveSettingsForm();
+      const cfg = await configio.exportConfig();
+      const blob = new Blob([JSON.stringify(cfg, null, 2)], { type: "application/json" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = "jira-ohmygant-config.json";
+      document.body.append(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    } catch (e) {
+      fail(e);
+    }
+  };
   $("#btnWipe").onclick = async () => {
     await db.clearAll();
     await settings.save({ lastSync: 0 });

@@ -222,6 +222,29 @@ async function refreshEpics(keys) {
   await db.putAll(db.STORES.epics, fresh.map((e) => ({ ...e, hidden: !!existing.get(e.key)?.hidden })));
 }
 
+// Эпики по списку ключей — для загрузчика конфигурации. Несуществующие ключи Jira отбрасывает
+// с ошибкой JQL, поэтому ищем пачками и при ошибке — по одному.
+export async function fetchEpics(keys) {
+  await ensureFields();
+  const out = [];
+  const clean = [...new Set(keys.map((k) => String(k).trim().toUpperCase()).filter((k) => /^[A-Z][A-Z0-9_]*-\d+$/.test(k)))];
+  for (let i = 0; i < clean.length; i += 50) {
+    const chunk = clean.slice(i, i + 50);
+    try {
+      out.push(...(await jira.search(`key in (${chunk.join(",")}) AND issuetype = Epic`, epicFieldList())).map(mapEpic));
+    } catch {
+      for (const k of chunk) {
+        try {
+          out.push(...(await jira.search(`key = ${k} AND issuetype = Epic`, epicFieldList())).map(mapEpic));
+        } catch {
+          // ключа нет или нет прав — пропускаем, загрузчик сообщит о ненайденных
+        }
+      }
+    }
+  }
+  return out;
+}
+
 // ---------- выбор эпиков ----------
 
 export async function selectedEpics() {
