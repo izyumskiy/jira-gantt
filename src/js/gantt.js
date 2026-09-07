@@ -331,8 +331,9 @@ export function render(container, model, opts) {
     }
     hr.append(th);
   }
-  // Справа от спринтов — «Бэклог»: задачи без спринта и не в статусе «Готово».
-  const showBacklog = epicLike;
+  // Справа от спринтов — «Бэклог»: задачи без спринта и не в статусе «Готово» (на всех вкладках;
+  // у человека — по его задачам целевых эпиков, «прочие» вне спринтов не загружаются).
+  const showBacklog = true;
   if (showBacklog) {
     const th = el("th", "c-sprint backlog");
     th.append(el("div", "sp-name", t("gantt.backlog")));
@@ -450,6 +451,7 @@ export function render(container, model, opts) {
       oname.append(el("span", "indent"), olabel, badges(g.otherCount, g.otherSum));
       otr.append(oname);
       for (const sec of model.columns) otr.append(nestedCell(g.otherCells.get(sec.id), sec, model, `${g.label} · ${t("gantt.others")}`));
+      if (showBacklog) otr.append(el("td", "c-cell c-backlog")); // прочие эпики — только спринты, бэклога нет
       tbody.append(otr);
     }
   });

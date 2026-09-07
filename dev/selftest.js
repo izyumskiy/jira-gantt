@@ -436,7 +436,11 @@ check("EP-1 бэклог: 1 задача / 5ч (A-6; готовая A-4 не с�
   JSON.stringify([ep1.backlog.count, ep1.backlog.sum / H]));
 const g1Heads = [...document.querySelectorAll("#g1 thead .c-sprint")];
 check("колонка «Бэклог» — последняя на вкладке по эпикам", g1Heads.at(-1).classList.contains("backlog") && g1Heads.at(-1).textContent.includes(t("gantt.backlog")));
-check("на вкладке по людям колонки «Бэклог» нет", document.querySelectorAll("#g2 thead .c-sprint.backlog").length === 0);
+check("на вкладке по людям тоже есть колонка «Бэклог»", document.querySelectorAll("#g2 thead .c-sprint.backlog").length === 1);
+const olgaRow2 = [...document.querySelectorAll("#g2 .g-row.group")].find((r) => r.querySelector(".glabel").textContent === "Olga");
+check("у Olga в бэклоге A-6 (без спринта, не готово): жёлтая полоса 1 · 5ч", olgaRow2.querySelector("td.c-backlog .bar.bar-group")?.textContent === "15ч", olgaRow2.querySelector("td.c-backlog .bar")?.textContent);
+check("у Ivan бэклог пуст (A-5 в закрытом спринте — не бэклог)", !ivanRow.querySelector("td.c-backlog .bar"));
+check("строки проектов и «Прочие» тоже с ячейкой бэклога — число ячеек одинаково", [...document.querySelectorAll("#g2 .g-row")].every((r) => r.querySelectorAll("td").length === 1 + m2.columns.length + 1));
 const ep1Row = [...document.querySelectorAll("#g1 .g-row.group")][0];
 const backlogBar = ep1Row.querySelector("td.c-backlog .bar");
 check("у EP-1 в бэклоге жёлтая полоса 1 · 5ч", backlogBar?.classList.contains("bar-group") && backlogBar.textContent === "15ч", backlogBar?.textContent);
