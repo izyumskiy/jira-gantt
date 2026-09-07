@@ -954,13 +954,19 @@ async function boot() {
     $("#configLog").textContent = "";
     try {
       const cfg = configio.parseConfig(await file.text());
-      // Адрес Jira из конфига — в форму и настройки до запроса разрешения на домен.
+      // 0. Адрес Jira из конфига: сразу в настройки (не только в форму), затем разрешение на домен
+      //    и проверка подключения по активной сессии — до всего остального.
       if (cfg.baseUrl) {
         $("#baseUrl").value = cfg.baseUrl;
+        await settings.save({ baseUrl: cfg.baseUrl });
         configLog(t("cfg.baseUrlSet", { url: cfg.baseUrl }));
       }
       await saveSettingsForm();
+      if (!settings.get().baseUrl) throw new jira.JiraError(t("err.noBaseUrl"), 0);
       await ensurePermission();
+      configLog(t("st.connecting"));
+      const me = await jira.myself();
+      configLog(t("st.ok", { name: me.displayName || me.name }));
       configLog(t("cfg.start"));
       const { addedEpics } = await configio.applyConfig(cfg, { onLog: configLog });
       fillSettingsForm();
