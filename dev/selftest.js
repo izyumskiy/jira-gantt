@@ -394,7 +394,8 @@ check("текущая секция помечена словом «текущи�
   [...document.querySelectorAll("#g1 thead .c-sprint")][0].querySelector(".sp-name")?.textContent);
 check("у второй секции подписи нет — только спринты", ![...document.querySelectorAll("#g1 thead .c-sprint")][1].querySelector(".sp-name"));
 check("секция без дат подписана «Без дат»", [...document.querySelectorAll("#g1 thead .c-sprint:not(.backlog)")].at(-1).querySelector(".sp-name")?.textContent === t("gantt.noDates"));
-check("легенда команд отрисована", document.querySelectorAll("#g1 .legend-item").length === 2);
+check("легенда команд отрисована — в горизонтальной прокрутке", document.querySelectorAll("#g1 .legend-scroll .legend-item").length === 2 && getComputedStyle(document.querySelector("#g1 .legend-scroll")).overflowX === "auto");
+check("подписи легенды короткие", document.querySelector("#g1 .legend-done").textContent === t("gantt.legendDone") && t("gantt.legendDone") === "доля готовых задач" && t("gantt.legendDue") === "срок исполнения");
 const left = [...document.querySelectorAll("#g1 .g-row.group .badge.b-left")].map((b) => b.textContent);
 check("жёлтый баллон «осталось» у каждого эпика", left.length === 5 && left[0] === "4", left.join(" "));
 check("у исполнителей жёлтого баллона нет", document.querySelectorAll("#g2 .badge.b-left").length === 0);

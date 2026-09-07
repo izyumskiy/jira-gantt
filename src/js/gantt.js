@@ -278,13 +278,16 @@ export function render(container, model, opts) {
     bar.append(dueLegend);
   }
   if (model.teams.length) {
-    const legend = el("span", "legend");
+    // Команд может быть много — список в горизонтальной прокрутке, панель не растёт.
+    const legend = el("span", "legend legend-teams");
     legend.append(el("span", "legend-title", t("gantt.teams")));
+    const scroll = el("span", "legend-scroll");
     for (const tm of model.teams) {
       const item = el("span", "legend-item");
       item.append(dot(tm), el("span", null, tm.name));
-      legend.append(item);
+      scroll.append(item);
     }
+    legend.append(scroll);
     bar.append(legend);
   }
   container.append(bar);
