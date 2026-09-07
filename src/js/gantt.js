@@ -10,6 +10,10 @@ import { normName } from "./team.js";
 
 const collapsed = { epic: new Set(), epicPeople: new Set(), assignee: new Set() };
 
+// В шапке секции показываем не больше стольких спринтов; остальные — по клику на шапку.
+const HEADER_SPRINTS = 7;
+const expandedHeaders = new Set();
+
 // Свернуть/развернуть группы снаружи (фильтр по человеку на «Ганте по эпикам и людям»).
 export function setCollapsed(mode, keys) {
   collapsed[mode] = new Set(keys);
@@ -209,13 +213,26 @@ export function render(container, model, opts) {
     if (sec.id === NO_DATES_ID) th.append(el("div", "sp-name", t("gantt.noDates")));
     if (sec.id === model.currentId) th.append(el("div", "sp-name", t("gantt.current")));
     const list = el("div", "sp-list");
-    for (const s of sec.sprints) {
+    const expanded = expandedHeaders.has(sec.id);
+    const shown = expanded ? sec.sprints : sec.sprints.slice(0, HEADER_SPRINTS);
+    for (const s of shown) {
       const item = el("div", "sp-item");
       item.title = `${s.name} · ${model.teamOf(s).name}`;
       item.append(dot(model.teamOf(s)), el("span", "sp-item-name", s.name));
       list.append(item);
     }
     th.append(list);
+    if (sec.sprints.length > HEADER_SPRINTS) {
+      // Длинный список спринтов не должен вытеснять таблицу: остаток — за строкой «ещё N».
+      const hidden = sec.sprints.length - HEADER_SPRINTS;
+      th.append(el("div", "sp-more", expanded ? t("gantt.headerLess") : t("gantt.headerMore", { n: hidden })));
+      th.classList.add("expandable");
+      th.title = expanded ? t("gantt.headerLess") : t("gantt.headerMore", { n: hidden });
+      th.onclick = () => {
+        expanded ? expandedHeaders.delete(sec.id) : expandedHeaders.add(sec.id);
+        render(container, model, opts);
+      };
+    }
     hr.append(th);
   }
   // Справа от спринтов — «Бэклог»: задачи без спринта и не в статусе «Готово».

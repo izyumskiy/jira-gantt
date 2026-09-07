@@ -256,6 +256,23 @@ check("epicPeople: итоги эпика при этом по всем зада�
 const m1f = agg.buildModel({ issues: [mk("F-2", "EP-1", "AAA", "Zed", 1, 4, "prog")], sprints, epics, boards, mode: "epic" });
 check("на «По эпикам» проекты не отсеиваются", m1f.groups[0].projects.length === 1);
 
+// шапка секции: не больше 7 спринтов, остальные по клику
+const manySprints = [sprints[1], ...Array.from({ length: 12 }, (_, i) => ({ id: 100 + i, name: `Someday ${i + 1}`, state: "FUTURE", startDate: null, endDate: null, boardId: 7 }))];
+const manyIssues = Array.from({ length: 12 }, (_, i) => mk(`M-${i}`, "EP-1", "AAA", "Ivan", 100 + i, 1, "new"));
+const mh = agg.buildModel({ issues: manyIssues, sprints: manySprints, epics, boards, mode: "epic" });
+const gh = document.createElement("div");
+document.body.append(gh);
+gantt.render(gh, mh, { mode: "epic" });
+const noDateTh = () => [...gh.querySelectorAll("thead .c-sprint:not(.backlog)")].at(-1);
+check("в шапке секции «Без дат» показаны только 7 спринтов из 12", noDateTh().querySelectorAll(".sp-item").length === 7, String(noDateTh().querySelectorAll(".sp-item").length));
+check("под списком — «ещё 5»", noDateTh().querySelector(".sp-more")?.textContent === t("gantt.headerMore", { n: 5 }), noDateTh().querySelector(".sp-more")?.textContent);
+noDateTh().click();
+check("клик по шапке раскрывает все 12", noDateTh().querySelectorAll(".sp-item").length === 12 && noDateTh().querySelector(".sp-more")?.textContent === t("gantt.headerLess"));
+noDateTh().click();
+check("повторный клик сворачивает обратно до 7", noDateTh().querySelectorAll(".sp-item").length === 7);
+check("секция с ≤7 спринтами без переключателя", !gh.querySelector("thead .c-sprint.current .sp-more"));
+gh.remove();
+
 const g3 = document.createElement("div");
 document.body.append(g3);
 let clicked = null;
