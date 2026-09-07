@@ -288,38 +288,97 @@ async function loadOthers({ collected, full, fields, fieldList, epicKeys, onProg
 // Смена дат спринта в Jira не меняет `updated` у задач, поэтому спринты перечитываем всегда:
 // сначала целиком доски (там видны и новые спринты без задач), затем поштучно те незакрытые,
 // до которых доска не дотянулась.
+// Даты из названия спринта — запасной вариант, когда в Jira они не заполнены.
+// Понимает «… [08.10 - 21.10]», «… [08.10.2026 - 21.10.2026]», «08.10–21.10»; год — из названия
+// (первое 20xx) или текущий; если конец раньше начала — переход через Новый год.
+export function datesFromName(name, now = new Date()) {
+  const m = String(name || "").match(/(\d{1,2})\.(\d{1,2})(?:\.(\d{4}))?\s*[-–—]\s*(\d{1,2})\.(\d{1,2})(?:\.(\d{4}))?/);
+  if (!m) return null;
+  const yearInName = (String(name).match(/\b(20\d{2})\b/) || [])[1];
+  const y1 = Number(m[3] || yearInName || now.getFullYear());
+  let y2 = Number(m[6] || yearInName || y1);
+  const mk = (y, mo, d) => new Date(y, mo - 1, d, 0, 0, 0, 0);
+  let start = mk(y1, Number(m[2]), Number(m[1]));
+  let end = mk(y2, Number(m[5]), Number(m[4]));
+  if (Number.isNaN(+start) || Number.isNaN(+end)) return null;
+  if (end < start) {
+    y2 += 1;
+    end = mk(y2, Number(m[5]), Number(m[4]));
+  }
+  end.setHours(23, 59, 59, 0);
+  return { startDate: toLocalIso(start), endDate: toLocalIso(end) };
+}
+
+// ISO с локальным смещением («2026-10-08T00:00:00.000+03:00»), как отдаёт Jira; toISOString()
+// перевёл бы полночь в UTC и сдвинул дату на день назад.
+function toLocalIso(d) {
+  const p = (n, w = 2) => String(n).padStart(w, "0");
+  const off = -d.getTimezoneOffset();
+  const sign = off >= 0 ? "+" : "-";
+  return (
+    `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}.000` +
+    `${sign}${p(Math.floor(Math.abs(off) / 60))}:${p(Math.abs(off) % 60)}`
+  );
+}
+
+// Обновление спринтов. Возвращает сводку — она уходит в строку статуса, чтобы было видно,
+// что именно перечитано и почему у спринта нет дат.
 async function refreshSprints(sprintMap) {
+  const stats = { boardsOk: 0, boardsFailed: [], agileOk: 0, agileFailed: 0, fromName: 0, withDates: 0, noDates: 0 };
   const boardIds = new Set();
   if (settings.get().boardId) boardIds.add(String(settings.get().boardId));
   for (const s of sprintMap.values()) if (s.boardId) boardIds.add(String(s.boardId));
 
-  const refreshed = new Set();
   for (const boardId of boardIds) {
     try {
       for (const raw of await jira.boardSprints(boardId)) {
         const n = normSprint(raw);
         if (!n) continue;
         sprintMap.set(n.id, { ...n, boardId: n.boardId || Number(boardId), source: "board" });
-        refreshed.add(n.id);
       }
-    } catch {
-      // Kanban-доска спринтов не отдаёт — не страшно, добьём поштучно.
+      stats.boardsOk += 1;
+    } catch (e) {
+      // Kanban-доска спринтов не отдаёт, а на чужую может не быть прав — добьём поштучно.
+      stats.boardsFailed.push(`#${boardId}: ${e && e.message ? e.message : e}`);
+      console.warn("[OhMyGant] board sprints failed", boardId, e);
     }
   }
 
-  const stale = [...sprintMap.values()].filter((s) => !refreshed.has(s.id) && s.state !== "CLOSED");
+  // Поштучно — все незакрытые спринты без дат (в т.ч. отданные доской без дат) и те, до которых
+  // доска не дотянулась. Смена дат в Jira не меняет задачи, поэтому это единственный надёжный путь.
+  const stale = [...sprintMap.values()].filter((s) => s.state !== "CLOSED" && (!s.startDate || s.source !== "board"));
   for (let i = 0; i < stale.length; i += 5) {
     await Promise.all(
       stale.slice(i, i + 5).map(async (s) => {
         try {
           const n = normSprint(await jira.sprint(s.id));
-          if (n) sprintMap.set(n.id, { ...n, boardId: n.boardId || s.boardId || null, source: "agile" });
-        } catch {
-          // Спринт мог быть удалён или закрыт для чтения — оставляем то, что было.
+          if (n) {
+            sprintMap.set(n.id, { ...n, boardId: n.boardId || s.boardId || null, source: "agile" });
+            stats.agileOk += 1;
+          }
+        } catch (e) {
+          stats.agileFailed += 1;
+          console.warn("[OhMyGant] sprint refresh failed", s.id, s.name, e);
         }
       })
     );
   }
+
+  // Запасной вариант: даты из названия спринта.
+  for (const s of sprintMap.values()) {
+    if (!s.startDate) {
+      const parsed = datesFromName(s.name);
+      if (parsed) {
+        sprintMap.set(s.id, { ...s, ...parsed, dateSource: "name" });
+        stats.fromName += 1;
+      }
+    }
+  }
+  for (const s of sprintMap.values()) {
+    if (s.state === "CLOSED") continue;
+    s.startDate ? (stats.withDates += 1) : (stats.noDates += 1);
+  }
+  return stats;
 }
 
 // ---------- синхронизация ----------
@@ -413,7 +472,7 @@ export async function sync({ full = false, onProgress = () => {} } = {}) {
   }
 
   onProgress(t("st.sprintsLoading"));
-  await refreshSprints(sprintMap);
+  const sprintStats = await refreshSprints(sprintMap);
 
   // Доски нужны, чтобы назвать команду спринта; без них команда подпишется как «#id».
   try {
@@ -434,5 +493,5 @@ export async function sync({ full = false, onProgress = () => {} } = {}) {
   await db.putAll(db.STORES.sprints, [...sprintMap.values()]);
   await settings.save({ lastSync: Date.now() });
   onProgress(t("st.done"));
-  return { issues: collected.length, sprints: sprintMap.size, others: others.length, othersError };
+  return { issues: collected.length, sprints: sprintMap.size, others: others.length, othersError, sprintStats };
 }

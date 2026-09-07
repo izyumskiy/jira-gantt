@@ -9,7 +9,7 @@ import { setLang, applyI18n, t } from "../src/js/i18n.js";
 import * as settings from "../src/js/settings.js";
 import * as agg from "../src/js/agg.js";
 import * as gantt from "../src/js/gantt.js";
-import { parseSprint } from "../src/js/sync.js";
+import { parseSprint, datesFromName } from "../src/js/sync.js";
 import { classify, isDoneStatus } from "../src/js/status.js";
 import { collectPeople, mergeProfiles, parseSystems, systemsList, normName } from "../src/js/team.js";
 
@@ -112,6 +112,14 @@ check("parseSprint state", ps && ps.state === "ACTIVE");
 check("parseSprint completeDate=null", ps && ps.completeDate === null);
 check("parseSprint boardId", ps && ps.boardId === 12);
 check("parseSprint объектом", parseSprint({ id: 9, name: "X", state: "future" }).state === "FUTURE");
+
+// 1b. даты из названия спринта (запасной вариант)
+const dn = (name) => { const r = datesFromName(name, new Date(2026, 8, 4)); return r ? `${r.startDate.slice(0, 10)}..${r.endDate.slice(0, 10)}` : null; };
+check("datesFromName: «20.2026 WEB[08.10 - 21.10]» → год из названия", dn("20.2026 WEB[08.10 - 21.10]") === "2026-10-08..2026-10-21", dn("20.2026 WEB[08.10 - 21.10]"));
+check("datesFromName: переход через Новый год", dn("26.2026 WEB[31.12 - 13.01]") === "2026-12-31..2027-01-13", dn("26.2026 WEB[31.12 - 13.01]"));
+check("datesFromName: без года — текущий", dn("Sprint1 Disc [14.06 - 28.06]") === "2026-06-14..2026-06-28", dn("Sprint1 Disc [14.06 - 28.06]"));
+check("datesFromName: полные даты", dn("Релиз 05.11.2026 – 18.11.2026") === "2026-11-05..2026-11-18", dn("Релиз 05.11.2026 – 18.11.2026"));
+check("datesFromName: обычное имя — null", dn("Sprint 3") === null && dn("Бэклог") === null);
 
 // 2. текущий спринт и временные секции
 check("currentSprint = активный по датам", agg.currentSprint(sprints)?.id === 2, String(agg.currentSprint(sprints)?.id));

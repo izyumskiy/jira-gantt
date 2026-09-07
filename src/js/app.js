@@ -462,6 +462,13 @@ async function doSync({ full = false } = {}) {
   try {
     const result = await sync.sync({ full, onProgress: (m) => status(m) });
     await refreshHeader();
+    // Сводка по спринтам — чтобы было видно, почему у спринта нет дат, а не гадать.
+    const st = result.sprintStats;
+    if (st) {
+      const named = st.fromName ? t("st.sprintsFromName", { n: st.fromName }) : "";
+      status(t("st.sprintsSummary", { n: st.withDates + st.noDates, dated: st.withDates, undated: st.noDates, named }));
+      if (st.boardsFailed.length) status(t("st.boardsFailed", { list: st.boardsFailed.join("; ") }), "error");
+    }
     if (result.othersError) status(result.othersError, "error");
     gantt.resetCollapse();
     redrawActive();
