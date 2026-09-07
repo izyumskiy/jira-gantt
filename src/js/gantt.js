@@ -146,6 +146,87 @@ function backlogNested(cell, model, rowLabel) {
   return td;
 }
 
+// ---------- веха срока исполнения эпика ----------
+
+const DAY_MS = 86400000;
+const DUE_SOON_DAYS = 14;
+
+function dayStart(v) {
+  const d = new Date(v.length === 10 ? `${v}T00:00:00` : v);
+  if (Number.isNaN(+d)) return null;
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+}
+
+function fmtDue(ms) {
+  const d = new Date(ms);
+  const p = (n) => String(n).padStart(2, "0");
+  return `${p(d.getDate())}.${p(d.getMonth() + 1)}.${d.getFullYear()}`;
+}
+
+// Куда ставить веху: индекс колонки, доля по ширине (0..1), край (если срок вне графика), цвет, подписи.
+function dueInfo(g, model) {
+  if (!g.dueDate) return null;
+  const due = dayStart(g.dueDate);
+  if (due == null) return null;
+  const dated = model.columns.map((sec, index) => ({ sec, index })).filter(({ sec }) => sec.start != null);
+  if (!dated.length) return null;
+
+  let colIndex;
+  let frac;
+  let edge = null;
+  const hit = dated.find(({ sec }) => due >= sec.start && due < sec.end);
+  if (hit) {
+    colIndex = hit.index;
+    frac = (due - hit.sec.start) / (hit.sec.end - hit.sec.start);
+  } else if (due < dated[0].sec.start) {
+    colIndex = dated[0].index;
+    frac = 0;
+    edge = "left";
+  } else {
+    colIndex = dated[dated.length - 1].index;
+    frac = 1;
+    edge = "right";
+  }
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const days = Math.round((due - today.getTime()) / DAY_MS);
+  const done = g.status && g.status.id === "done";
+  const cls = done ? "due-green" : days <= DUE_SOON_DAYS ? "due-red" : "due-gray";
+  const date = fmtDue(due);
+  let title = done
+    ? t("gantt.dueDone", { date })
+    : days === 0
+      ? t("gantt.dueToday", { date })
+      : days > 0
+        ? t("gantt.dueIn", { date, n: days })
+        : t("gantt.dueOverdue", { date, n: -days });
+  if (edge === "left") title += ` · ${t("gantt.dueBeforeChart")}`;
+  if (edge === "right") title += ` · ${t("gantt.dueAfterChart")}`;
+  const p = (n) => String(n).padStart(2, "0");
+  const short = `${p(new Date(due).getDate())}.${p(new Date(due).getMonth() + 1)}`;
+  const label = edge === "left" ? `◀ ${short}` : edge === "right" ? `${short} ▶` : `◆ ${short}`;
+  return { colIndex, frac, edge, cls, title, label };
+}
+
+// Линия вехи в ячейке строки; у строки эпика — ещё и флажок с датой.
+function addDueLine(row, info, withFlag) {
+  const td = row.children[1 + info.colIndex];
+  if (!td) return;
+  td.classList.add("has-due");
+  const x = `${Math.round(info.frac * 100)}%`;
+  const line = el("i", `due-line ${info.cls}` + (info.edge ? ` edge-${info.edge}` : ""));
+  line.style.setProperty("--x", x);
+  td.append(line);
+  if (withFlag) {
+    const flag = el("span", `due-flag ${info.cls}` + (info.edge ? ` edge-${info.edge}` : ""), info.label);
+    flag.style.setProperty("--x", x);
+    flag.title = info.title;
+    td.append(flag);
+  }
+}
+
 function emptyCells(n) {
   const out = [];
   for (let i = 0; i < n; i++) out.push(el("td", "c-cell"));
@@ -184,6 +265,11 @@ export function render(container, model, opts) {
   const doneLegend = el("span", "legend legend-done");
   doneLegend.append(el("i", "swatch swatch-done"), el("span", null, t("gantt.legendDone")));
   bar.append(doneLegend);
+  if (epicLike) {
+    const dueLegend = el("span", "legend legend-done");
+    dueLegend.append(el("i", "swatch swatch-due"), el("span", null, t("gantt.legendDue")));
+    bar.append(dueLegend);
+  }
   if (model.teams.length) {
     const legend = el("span", "legend");
     legend.append(el("span", "legend-title", t("gantt.teams")));
@@ -314,6 +400,9 @@ export function render(container, model, opts) {
       if (g.backlog.count) td.append(groupBar(g.backlog, model.maxCell, `${g.label} · ${t("gantt.backlog")}`));
       tr.append(td);
     }
+    // Веха срока исполнения — по строкам эпика (на «По людям» строки — люди, там её нет).
+    const due = epicLike ? dueInfo(g, model) : null;
+    if (due) addDueLine(tr, due, true);
     tbody.append(tr);
 
     if (isCollapsed) return;
@@ -336,6 +425,7 @@ export function render(container, model, opts) {
       ptr.append(pname);
       for (const sec of model.columns) ptr.append(nestedCell(p.cells.get(sec.id), sec, model, `${g.label} · ${p.label}`));
       if (showBacklog) ptr.append(backlogNested(p.backlog, model, `${g.label} · ${p.label}`));
+      if (due) addDueLine(ptr, due, false);
       tbody.append(ptr);
     }
     // «Прочие» — задачи человека в эпиках вне выбранных.

@@ -83,10 +83,11 @@ const others = [
   { ...mk("X-2", "EP-8", "XXX", "Petr", 6, 4, "new"), epicSummary: "Инфра" },
   { ...mk("X-3", "", "XXX", "Petr", 6, 2, "new"), epicSummary: "" }
 ];
+const ymd = (offsetDays) => { const x = new Date(Date.now() + offsetDays * day); const p = (n) => String(n).padStart(2, "0"); return `${x.getFullYear()}-${p(x.getMonth() + 1)}-${p(x.getDate())}`; };
 const epics = [
-  { key: "EP-1", summary: "Личный кабинет", statusName: "В работе", statusCategory: "indeterminate" },
-  { key: "EP-2", summary: "Биллинг", statusName: "Готово", statusCategory: "done" },
-  { key: "EP-3", summary: "Отчёты", statusName: "Бизнес тест", statusCategory: "indeterminate" },
+  { key: "EP-1", summary: "Личный кабинет", statusName: "В работе", statusCategory: "indeterminate", dueDate: ymd(5) },
+  { key: "EP-2", summary: "Биллинг", statusName: "Готово", statusCategory: "done", dueDate: ymd(-10) },
+  { key: "EP-3", summary: "Отчёты", statusName: "Бизнес тест", statusCategory: "indeterminate", dueDate: ymd(40) },
   { key: "EP-4", summary: "Импорт", statusName: "Сделать", statusCategory: "new" },
   { key: "EP-5", summary: "Уведомления", statusName: "New", statusCategory: "new" }
 ];
@@ -343,6 +344,24 @@ check("вложенный отрезок Sprint 2 у AAA: 8ч из 12ч гото
   [...document.querySelectorAll("#g1 .g-row.proj")][0].querySelectorAll(".c-cell")[0].querySelector(".bar").style.getPropertyValue("--fill") === "67%",
   [...document.querySelectorAll("#g1 .g-row.proj")][0].querySelectorAll(".c-cell")[0].querySelector(".bar").style.getPropertyValue("--fill"));
 check("легенда про зелёную заливку", document.querySelector("#g1 .legend-done")?.textContent.includes(t("gantt.legendDone")));
+// вехи срока исполнения
+const flags = [...document.querySelectorAll("#g1 .due-flag")];
+const flagOf = (key) => [...document.querySelectorAll("#g1 .g-row.group")].find((r) => r.querySelector(".glabel").textContent.startsWith(key))?.querySelector(".due-flag");
+check("вехи есть у трёх эпиков со сроком, у EP-4/EP-5 без срока — нет", flags.length === 3 && !flagOf("EP-4") && !flagOf("EP-5"), String(flags.length));
+const df1 = flagOf("EP-1");
+check("EP-1: срок через 5 дн. — в секции 0, доля (5+3)/14 = 57%", df1 && df1.parentElement === [...document.querySelectorAll("#g1 .g-row.group")][0].children[1] && df1.style.getPropertyValue("--x") === "57%",
+  `${df1?.style.getPropertyValue("--x")}`);
+check("EP-1: красная (≤14 дней), подпись с датой", df1?.classList.contains("due-red") && /◆ \d{2}\.\d{2}/.test(df1.textContent) && df1.title.includes("5"), `${df1?.className} / ${df1?.textContent} / ${df1?.title}`);
+check("EP-1: линия проходит и через строки проектов", [...document.querySelectorAll("#g1 .g-row.group")][0].nextElementSibling.querySelector(".due-line.due-red") != null);
+const df3 = flagOf("EP-3");
+check("EP-3: срок за графиком — стрелка у правого края последней датированной секции", df3?.classList.contains("edge-right") && df3.parentElement === [...document.querySelectorAll("#g1 .g-row.group")].find((r) => r.querySelector(".glabel").textContent.startsWith("EP-3")).children[2] && df3.textContent.endsWith("▶") && df3.title.includes(t("gantt.dueAfterChart")),
+  `${df3?.className} / ${df3?.textContent}`);
+check("EP-3: серая (далеко)", df3?.classList.contains("due-gray"));
+const df2 = flagOf("EP-2");
+check("EP-2: готов и просрочен — зелёная у левого края первой секции", df2?.classList.contains("due-green") && df2.classList.contains("edge-left") && df2.textContent.startsWith("◀") && df2.title.includes(t("gantt.dueDone", { date: "" }).split("·").pop().trim()),
+  `${df2?.className} / ${df2?.title}`);
+check("на «По людям» вех нет", document.querySelectorAll("#g2 .due-flag, #g2 .due-line").length === 0);
+check("легенда вехи на вкладке по эпикам", document.querySelector("#g1 .swatch-due") != null);
 check("полосы групп — жёлтые (.bar-group), у проектов их нет",
   document.querySelectorAll("#g1 .g-row.group .bar").length > 0 &&
   [...document.querySelectorAll("#g1 .g-row.group .bar")].every((b) => b.classList.contains("bar-group")) &&

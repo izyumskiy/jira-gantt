@@ -358,7 +358,44 @@ table.gantt { border-collapse: separate; border-spacing: 0; }
 .badge.b-left { background: #fff0b3; color: #172b4d; font-weight: 700; }
 .badge.b-other { background: #dfe1e6; color: #42526e; }
 
-.c-cell { padding: 3px 4px; width: var(--col-w); min-width: var(--col-w); vertical-align: middle; }
+.c-cell { padding: 3px 4px; width: var(--col-w); min-width: var(--col-w); vertical-align: middle; position: relative; }
+
+/* Веха срока исполнения эпика: пунктирная линия через строки эпика и флажок с датой на строке эпика. */
+.due-line {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: var(--x, 0%);
+  width: 0;
+  border-left: 2px dashed #8993a4;
+  pointer-events: none;
+  z-index: 1;
+}
+.due-line.edge-left { left: 2px; }
+.due-line.edge-right { left: auto; right: 2px; border-left: none; border-right: 2px dashed #8993a4; }
+.due-flag {
+  position: absolute;
+  top: 0;
+  left: var(--x, 0%);
+  transform: translateX(-50%);
+  z-index: 2;
+  padding: 0 5px;
+  border-radius: 0 0 4px 4px;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 14px;
+  color: #fff;
+  background: #8993a4;
+  white-space: nowrap;
+  cursor: default;
+}
+.due-flag.edge-left { left: 2px; transform: none; border-radius: 0 4px 4px 0; }
+.due-flag.edge-right { left: auto; right: 2px; transform: none; border-radius: 4px 0 0 4px; }
+.due-red.due-line { border-color: #de350b; }
+.due-red.due-flag { background: #de350b; }
+.due-green.due-line { border-color: #36b37e; }
+.due-green.due-flag { background: #36b37e; }
+.swatch-due { border-left: 2px dashed #de350b; width: 0; height: 12px; border-radius: 0; opacity: 1; }
 .c-empty { background: transparent; }
 
 /* Цвета команд: --tc задаёт и точку в легенде, и заливку отрезка. */

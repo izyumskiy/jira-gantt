@@ -243,6 +243,7 @@ export function buildModel({ issues, others = [], sprints, epics, boards = [], m
         label: groupLabelOf(issue),
         status: epic ? { name: epic.statusName || "", category: epic.statusCategory || "", id: cls.id } : null,
         statusRank: cls ? cls.rank : 0,
+        dueDate: epic ? epic.dueDate || "" : "", // срок исполнения эпика — веха на диаграмме
         login: mode === "assignee" ? issue.assigneeLogin || "" : "",
         team: null,
         teamVotes: new Map(),
