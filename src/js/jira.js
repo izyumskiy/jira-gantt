@@ -130,6 +130,19 @@ export function addComment(issueKey, text) {
   return request(`/rest/api/2/issue/${encodeURIComponent(issueKey)}/comment`, { method: "POST", body: { body: text } });
 }
 
+// Поиск пользователей для упоминаний (@): user/picker отдаёт логин и имя; запасной путь — user/search.
+export async function userSearch(query) {
+  const q = encodeURIComponent(query);
+  try {
+    const res = await request(`/rest/api/2/user/picker?query=${q}&maxResults=10`);
+    if (res && Array.isArray(res.users)) return res.users.map((u) => ({ name: u.name, displayName: u.displayName || u.name }));
+  } catch {
+    // ниже запасной вариант
+  }
+  const list = await request(`/rest/api/2/user/search?username=${q}&maxResults=10`);
+  return (Array.isArray(list) ? list : []).map((u) => ({ name: u.name || u.key, displayName: u.displayName || u.name }));
+}
+
 // Один спринт по id — так обновляем даты, даже если ни одна задача не менялась.
 export function sprint(sprintId) {
   return request(`/rest/agile/1.0/sprint/${encodeURIComponent(sprintId)}`);

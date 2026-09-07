@@ -574,7 +574,26 @@ await new Promise((r) => setTimeout(r, 50));
 check("сохранение ушло в Jira с ключом эпика и текстом", added.length === 1 && added[0].key === "EP-1" && added[0].text === "Новый комментарий из теста", JSON.stringify(added));
 check("после сохранения поле очищено, список обновлён, новый — первым", ta.value === "" && cmtTip.querySelector(".cmt-item .cmt-body").textContent === "Новый комментарий из теста" && cmtTip.querySelectorAll(".cmt-item").length === 5);
 check("статус «Сохранено»", cmtTip.querySelector(".cmt-note").textContent === t("cmt.saved"));
+// упоминания через @
+const userQueries = [];
+gantt.commentsApi.users = async (q) => { userQueries.push(q); return [{ name: "ielkin", displayName: "Иван Ёлкин" }, { name: "ivanov", displayName: "Иван Иванов" }].filter((u) => u.displayName.toLowerCase().includes(q.toLowerCase())); };
+ta.value = "Посмотри, @Ив"; ta.setSelectionRange(ta.value.length, ta.value.length); ta.dispatchEvent(new Event("input"));
+await new Promise((r) => setTimeout(r, 350));
+const menu = cmtTip.querySelector(".mention-list");
+check("по @ появился список пользователей из Jira", !menu.hidden && userQueries.at(-1) === "Ив" && menu.querySelectorAll(".mention-item").length === 2, `${menu.hidden} / ${userQueries.at(-1)} / ${menu.querySelectorAll(".mention-item").length}`);
+ta.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true, cancelable: true }));
+check("стрелка вниз переключает выбор", menu.querySelectorAll(".mention-item")[1].classList.contains("active"));
+ta.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+check("Enter вставляет разметку упоминания [~логин]", ta.value === "Посмотри, [~ivanov] " && menu.hidden, JSON.stringify(ta.value));
+ta.value = "письмо на mail@site.ru"; ta.setSelectionRange(ta.value.length, ta.value.length); ta.dispatchEvent(new Event("input"));
+await new Promise((r) => setTimeout(r, 350));
+check("@ внутри слова (e-mail) список не открывает", menu.hidden);
+check("в списке комментариев [~логин] показывается как @логин", (() => { fakeComments.push({ id: "m", body: "Спасибо, [~ielkin]!", author: { displayName: "Me" }, created: new Date(Date.now() + 1000).toISOString() }); return true; })());
 cmtTip.querySelector(".tip-close").click();
+cmtBtn.click();
+await new Promise((r) => setTimeout(r, 30));
+check("…и он первый в списке", document.querySelector(".tooltip.tip-comments .cmt-item .cmt-body")?.textContent === "Спасибо, @ielkin!", document.querySelector(".tooltip.tip-comments .cmt-item .cmt-body")?.textContent);
+document.querySelector(".tooltip.tip-comments .tip-close").click();
 gantt.render(g3, m3, { mode: "epicPeople", onChildClick: () => {} });
 check("пиктограмма 💬 есть и на «По эпикам и людям»", g3.querySelectorAll(".g-row.group .cmt-btn").length === m3.groups.length);
 

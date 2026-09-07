@@ -335,6 +335,12 @@ table.gantt { border-collapse: separate; border-spacing: 0; }
 .cmt-author { font-weight: 600; }
 .cmt-body { white-space: pre-wrap; word-break: break-word; font-size: 12px; }
 .cmt-error { color: #bf2600; }
+/* Список пользователей для упоминания через @. */
+.mention-list { grid-column: 1 / -1; border: 1px solid var(--line); border-radius: 4px; background: var(--panel); max-height: 180px; overflow-y: auto; }
+.mention-item { display: flex; justify-content: space-between; gap: 10px; padding: 4px 8px; cursor: pointer; font-size: 12px; }
+.mention-item.active, .mention-item:hover { background: var(--accent-soft); }
+.mention-name { font-weight: 600; }
+.mention-empty { padding: 4px 8px; font-size: 12px; }
 .cmp-btn:hover { color: var(--accent); }
 .tooltip.tip-compare { min-width: 420px; max-width: 640px; }
 .cmp-table .tp-name { white-space: nowrap; vertical-align: top; padding-right: 10px; }

@@ -5,12 +5,13 @@
 import { t } from "./i18n.js";
 import { fmtEstimate, NO_DATES_ID, BACKLOG_ID } from "./agg.js";
 import * as settings from "./settings.js";
-import { cfId, escapeJql, comments as jiraComments, addComment as jiraAddComment } from "./jira.js";
+import { cfId, escapeJql, comments as jiraComments, addComment as jiraAddComment, userSearch as jiraUserSearch } from "./jira.js";
 
 // Комментарии эпика — через это, чтобы самопроверка могла подменить Jira заглушкой.
 export const commentsApi = {
   list: (key) => jiraComments(key),
-  add: (key, text) => jiraAddComment(key, text)
+  add: (key, text) => jiraAddComment(key, text),
+  users: (query) => jiraUserSearch(query)
 };
 const RECENT_COMMENTS = 5;
 import { normName } from "./team.js";
@@ -509,10 +510,97 @@ function showComments(anchor, key, label) {
   const save = el("button", "primary cmt-save", t("cmt.save"));
   save.type = "button";
   save.disabled = true;
-  const note = el("span", "muted small cmt-note");
-  ta.oninput = () => (save.disabled = !ta.value.trim());
+  const note = el("span", "muted small cmt-note", t("cmt.mentionHint"));
+  ta.oninput = () => {
+    save.disabled = !ta.value.trim();
+    mentionsOnInput();
+  };
   form.append(ta, save, note);
   tip.append(form);
+
+  // Упоминания через @: список пользователей Jira под полем, вставка разметки [~логин].
+  const menu = el("div", "mention-list");
+  menu.hidden = true;
+  form.append(menu);
+  let mentionItems = [];
+  let mentionIdx = 0;
+  let mentionTimer = null;
+  let mentionSeq = 0;
+  const mentionQuery = () => {
+    const before = ta.value.slice(0, ta.selectionStart);
+    const m = before.match(/(^|\s)@([^\s@]*)$/);
+    return m ? { query: m[2], start: before.length - m[2].length - 1 } : null;
+  };
+  const closeMentions = () => {
+    menu.hidden = true;
+    menu.textContent = "";
+    mentionItems = [];
+  };
+  const renderMentions = () => {
+    menu.textContent = "";
+    if (!mentionItems.length) {
+      menu.append(el("div", "mention-empty muted", t("cmt.mentionNone")));
+      return;
+    }
+    mentionItems.forEach((u, i) => {
+      const item = el("div", "mention-item" + (i === mentionIdx ? " active" : ""));
+      item.append(el("span", "mention-name", u.displayName), el("span", "mention-login muted", `@${u.name}`));
+      item.onmousedown = (e) => {
+        e.preventDefault(); // не терять фокус textarea
+        pickMention(u);
+      };
+      menu.append(item);
+    });
+  };
+  const pickMention = (u) => {
+    const q = mentionQuery();
+    if (!q) return;
+    const after = ta.value.slice(ta.selectionStart);
+    const inserted = `[~${u.name}] `;
+    ta.value = ta.value.slice(0, q.start) + inserted + after;
+    const pos = q.start + inserted.length;
+    ta.setSelectionRange(pos, pos);
+    save.disabled = !ta.value.trim();
+    closeMentions();
+    ta.focus();
+  };
+  function mentionsOnInput() {
+    const q = mentionQuery();
+    clearTimeout(mentionTimer);
+    if (!q) return closeMentions();
+    menu.hidden = false;
+    menu.textContent = "";
+    menu.append(el("div", "mention-empty muted", t("cmt.mentionSearching")));
+    const seq = ++mentionSeq;
+    mentionTimer = setTimeout(async () => {
+      try {
+        const users = await commentsApi.users(q.query);
+        if (seq !== mentionSeq) return; // уже набрали дальше
+        mentionItems = users.slice(0, 10);
+        mentionIdx = 0;
+        renderMentions();
+      } catch (e) {
+        if (seq !== mentionSeq) return;
+        menu.textContent = "";
+        menu.append(el("div", "cmt-error", t("cmt.error", { msg: e && e.message ? e.message : e })));
+      }
+    }, 250);
+  }
+  ta.onkeydown = (e) => {
+    if (menu.hidden) return;
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      if (!mentionItems.length) return;
+      mentionIdx = (mentionIdx + (e.key === "ArrowDown" ? 1 : mentionItems.length - 1)) % mentionItems.length;
+      renderMentions();
+    } else if ((e.key === "Enter" || e.key === "Tab") && mentionItems.length) {
+      e.preventDefault();
+      pickMention(mentionItems[mentionIdx]);
+    } else if (e.key === "Escape") {
+      e.stopPropagation();
+      closeMentions();
+    }
+  };
 
   // Последние комментарии — в прокручиваемой зоне.
   const listTitle = el("div", "tip-sub", t("cmt.recent", { n: RECENT_COMMENTS }));
@@ -532,7 +620,7 @@ function showComments(anchor, key, label) {
       const item = el("div", "cmt-item");
       const meta = el("div", "cmt-meta");
       meta.append(el("span", "cmt-author", c.author?.displayName || c.author?.name || t("dash")), el("span", "muted", fmtDateTime(c.created)));
-      item.append(meta, el("div", "cmt-body", c.body || ""));
+      item.append(meta, el("div", "cmt-body", String(c.body || "").replace(/\[~([^\]]+)\]/g, "@$1")));
       list.append(item);
     }
   };
