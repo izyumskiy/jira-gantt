@@ -53,6 +53,7 @@ function showTab(name) {
 // Перерисовать активную вкладку с диаграммой (после синка, смены языка, фильтров).
 function redrawActive() {
   const active = document.querySelector(".tab.active")?.dataset.tab;
+  if (active === "search") renderStored().then(renderResults).catch(fail);
   if (active === "epics") drawGantt("epic", $("#page-epics"));
   if (active === "people") drawGantt("assignee", $("#page-people"));
   if (active === "epicPeople") drawGantt("epicPeople", $("#page-epicPeople"));
@@ -463,6 +464,8 @@ async function doSync({ full = false } = {}) {
   try {
     const result = await sync.sync({ full, onProgress: (m) => status(m) });
     await refreshHeader();
+    // Статусы, даты, метки эпиков обновились в базе — перерисовать список «Сохранённые эпики».
+    await renderStored();
     // Сводка по спринтам — чтобы было видно, почему у спринта нет дат, а не гадать.
     const st = result.sprintStats;
     const lines = [];
