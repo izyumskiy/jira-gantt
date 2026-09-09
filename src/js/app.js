@@ -430,6 +430,28 @@ function showEpicInfo(anchor, epic, spent, pct) {
   }
   if (pct && pct.count) line(t("search.col.pct"), `${Math.round(pctShare(pct) * 100)}% · ${pctTitle(pct)}`);
   box.append(rows);
+
+  // Задачи эпика по проектам Jira — таблицей, самые крупные сверху.
+  if (pct && pct.projects && pct.projects.size) {
+    const sub = document.createElement("div");
+    sub.className = "tip-sub";
+    sub.textContent = `${t("search.byProject")} · ${t("search.total", { n: pct.count })}`;
+    box.append(sub);
+    const tbl = document.createElement("table");
+    tbl.className = "tip-table";
+    for (const pr of [...pct.projects.values()].sort((a, b) => b.count - a.count || a.name.localeCompare(b.name))) {
+      const tr = document.createElement("tr");
+      const name = document.createElement("td");
+      name.className = "tp-name";
+      name.textContent = pr.name === pr.key ? pr.name : `${pr.name} (${pr.key})`;
+      const n = document.createElement("td");
+      n.className = "tp-num";
+      n.textContent = String(pr.count);
+      tr.append(name, n);
+      tbl.append(tr);
+    }
+    box.append(tbl);
+  }
   document.body.append(box);
   epicInfoBox = box;
   const r = anchor.getBoundingClientRect();
@@ -567,7 +589,7 @@ async function renderStored() {
   // Списано: на сам эпик + на его задачи из выгрузки.
   const spentByEpic = new Map(stored.map((e) => [e.key, { epic: e.timeSpent || 0, issues: 0, withLogs: 0, total: 0 }]));
   // Доля выполнения: оценки сделанных задач (Готово / On Prod / Cancel) относительно всех.
-  const pctByEpic = new Map(stored.map((e) => [e.key, { done: 0, total: 0, doneCount: 0, count: 0 }]));
+  const pctByEpic = new Map(stored.map((e) => [e.key, { done: 0, total: 0, doneCount: 0, count: 0, projects: new Map() }]));
   for (const i of await db.all(db.STORES.issues)) {
     const acc = spentByEpic.get(i.epicKey);
     if (!acc) continue;
@@ -580,6 +602,10 @@ async function renderStored() {
     const est = agg.estimateOf(i);
     p.count += 1;
     p.total += est;
+    // Число задач по проектам Jira — для карточки эпика.
+    const pk = i.projectKey || t("dash");
+    if (!p.projects.has(pk)) p.projects.set(pk, { key: pk, name: i.projectName || pk, count: 0 });
+    p.projects.get(pk).count += 1;
     if (agg.isDone(i)) {
       p.doneCount += 1;
       p.done += est;
