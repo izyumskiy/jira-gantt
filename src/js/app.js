@@ -320,7 +320,7 @@ function epicSpent(spent) {
   const cell = document.createElement("span");
   cell.className = "ispent" + (spent && spent.epic + spent.issues ? "" : " iperson-empty");
   cell.textContent = spent ? fmtSpentDays(spent.epic + spent.issues) : t("dash");
-  if (spent) cell.title = t("search.spentFull", { epic: fmtSpentDays(spent.epic), issues: fmtSpentDays(spent.issues) });
+  if (spent) cell.title = t("search.spentFull", { epic: fmtSpentDays(spent.epic), issues: fmtSpentDays(spent.issues), n: spent.withLogs, total: spent.total });
   return cell;
 }
 
@@ -438,10 +438,15 @@ async function renderStored() {
   renderStatusSummary($("#storedSummary"), shown);
   if (stored.length || hasFilter()) box.append(listHead());
   // Списано: на сам эпик + на его задачи из выгрузки.
-  const spentByEpic = new Map(stored.map((e) => [e.key, { epic: e.timeSpent || 0, issues: 0 }]));
+  const spentByEpic = new Map(stored.map((e) => [e.key, { epic: e.timeSpent || 0, issues: 0, withLogs: 0, total: 0 }]));
   for (const i of await db.all(db.STORES.issues)) {
     const acc = spentByEpic.get(i.epicKey);
-    if (acc) acc.issues += i.timeSpent || 0;
+    if (!acc) continue;
+    acc.total += 1;
+    if (i.timeSpent) {
+      acc.issues += i.timeSpent;
+      acc.withLogs += 1;
+    }
   }
   sortEpics(shown).forEach((e, i) => box.append(epicRow(e, state.selected.has(e.key), i, spentByEpic.get(e.key))));
   if (!stored.length) {

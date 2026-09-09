@@ -418,10 +418,18 @@ function jqlDate(ms) {
   return `${d.getFullYear()}/${p(d.getMonth() + 1)}/${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
+// Версия набора полей задачи в базе. Растёт, когда mapIssue начинает сохранять новые поля:
+// инкрементальное обновление их у старых задач не добавит, поэтому один раз делаем полную выгрузку.
+const ISSUE_SCHEMA = 2;
+
 // full = true — скачиваем задачи целиком, иначе только изменённые с прошлой синхронизации.
 export async function sync({ full = false, onProgress = () => {} } = {}) {
   const fields = await ensureFields();
   if (!fields.epicLink) throw new jira.JiraError(t("err.noEpicField"), 0);
+  if (!full && (await db.metaGet("issueSchema", 0)) < ISSUE_SCHEMA) {
+    full = true;
+    onProgress(t("st.schemaUpgrade"));
+  }
 
   const epics = await db.all(db.STORES.epics);
   if (!epics.length) return { issues: 0, sprints: 0 };
@@ -522,6 +530,7 @@ export async function sync({ full = false, onProgress = () => {} } = {}) {
     await db.putAll(db.STORES.others, others);
   }
   await db.putAll(db.STORES.sprints, [...sprintMap.values()]);
+  await db.metaSet("issueSchema", ISSUE_SCHEMA);
   await settings.save({ lastSync: Date.now() });
   onProgress(t("st.done"));
   return { issues: collected.length, sprints: sprintMap.size, others: others.length, othersError, sprintStats };
