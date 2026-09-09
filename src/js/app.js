@@ -300,14 +300,31 @@ function listHead() {
   head.append(
     cell("inum", "#"), cell("", ""), cell("ikey", t("search.col.key")), cell("isum", t("search.col.name")), dates,
     cell("ilabels", t("search.col.labels")),
-    cell("iperson", t("search.assignee")), cell("iperson", t("search.reporter")), cell("istatus", t("search.col.status"))
+    cell("iperson", t("search.assignee")), cell("iperson", t("search.reporter")),
+    cell("ispent", t("search.col.spent")), cell("istatus", t("search.col.status"))
   );
   // Активные фильтры и «Снять фильтры» — второй строкой шапки во всю ширину, чтобы не зависеть от ширины колонок.
   if (hasFilter()) head.append(filterControls());
   return head;
 }
 
-function epicRow(epic, checked, index) {
+// Списанное время в днях (через настройку «часов в дне»); 0 → прочерк.
+function fmtSpentDays(seconds) {
+  if (!seconds) return t("dash");
+  const hpd = Number(settings.get().hoursPerDay) || 8;
+  return `${Math.round((seconds / 3600 / hpd) * 10) / 10}${t("unit.d")}`;
+}
+
+// Ячейка «Списано»: сам эпик + его задачи (spent = { epic, issues } в секундах); у ненайденных — прочерк.
+function epicSpent(spent) {
+  const cell = document.createElement("span");
+  cell.className = "ispent" + (spent && spent.epic + spent.issues ? "" : " iperson-empty");
+  cell.textContent = spent ? fmtSpentDays(spent.epic + spent.issues) : t("dash");
+  if (spent) cell.title = t("search.spentFull", { epic: fmtSpentDays(spent.epic), issues: fmtSpentDays(spent.issues) });
+  return cell;
+}
+
+function epicRow(epic, checked, index, spent = null) {
   const row = document.createElement("label");
   row.className = "item" + (isDueSoon(epic) ? " due-soon" : "");
   row.dataset.key = epic.key;
@@ -349,6 +366,7 @@ function epicRow(epic, checked, index) {
     epicLabels(epic),
     epicPerson("search.assignee", epic.assigneeName, true),
     epicPerson("search.reporter", epic.reporterName, false),
+    epicSpent(spent),
     status
   );
   return row;
@@ -419,7 +437,13 @@ async function renderStored() {
   const shown = applyFilter(stored);
   renderStatusSummary($("#storedSummary"), shown);
   if (stored.length || hasFilter()) box.append(listHead());
-  sortEpics(shown).forEach((e, i) => box.append(epicRow(e, state.selected.has(e.key), i)));
+  // Списано: на сам эпик + на его задачи из выгрузки.
+  const spentByEpic = new Map(stored.map((e) => [e.key, { epic: e.timeSpent || 0, issues: 0 }]));
+  for (const i of await db.all(db.STORES.issues)) {
+    const acc = spentByEpic.get(i.epicKey);
+    if (acc) acc.issues += i.timeSpent || 0;
+  }
+  sortEpics(shown).forEach((e, i) => box.append(epicRow(e, state.selected.has(e.key), i, spentByEpic.get(e.key))));
   if (!stored.length) {
     const p = document.createElement("div");
     p.className = "empty";

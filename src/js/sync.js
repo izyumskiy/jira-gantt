@@ -54,7 +54,7 @@ async function ensureFields() {
 function epicFieldList() {
   const f = settings.get().fields;
   return [
-    "summary", "project", "status", "updated", "created", "duedate", "labels",
+    "summary", "project", "status", "updated", "created", "duedate", "labels", "timespent",
     f.epicAssignee || "assignee", f.epicReporter || "reporter",
     f.plannedStart, f.plannedEnd
   ].filter(Boolean);
@@ -148,6 +148,8 @@ function mapIssue(issue, fields, epicKeyFallback) {
     statusCategory: f.status?.statusCategory?.key || "",
     typeName: f.issuetype?.name || "",
     updated: f.updated || "",
+    // Списания: с подзадачами (aggregatetimespent), если Jira отдала, иначе по самой задаче.
+    timeSpent: Number(f.aggregatetimespent ?? f.timespent) || 0,
     originalEstimate: f.timeoriginalestimate ?? null,
     remainingEstimate: f.timeestimate ?? null,
     storyPoints: fields.storyPoints ? f[fields.storyPoints] ?? null : null,
@@ -191,6 +193,7 @@ function mapEpic(i) {
     assigneeName: userOf(i.fields[f.epicAssignee || "assignee"]).name,
     reporterName: userOf(i.fields[f.epicReporter || "reporter"]).name,
     labels: Array.isArray(i.fields.labels) ? i.fields.labels.filter(Boolean) : [],
+    timeSpent: Number(i.fields.timespent) || 0, // списания на сам эпик, секунды
     plannedStart: f.plannedStart ? dateOf(i.fields[f.plannedStart]) : "",
     plannedEnd: f.plannedEnd ? dateOf(i.fields[f.plannedEnd]) : ""
   };
@@ -433,6 +436,8 @@ export async function sync({ full = false, onProgress = () => {} } = {}) {
     "updated",
     "timeoriginalestimate",
     "timeestimate",
+    "timespent",
+    "aggregatetimespent",
     fields.epicLink,
     fields.sprint
   ];
