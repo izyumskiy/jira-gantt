@@ -114,7 +114,7 @@ main { padding: 14px 16px 40px; }
 .list { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; overflow: clip; }
 .item {
   display: grid;
-  grid-template-columns: 34px 22px 90px 1fr 320px 220px 140px 140px 70px 130px;
+  grid-template-columns: 34px 22px 24px 90px 1fr 160px 220px 140px 140px 70px 76px 130px;
   align-items: center;
   gap: 8px;
   padding: 6px 10px;
@@ -125,7 +125,16 @@ main { padding: 14px 16px 40px; }
 .item:hover { background: #f7f8fa; }
 .inum { color: var(--muted); text-align: right; }
 .istatus { overflow: hidden; white-space: nowrap; }
-.idates { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; white-space: nowrap; font-size: 12px; }
+.idates { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; white-space: nowrap; font-size: 12px; }
+.iplus { display: flex; align-items: center; }
+.iplus-btn { width: 18px; height: 18px; padding: 0; border: 1px solid var(--line); border-radius: 4px; background: #fff; color: var(--accent); font-weight: 700; line-height: 1; cursor: pointer; }
+.iplus-btn:hover { border-color: var(--accent); background: var(--accent-soft); }
+.ipct { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.ipct-bar { flex: none; width: 34px; height: 8px; border-radius: 4px; background: #ebecf0; position: relative; overflow: hidden; }
+.ipct-bar::before { content: ""; position: absolute; inset: 0 auto 0 0; width: var(--pct, 0%); background: #36b37e; }
+.ipct-num { font-variant-numeric: tabular-nums; font-weight: 600; font-size: 12px; }
+.tooltip.epic-info { min-width: 420px; max-width: 620px; }
+.tooltip.epic-info .tip-v { text-align: right; max-width: 380px; white-space: normal; }
 .idate { font-variant-numeric: tabular-nums; }
 .idate-empty { color: var(--muted); }
 .iperson { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; min-width: 0; }

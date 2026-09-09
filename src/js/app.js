@@ -111,11 +111,13 @@ function dueHint(n) {
   return n > 0 ? t("search.dueSoon", { n }) : t("search.overdue", { n: -n });
 }
 
-// Четыре даты эпика: создан, плановое начало, плановое завершение, срок исполнения. Подписи — в шапке списка.
+// В строке — только плановое завершение и срок; создан и плановое начало — в карточке по «+».
+const ROW_DATE_COLS = DATE_COLS.filter(([key]) => key === "search.plannedEnd" || key === "search.due");
+
 function epicDates(epic) {
   const box = document.createElement("span");
   box.className = "idates";
-  for (const [key, full, get] of DATE_COLS) {
+  for (const [key, full, get] of ROW_DATE_COLS) {
     const value = get(epic);
     const item = document.createElement("span");
     item.className = "idate" + (value ? "" : " idate-empty"); // не «empty»: это глобальная плашка «Нет данных»
@@ -292,16 +294,16 @@ function listHead() {
   };
   const dates = document.createElement("span");
   dates.className = "idates";
-  for (const [label, full] of DATE_COLS) {
+  for (const [label, full] of ROW_DATE_COLS) {
     const c = cell("idate", t(label));
     c.title = t(full);
     dates.append(c);
   }
   head.append(
-    cell("inum", "#"), cell("", ""), cell("ikey", t("search.col.key")), cell("isum", t("search.col.name")), dates,
+    cell("inum", "#"), cell("", ""), cell("iplus", ""), cell("ikey", t("search.col.key")), cell("isum", t("search.col.name")), dates,
     cell("ilabels", t("search.col.labels")),
     cell("iperson", t("search.assignee")), cell("iperson", t("search.reporter")),
-    cell("ispent", t("search.col.spent")), cell("istatus", t("search.col.status"))
+    cell("ispent", t("search.col.spent")), cell("ipct", t("search.col.pct")), cell("istatus", t("search.col.status"))
   );
   // Активные фильтры и «Снять фильтры» — второй строкой шапки во всю ширину, чтобы не зависеть от ширины колонок.
   if (hasFilter()) head.append(filterControls());
@@ -324,7 +326,118 @@ function epicSpent(spent) {
   return cell;
 }
 
-function epicRow(epic, checked, index, spent = null) {
+// Доля выполнения эпика по оценкам: сделано (Готово / On Prod / Cancel) относительно всех задач.
+// Без оценок — по количеству. pct = { done, total, doneCount, count }.
+function pctShare(pct) {
+  return pct.total > 0 ? pct.done / pct.total : pct.doneCount / pct.count;
+}
+function pctTitle(pct) {
+  return pct.total > 0
+    ? t("search.pctFull", { done: fmtSpentDays(pct.done), total: fmtSpentDays(pct.total), n: pct.doneCount, m: pct.count })
+    : `${t("search.pctNone")} · ${pct.doneCount}/${pct.count}`;
+}
+function epicPct(pct) {
+  const cell = document.createElement("span");
+  cell.className = "ipct" + (pct && pct.count ? "" : " iperson-empty");
+  if (!pct || !pct.count) {
+    cell.textContent = t("dash");
+    return cell;
+  }
+  const value = Math.round(pctShare(pct) * 100);
+  const bar = document.createElement("span");
+  bar.className = "ipct-bar";
+  bar.style.setProperty("--pct", `${value}%`);
+  const num = document.createElement("span");
+  num.className = "ipct-num";
+  num.textContent = `${value}%`;
+  cell.append(bar, num);
+  cell.title = pctTitle(pct);
+  return cell;
+}
+
+// Карточка «вся информация по эпику» — по «+» в строке.
+let epicInfoBox = null;
+function closeEpicInfo() {
+  if (epicInfoBox) {
+    epicInfoBox.remove();
+    epicInfoBox = null;
+  }
+}
+document.addEventListener("click", (e) => {
+  if (epicInfoBox && !epicInfoBox.contains(e.target) && !e.target.closest(".iplus-btn")) closeEpicInfo();
+});
+document.addEventListener("keydown", (e) => e.key === "Escape" && closeEpicInfo());
+
+function showEpicInfo(anchor, epic, spent, pct) {
+  closeEpicInfo();
+  const box = document.createElement("div");
+  box.className = "tooltip epic-info";
+  const head = document.createElement("div");
+  head.className = "tip-head";
+  const strong = document.createElement("strong");
+  const base = (settings.get().baseUrl || "").replace(/\/+$/, "");
+  if (base) {
+    const a = document.createElement("a");
+    a.href = `${base}/browse/${encodeURIComponent(epic.key)}`;
+    a.target = "_blank";
+    a.rel = "noopener noreferrer";
+    a.className = "tip-link";
+    a.textContent = t("search.infoTitle", { key: epic.key });
+    strong.append(a);
+  } else strong.textContent = t("search.infoTitle", { key: epic.key });
+  const sub = document.createElement("div");
+  sub.className = "tip-sub-title";
+  sub.textContent = epic.summary || "";
+  strong.append(sub);
+  const close = document.createElement("button");
+  close.className = "tip-close";
+  close.textContent = "×";
+  close.onclick = closeEpicInfo;
+  head.append(strong, close);
+  box.append(head);
+
+  const rows = document.createElement("div");
+  rows.className = "tip-rows";
+  const line = (k, node) => {
+    const r = document.createElement("div");
+    r.className = "tip-row";
+    const kk = document.createElement("span");
+    kk.className = "tip-k";
+    kk.textContent = k;
+    const v = typeof node === "string" ? Object.assign(document.createElement("span"), { className: "tip-v", textContent: node }) : node;
+    r.append(kk, v);
+    rows.append(r);
+  };
+  const statusNode = document.createElement("span");
+  statusNode.className = "tip-v";
+  if (epic.statusName) {
+    const lz = document.createElement("span");
+    lz.className = `lozenge lz-s-${classify(epic.statusName, epic.statusCategory).id}`;
+    lz.textContent = epic.statusName;
+    statusNode.append(lz);
+  } else statusNode.textContent = t("dash");
+  line(t("search.col.status"), statusNode);
+  for (const [, full, get] of DATE_COLS) {
+    let text = fmtDay(get(epic));
+    if (full === "search.dueFull" && isDueSoon(epic)) text += ` · ${dueHint(daysUntil(epic.dueDate))}`;
+    line(t(full), text);
+  }
+  line(t("search.assignee"), epic.assigneeName || t("dash"));
+  line(t("search.reporter"), epic.reporterName || t("dash"));
+  line(t("search.col.labels"), (epic.labels || []).join(", ") || t("dash"));
+  if (spent) {
+    line(t("search.col.spent"), `${fmtSpentDays(spent.epic + spent.issues)} · ${t("search.spentFull", { epic: fmtSpentDays(spent.epic), issues: fmtSpentDays(spent.issues), n: spent.withLogs, total: spent.total })}`);
+  }
+  if (pct && pct.count) line(t("search.col.pct"), `${Math.round(pctShare(pct) * 100)}% · ${pctTitle(pct)}`);
+  box.append(rows);
+  document.body.append(box);
+  epicInfoBox = box;
+  const r = anchor.getBoundingClientRect();
+  box.style.top = `${Math.max(8, Math.min(window.innerHeight - box.offsetHeight - 12, r.bottom + 6))}px`;
+  box.style.left = `${Math.max(8, Math.min(window.innerWidth - box.offsetWidth - 12, r.left))}px`;
+}
+
+function epicRow(epic, checked, index, spent = null, pct = null) {
   const row = document.createElement("label");
   row.className = "item" + (isDueSoon(epic) ? " due-soon" : "");
   row.dataset.key = epic.key;
@@ -361,12 +474,26 @@ function epicRow(epic, checked, index, spent = null) {
     lz.title = epic.statusName;
     status.append(lz);
   }
+  const plus = document.createElement("button");
+  plus.type = "button";
+  plus.className = "iplus-btn";
+  plus.textContent = "+";
+  plus.title = t("search.info");
+  plus.onclick = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    showEpicInfo(plus, epic, spent, pct);
+  };
+  const plusCell = document.createElement("span");
+  plusCell.className = "iplus";
+  plusCell.append(plus);
   row.append(
-    num, cb, key, sum, epicDates(epic),
+    num, cb, plusCell, key, sum, epicDates(epic),
     epicLabels(epic),
     epicPerson("search.assignee", epic.assigneeName, true),
     epicPerson("search.reporter", epic.reporterName, false),
     epicSpent(spent),
+    epicPct(pct),
     status
   );
   return row;
@@ -439,6 +566,8 @@ async function renderStored() {
   if (stored.length || hasFilter()) box.append(listHead());
   // Списано: на сам эпик + на его задачи из выгрузки.
   const spentByEpic = new Map(stored.map((e) => [e.key, { epic: e.timeSpent || 0, issues: 0, withLogs: 0, total: 0 }]));
+  // Доля выполнения: оценки сделанных задач (Готово / On Prod / Cancel) относительно всех.
+  const pctByEpic = new Map(stored.map((e) => [e.key, { done: 0, total: 0, doneCount: 0, count: 0 }]));
   for (const i of await db.all(db.STORES.issues)) {
     const acc = spentByEpic.get(i.epicKey);
     if (!acc) continue;
@@ -447,8 +576,16 @@ async function renderStored() {
       acc.issues += i.timeSpent;
       acc.withLogs += 1;
     }
+    const p = pctByEpic.get(i.epicKey);
+    const est = agg.estimateOf(i);
+    p.count += 1;
+    p.total += est;
+    if (agg.isDone(i)) {
+      p.doneCount += 1;
+      p.done += est;
+    }
   }
-  sortEpics(shown).forEach((e, i) => box.append(epicRow(e, state.selected.has(e.key), i, spentByEpic.get(e.key))));
+  sortEpics(shown).forEach((e, i) => box.append(epicRow(e, state.selected.has(e.key), i, spentByEpic.get(e.key), pctByEpic.get(e.key))));
   if (!stored.length) {
     const p = document.createElement("div");
     p.className = "empty";
