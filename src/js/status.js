@@ -85,6 +85,14 @@ export function classify(statusName, statusCategory) {
 
 // Название статуса важнее категории: «On Prod» в Jira нередко остаётся жёлтым,
 // но по процессу это уже завершённая задача.
+// Отменённая задача: по названию статуса (cancel/cancelled/canceled/отмен…). Считается готовой,
+// но её оценка в суммы дней не входит — работа не делалась.
+const CANCEL_NAMES = ["cancel", "cancelled", "canceled", "отмен"];
+export function isCancelledStatus(statusName) {
+  const n = norm(statusName);
+  return !!n && CANCEL_NAMES.some((a) => n === a || contains(n, a));
+}
+
 export function isDoneStatus(statusName, statusCategory) {
   if (String(statusName || "").trim()) return classify(statusName, "").id === "done" || statusCategory === "done";
   return statusCategory === "done";

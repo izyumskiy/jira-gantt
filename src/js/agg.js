@@ -6,11 +6,13 @@
 // Команда спринта = доска, на которой он заведён (другого понятия «команда» в Jira Server нет).
 import { t } from "./i18n.js";
 import * as settings from "./settings.js";
-import { classify, isDoneStatus } from "./status.js";
+import { classify, isDoneStatus, isCancelledStatus } from "./status.js";
 
 // ---------- оценки ----------
 
 export function estimateOf(issue) {
+  // Отменённые задачи в суммах дней не участвуют (в количестве — участвуют).
+  if (isCancelledStatus(issue.statusName)) return 0;
   const f = settings.get().estimateField;
   if (f === "points") return Number(issue.storyPoints) || 0;
   if (f === "remaining") return Number(issue.remainingEstimate) || 0;

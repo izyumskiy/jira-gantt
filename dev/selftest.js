@@ -177,6 +177,20 @@ check("isDone по имени статуса без категории", agg.isD
 check("легенда: две команды", m1.teams.map((x) => x.name).join(",") === "Alpha,Beta", m1.teams.map((x) => x.name).join(","));
 check("команда спринта по доске", m1.teamOfSprint(5)?.name === "Beta" && m1.teamOfSprint(2)?.name === "Alpha");
 
+// 3a. отменённые задачи: в количестве есть, в сумме дней нет
+{
+  const mc = agg.buildModel({
+    issues: [mk("K-1", "EP-1", "AAA", "Ivan", 2, 8, "prog"), { ...mk("K-2", "EP-1", "AAA", "Ivan", 2, 4, "done"), statusName: "Cancelled", statusCategory: "indeterminate" }, { ...mk("K-3", "EP-1", "AAA", "Ivan", null, 6, "new"), statusName: "Отменена" }],
+    sprints, epics, boards, mode: "epic"
+  });
+  const kg = mc.groups[0];
+  check("отмена: количество считает все задачи", kg.count === 3, String(kg.count));
+  check("отмена: сумма дней без отменённых (8ч, а не 18ч)", kg.sum === 8 * H, String(kg.sum / H));
+  check("отмена: в ячейке секции 2 задачи, но 8ч", kg.cells.get("sec:0")?.count === 2 && kg.cells.get("sec:0")?.sum === 8 * H);
+  check("отмена: отменённая без спринта не в бэклоге (она готова)", kg.backlog.count === 0);
+  check("отмена: считается готовой", kg.done === 2 && kg.other === 1, `${kg.done}/${kg.other}`);
+}
+
 // 3b. классификация статусов и порядок эпиков
 const cls = (n, c = "") => classify(n, c).id;
 check("classify «В работе»", cls("В работе") === "progress");
