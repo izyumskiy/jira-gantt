@@ -104,31 +104,49 @@ export const NO_DATES_ID = "sec:nodate";
 
 // Секции от текущего спринта в будущее; хвост секций без задач отбрасываем, а пустые
 // секции между занятыми оставляем — шкала времени должна быть честной.
-export function timeline(sprints, issues) {
+export function timeline(sprints, issues, now = Date.now()) {
   const cur = currentSprint(sprints);
   if (!cur) return [];
-  const step = sprintStepDays(sprints) * DAY;
-  const origin = startOfDay(ts(cur.startDate) || Date.now());
+  const stepDays = sprintStepDays(sprints);
+  const step = stepDays * DAY;
+  const today = startOfDay(now);
+  const dayOf = (v) => (ts(v) != null ? startOfDay(ts(v)) : null);
 
-  const candidates = sprints.filter((s) => {
-    if (s.id === cur.id) return true;
+  // Идущие сегодня спринты (по дням, конец включительно): у команд они сдвинуты друг относительно
+  // друга, поэтому точка отсчёта секций — начало самого раннего из них типовой длины. Так недельный
+  // спринт одной команды не сдвигает шкалу для всех остальных.
+  const running = sprints.filter((s) => {
     if (isClosed(s)) return false;
-    const end = ts(s.endDate);
-    return !end || end >= origin;
+    const a = dayOf(s.startDate);
+    const b = dayOf(s.endDate);
+    return a != null && b != null && a <= today && today <= b;
+  });
+  const typical = running.filter((s) => Math.round((dayOf(s.endDate) - dayOf(s.startDate)) / DAY) === stepDays);
+  const anchors = typical.length ? typical : running;
+  const origin = anchors.length ? Math.min(...anchors.map((s) => dayOf(s.startDate))) : startOfDay(ts(cur.startDate) || now);
+
+  // Кандидаты: незакрытые спринты, не завершившиеся до сегодня (закончившийся вчера, но не закрытый
+  // в Jira, на график не идёт), плюс спринты без дат.
+  const candidates = sprints.filter((s) => {
+    if (isClosed(s)) return false;
+    const b = dayOf(s.endDate);
+    return b == null || b >= today;
   });
 
   const byIndex = new Map();
   let noDates = null;
   for (const s of sortSprints(candidates)) {
-    const a = ts(s.startDate);
-    const b = ts(s.endDate);
-    if (!a) {
+    const a = dayOf(s.startDate);
+    const b = dayOf(s.endDate);
+    if (a == null) {
       noDates = noDates || { id: NO_DATES_ID, index: Infinity, start: null, end: null, sprints: [] };
       noDates.sprints.push(s);
       continue;
     }
-    const mid = b && b > a ? (a + b) / 2 : a;
-    const index = Math.max(0, Math.floor((mid - origin) / step));
+    // Всё, что идёт сегодня, — в «текущем»; остальное — по середине спринта относительно отсчёта.
+    const isRunning = a <= today && (b == null || today <= b);
+    const mid = b != null && b > a ? (a + b) / 2 : a;
+    const index = isRunning ? 0 : Math.max(0, Math.floor((mid - origin) / step));
     if (!byIndex.has(index)) {
       byIndex.set(index, { id: `sec:${index}`, index, start: origin + index * step, end: origin + (index + 1) * step, sprints: [] });
     }

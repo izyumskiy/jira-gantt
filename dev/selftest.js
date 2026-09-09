@@ -135,6 +135,24 @@ check("пустой хвост (Sprint 4) обрезан, спринт без д
   cols.map((c) => c.id).join(",") === "sec:0,sec:1,sec:nodate", cols.map((c) => c.id).join(","));
 check("подпись секции — диапазон дат", /^\d{2}\.\d{2} – \d{2}\.\d{2}$/.test(cols[0].label), cols[0].label);
 
+// 2b. секции при сдвинутых спринтах команд (дефект: два спринта одной команды в «текущем»)
+{
+  const at = (offsetDays, h = 12) => { const x = new Date(); x.setHours(h, 0, 0, 0); x.setDate(x.getDate() + offsetDays); return x.toISOString(); };
+  const teams = [
+    { id: 17, name: "17.2026 WEB", state: "ACTIVE", startDate: at(-13, 10), endDate: at(0, 10), boardId: 1 },   // заканчивается сегодня утром
+    { id: 18, name: "18.2026 WEB", state: "FUTURE", startDate: at(1, 10), endDate: at(14, 10), boardId: 1 },
+    { id: 19, name: "19.2026 WEB", state: "FUTURE", startDate: at(15, 10), endDate: at(28, 10), boardId: 1 },
+    { id: 27, name: "17 BI", state: "ACTIVE", startDate: at(-2), endDate: at(4), boardId: 2 },                 // недельный спринт другой команды
+    { id: 16, name: "16.2026 WEB", state: "ACTIVE", startDate: at(-27), endDate: at(-14), boardId: 1 }         // не закрыт в Jira, но давно кончился
+  ];
+  const tIssues = [mk("W-1", "EP-1", "AAA", "Ivan", 17, 1), mk("W-2", "EP-1", "AAA", "Ivan", 18, 1), mk("W-3", "EP-1", "AAA", "Ivan", 19, 1), mk("W-4", "EP-1", "AAA", "Ivan", 27, 1), mk("W-5", "EP-1", "AAA", "Ivan", 16, 1)];
+  const cols = agg.timeline(teams, tIssues);
+  const secOf = (id) => cols.find((c) => c.sprints.some((s) => s.id === id))?.id || "—";
+  check("сдвиг команд: спринт, идущий сегодня, и недельный чужой — в «текущем»", secOf(17) === "sec:0" && secOf(27) === "sec:0", `${secOf(17)} / ${secOf(27)}`);
+  check("сдвиг команд: следующий спринт команды — в следующей секции, не в «текущем»", secOf(18) === "sec:1" && secOf(19) === "sec:2", `${secOf(18)} / ${secOf(19)}`);
+  check("сдвиг команд: спринт, закончившийся до сегодня, на график не попадает", secOf(16) === "—", secOf(16));
+}
+
 // 3. модель по эпикам
 const m1 = agg.buildModel({ issues, sprints, epics, boards, mode: "epic" });
 const ep1 = m1.groups.find((g) => g.key === "EP-1");
