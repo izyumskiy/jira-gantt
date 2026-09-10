@@ -318,6 +318,52 @@ async function loadOthers({ collected, full, fields, fieldList, epicKeys, onProg
   return out;
 }
 
+// ---------- команды Tempo ----------
+
+// Состав команды: форма ответа у версий Tempo различается, поэтому читаем терпимо —
+// участник может лежать в поле member или прямо в строке, даты членства — в membership.
+function mapTempoMember(row) {
+  const m = (row && row.member) || row || {};
+  const period = (row && row.membership) || row || {};
+  const key = m.key || m.accountId || "";
+  const login = m.name || m.username || "";
+  const name = m.displayName || m.name || "";
+  if (!key && !login && !name) return null;
+  return { key, login, name, dateFrom: period.dateFrom || "", dateTo: period.dateTo || "" };
+}
+
+// Действующее членство: без дат — считаем действующим.
+function isActiveMember(m, today = new Date().toISOString().slice(0, 10)) {
+  if (m.dateFrom && m.dateFrom > today) return false;
+  if (m.dateTo && m.dateTo < today) return false;
+  return true;
+}
+
+export async function refreshTempoTeams(onProgress = () => {}) {
+  if (!settings.get().useTempoTeams) return { teams: 0, members: 0, skipped: true };
+  onProgress(t("st.tempoLoading"));
+  const teams = await jira.tempoTeams();
+  const list = Array.isArray(teams) ? teams : [];
+  const out = [];
+  for (let i = 0; i < list.length; i += 5) {
+    await Promise.all(
+      list.slice(i, i + 5).map(async (team) => {
+        let members = [];
+        try {
+          const rows = await jira.tempoTeamMembers(team.id);
+          members = (Array.isArray(rows) ? rows : []).map(mapTempoMember).filter(Boolean).filter(isActiveMember);
+        } catch (e) {
+          console.warn("[OhMyGant] tempo members failed", team.id, e && e.message ? e.message : e);
+        }
+        out.push({ id: Number(team.id), name: team.name || `#${team.id}`, members });
+      })
+    );
+  }
+  await db.clear(db.STORES.tempo);
+  await db.putAll(db.STORES.tempo, out);
+  return { teams: out.length, members: out.reduce((n, x) => n + x.members.length, 0) };
+}
+
 // ---------- обновление спринтов ----------
 
 // Смена дат спринта в Jira не меняет `updated` у задач, поэтому спринты перечитываем всегда:
@@ -519,6 +565,16 @@ export async function sync({ full = false, onProgress = () => {} } = {}) {
     // Статус эпика — украшение: если запрос не прошёл, оставляем сохранённые данные.
   }
 
+  // Команды Tempo — необязательный источник: если дополнения нет или нет прав, просто пропускаем.
+  let tempoStats = null;
+  let tempoError = "";
+  try {
+    tempoStats = await refreshTempoTeams(onProgress);
+  } catch (e) {
+    tempoError = e && e.message ? e.message : String(e);
+    console.warn("[OhMyGant] tempo teams unavailable", tempoError);
+  }
+
   onProgress(t("st.sprintsLoading"));
   const sprintStats = await refreshSprints(sprintMap);
 
@@ -542,5 +598,5 @@ export async function sync({ full = false, onProgress = () => {} } = {}) {
   await db.metaSet("issueSchema", ISSUE_SCHEMA);
   await settings.save({ lastSync: Date.now() });
   onProgress(t("st.done"));
-  return { issues: collected.length, sprints: sprintMap.size, others: others.length, othersError, sprintStats };
+  return { issues: collected.length, sprints: sprintMap.size, others: others.length, othersError, sprintStats, tempoStats, tempoError };
 }

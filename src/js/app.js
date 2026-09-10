@@ -698,6 +698,9 @@ async function doSync({ full = false } = {}) {
       );
       if (st.boardsFailed.length) lines.push(t("st.boardsFailed", { list: st.boardsFailed.join("; ") }));
     }
+    if (result.tempoStats && !result.tempoStats.skipped) {
+      lines.push(t("st.tempoSummary", { teams: result.tempoStats.teams, members: result.tempoStats.members }).replace(/^ · /, ""));
+    }
     if (result.othersError) lines.push(result.othersError);
     // Одной строкой, чтобы сводка не перекрывалась ошибкой; ошибка красит всю строку.
     const isError = (st && st.boardsFailed.length) || result.othersError;
@@ -868,13 +871,14 @@ function buildPersonLoad(model, issues, others) {
 
 async function drawGantt(mode, container) {
   try {
-    const [issues, others, sprints, epics, boards, profiles] = await Promise.all([
+    const [issues, others, sprints, epics, boards, profiles, tempo] = await Promise.all([
       db.all(db.STORES.issues),
       db.all(db.STORES.others),
       db.all(db.STORES.sprints),
       db.all(db.STORES.epics),
       db.all(db.STORES.boards),
-      db.all(db.STORES.people)
+      db.all(db.STORES.people),
+      db.all(db.STORES.tempo)
     ]);
     let target = container;
     let epicsShown = epics;
@@ -901,6 +905,7 @@ async function drawGantt(mode, container) {
       sprints,
       epics: epicsShown,
       boards,
+      tempo,
       mode,
       timelineIssues: [...issues, ...others]
     });
@@ -937,6 +942,7 @@ function fillSettingsForm() {
   $("#estimateField").value = s.estimateField;
   $("#hoursPerDay").value = s.hoursPerDay;
   $("#sprintDays").value = s.sprintDays;
+  $("#useTempoTeams").checked = !!s.useTempoTeams;
   $("#doneStatuses").value = s.doneStatuses;
   $("#infoSystems").value = (s.infoSystems || []).join("\n");
   $("#lang").value = s.lang;
@@ -1036,6 +1042,7 @@ async function saveSettingsForm() {
     estimateField: $("#estimateField").value,
     hoursPerDay: Number($("#hoursPerDay").value) || 8,
     sprintDays: Number($("#sprintDays").value) || 10,
+    useTempoTeams: $("#useTempoTeams").checked,
     doneStatuses: $("#doneStatuses").value.trim(),
     infoSystems: team.parseSystems($("#infoSystems").value),
     fields: {

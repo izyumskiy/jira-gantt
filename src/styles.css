@@ -243,6 +243,8 @@ main { padding: 14px 16px 40px; }
 .card h3 { margin: 0 0 10px; font-size: 13px; text-transform: uppercase; letter-spacing: .03em; color: var(--muted); }
 .field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; max-width: 520px; }
 .field.narrow { max-width: 180px; }
+.field.check { flex-direction: row; align-items: center; gap: 8px; max-width: none; }
+.field.check > span { font-weight: 600; }
 .field > span { font-weight: 600; }
 
 /* ----- диаграмма ----- */

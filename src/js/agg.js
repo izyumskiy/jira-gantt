@@ -216,6 +216,47 @@ export function nameFromSprints(names) {
   return best ? best.word : "";
 }
 
+// Команды Tempo: соответствие человек → команда. Ключ, логин и имя — три способа найти,
+// потому что в задачах Jira отдаёт то одно, то другое.
+function buildTempoIndex(tempo) {
+  const byKey = new Map();
+  const byLogin = new Map();
+  const byName = new Map();
+  const teams = new Map();
+  const size = new Map();
+  const norm = (v) => String(v || "").trim().toLowerCase().replace(/ё/g, "е");
+  const add = (map, id, team) => {
+    if (!id) return;
+    if (!map.has(id)) map.set(id, []);
+    if (!map.get(id).includes(team)) map.get(id).push(team);
+  };
+  [...tempo]
+    .sort((a, b) => String(a.name).localeCompare(String(b.name)))
+    .forEach((tm, i) => {
+      const team = { id: `t:${tm.id}`, name: tm.name, color: i % TEAM_COLORS, tempo: true };
+      teams.set(team.id, team);
+      size.set(team.id, (tm.members || []).length);
+      for (const m of tm.members || []) {
+        add(byKey, m.key, team);
+        add(byLogin, m.login, team);
+        add(byName, norm(m.name), team);
+      }
+    });
+  // Человек может числиться в нескольких командах: берём самую малочисленную — она конкретнее,
+  // а команда «по умолчанию» обычно самая большая.
+  const of = (person) => {
+    if (!person) return null;
+    const found = [
+      ...(byKey.get(person.key) || []),
+      ...(byLogin.get(person.login) || []),
+      ...(byName.get(norm(person.name)) || [])
+    ];
+    if (!found.length) return null;
+    return [...new Set(found)].sort((a, b) => size.get(a.id) - size.get(b.id) || a.name.localeCompare(b.name))[0];
+  };
+  return { teams, of, size: teams.size };
+}
+
 function buildTeams(sprints, boards) {
   const boardName = new Map(boards.map((b) => [String(b.id), b.name]));
   const byBoard = new Map();
@@ -282,9 +323,10 @@ export const BACKLOG_ID = "sec:backlog";
 // others — задачи людей вне целевых эпиков (учитываются только по людям).
 // timelineIssues — по каким задачам строить шкалу времени. Передаётся вся выгрузка, чтобы шкала
 // была одинаковой на всех вкладках и не менялась от фильтров.
-export function buildModel({ issues, others = [], sprints, epics, boards = [], mode, timelineIssues = null }) {
+export function buildModel({ issues, others = [], sprints, epics, boards = [], tempo = [], mode, timelineIssues = null }) {
   const epicLike = mode !== "assignee"; // группы — эпики
   const teamsInfo = buildTeams(sprints, boards);
+  const tempoInfo = buildTempoIndex(tempo);
   const sprintById = new Map(sprints.map((s) => [s.id, s]));
   const columns = timeline(sprints, timelineIssues || [...issues, ...others]);
   // Внутри секции спринты идут по командам, чтобы цвета в колонке не перемешивались.
@@ -466,12 +508,15 @@ export function buildModel({ issues, others = [], sprints, epics, boards = [], m
   }
 
   const list = [...groups.values()].map((g) => {
-    let team = teamsInfo.none;
+    // Команда человека: из Tempo, если он там числится; иначе по доске, где больше его задач.
+    let team = tempoInfo.of({ key: g.key, login: g.login, name: g.label }) || teamsInfo.none;
     let best = 0;
-    for (const [id, n] of g.teamVotes) {
-      if (n > best) {
-        best = n;
-        team = teamsInfo.teams.get(id) || teamsInfo.none;
+    if (team === teamsInfo.none) {
+      for (const [id, n] of g.teamVotes) {
+        if (n > best) {
+          best = n;
+          team = teamsInfo.teams.get(id) || teamsInfo.none;
+        }
       }
     }
     return {

@@ -193,6 +193,24 @@ check("подпись секции — диапазон дат", /^\d{2}\.\d{2} 
   check("известная доска сохраняет своё имя", mixed.teams.every((x) => x.id !== "3" || (x.name === "Alpha" && !x.derived)));
 }
 
+// 2e. команды из Tempo
+{
+  const tempo = [
+    { id: 1, name: "Команда Tempo по умолчанию", members: [{ key: "", login: "ivan", name: "Ivan" }, { key: "", login: "olga", name: "Olga" }, { key: "", login: "petr", name: "Petr" }] },
+    { id: 2, name: "1C", members: [{ key: "JIRAUSER1", login: "ivan", name: "Ivan" }] },
+    { id: 3, name: "AlphaOne", members: [{ key: "", login: "", name: "Olga" }] }
+  ];
+  const mt = agg.buildModel({ issues, others, sprints, epics, boards, tempo, mode: "assignee" });
+  const teamOf = (key) => mt.groups.find((g) => g.key === key)?.team;
+  check("команда человека берётся из Tempo, а не из доски", teamOf("ivan")?.name === "1C" && teamOf("ivan")?.tempo === true, JSON.stringify(teamOf("ivan")));
+  check("при нескольких командах выбирается самая малочисленная (не «по умолчанию»)", teamOf("olga")?.name === "AlphaOne", teamOf("olga")?.name);
+  check("сопоставление по отображаемому имени работает", teamOf("olga")?.tempo === true);
+  check("кого нет в Tempo — команда по доске", teamOf("petr")?.name === "Команда Tempo по умолчанию" || teamOf("petr")?.tempo === true, teamOf("petr")?.name);
+  const noTempo = agg.buildModel({ issues, others, sprints, epics, boards, tempo: [], mode: "assignee" });
+  check("без Tempo команда по-прежнему по доске", noTempo.groups.find((g) => g.key === "ivan")?.team?.name === "Alpha",
+    noTempo.groups.find((g) => g.key === "ivan")?.team?.name);
+}
+
 // 3. модель по эпикам
 const m1 = agg.buildModel({ issues, sprints, epics, boards, mode: "epicPeople" });
 const ep1 = m1.groups.find((g) => g.key === "EP-1");

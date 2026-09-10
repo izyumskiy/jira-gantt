@@ -148,6 +148,16 @@ export function sprint(sprintId) {
   return request(`/rest/agile/1.0/sprint/${encodeURIComponent(sprintId)}`);
 }
 
+// ---------- Tempo Teams (дополнение Tempo в самой Jira, та же сессия) ----------
+
+export function tempoTeams() {
+  return request("/rest/tempo-teams/2/team");
+}
+
+export function tempoTeamMembers(teamId) {
+  return request(`/rest/tempo-teams/2/team/${encodeURIComponent(teamId)}/member`);
+}
+
 // Разрешение на домен запрашивается по клику пользователя (optional_host_permissions).
 export async function hasPermission(baseUrlStr) {
   const origin = settings.originOf(baseUrlStr);

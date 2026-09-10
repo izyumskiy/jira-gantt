@@ -8,6 +8,7 @@ export const DEFAULTS = {
   estimateField: "original", // original | remaining | points
   hoursPerDay: 8,
   sprintDays: 10, // длительность спринта в рабочих днях — ёмкость человека на спринт
+  useTempoTeams: true, // брать команды людей из Tempo (если дополнение установлено)
   doneStatuses: "", // статусы своего потока, которые считаем завершёнными, через запятую
   infoSystems: [], // справочник информационных систем для вкладки «Команда»
   boardId: "",
