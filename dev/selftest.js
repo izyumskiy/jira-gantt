@@ -389,6 +389,17 @@ check("epicPeople: колонка «Бэклог» и нумерация как 
 check("epicPeople: имена людей — кнопки", g3.querySelectorAll(".g-row.proj .plabel-link").length > 0);
 check("epicPeople: лейблов с цифрами нет ни у эпиков, ни у людей", g3.querySelectorAll(".badges").length === 0, String(g3.querySelectorAll(".badges").length));
 check("epicPeople: имена людей кликабельны", g3.querySelectorAll(".g-row.proj .plabel-link").length > 0);
+// прокрутка не сбрасывается при сворачивании/разворачивании узла
+{
+  const wrap = g3.querySelector(".gantt-wrap");
+  wrap.scrollLeft = 40;
+  const row = g3.querySelector(".g-row.group");
+  row.querySelector(".twisty").click();
+  check("горизонтальная прокрутка таблицы сохраняется при сворачивании", g3.querySelector(".gantt-wrap").scrollLeft === 40,
+    String(g3.querySelector(".gantt-wrap").scrollLeft));
+  g3.querySelector(".g-row.group .twisty").click();
+  check("и при разворачивании обратно", g3.querySelector(".gantt-wrap").scrollLeft === 40, String(g3.querySelector(".gantt-wrap").scrollLeft));
+}
 check("epicPeople: строка выбранного человека подсвечена", [...g3.querySelectorAll(".g-row.proj.hl")].every((r) => r.querySelector(".plabel").textContent === "Ivan") && g3.querySelectorAll(".g-row.proj.hl").length === 2, String(g3.querySelectorAll(".g-row.proj.hl").length));
 g3.querySelector(".g-row.proj .plabel-link").click();
 check("epicPeople: клик по имени отдаёт ключ и имя", /^[a-z]+:.+$/.test(clicked || ""), clicked);

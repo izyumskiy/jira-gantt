@@ -326,19 +326,40 @@ function emptyCells(n) {
   return out;
 }
 
+// Перерисовка стирает таблицу целиком, страница на миг становится короче и браузер сбрасывает
+// прокрутку. Запоминаем её (страницы и самой таблицы) и возвращаем после сборки DOM.
+function keepScroll(container) {
+  const scroller = document.scrollingElement || document.documentElement;
+  const pageY = scroller.scrollTop;
+  const wrap = container.querySelector(".gantt-wrap");
+  const left = wrap ? wrap.scrollLeft : 0;
+  const top = wrap ? wrap.scrollTop : 0;
+  return () => {
+    const next = container.querySelector(".gantt-wrap");
+    if (next) {
+      next.scrollLeft = left;
+      next.scrollTop = top;
+    }
+    scroller.scrollTop = pageY;
+  };
+}
+
 export function render(container, model, opts) {
   const { mode, profiles = [], highlightChild = "", onChildClick = null, personLoad = null } = opts;
   const epicLike = mode !== "assignee";
   // Профили людей (вкладка «Команда») — по нормализованному имени.
   const profileOf = new Map(profiles.map((p) => [p.name, p]));
+  const restoreScroll = keepScroll(container);
   container.textContent = "";
 
   if (!model.groups.length) {
     container.append(el("div", "empty", t("gantt.noData")));
+    restoreScroll();
     return;
   }
   if (!model.columns.length) {
     container.append(el("div", "empty", t("gantt.noSprints")));
+    restoreScroll();
     return;
   }
 
@@ -562,6 +583,7 @@ export function render(container, model, opts) {
   table.append(tbody);
   wrap.append(table);
   container.append(wrap);
+  restoreScroll();
 }
 
 // Статус эпика — лейбл в стиле Jira: цвет берётся из таблицы статусов.
