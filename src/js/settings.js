@@ -15,6 +15,7 @@ export const DEFAULTS = {
   fields: {
     version: 0,
     epicLink: "",
+    epicName: "",
     sprint: "",
     storyPoints: "",
     plannedStart: "",

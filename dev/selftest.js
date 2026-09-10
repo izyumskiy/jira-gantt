@@ -165,9 +165,9 @@ check("EP-1 в секции 0 разложен по спринтам 2 и 5 (д�
   [...(ep1.cells.get("sec:0")?.bySprint.keys() || [])].join(","));
 check("EP-1 закрытый спринт не в ячейках", ![...ep1.cells.values()].some((c) => c.bySprint.has(1)));
 check("EP-1 вложенные строки — исполнители (A-4 без спринта и готова → «Без исполнителя» скрыт)", ep1.projects.map((p) => p.label).sort().join(",") === "Ivan,Olga,Petr", ep1.projects.map((p) => p.label).join(","));
-check("EP-1 подпись: ключ и название (меток нет)", ep1.label === "EP-1 · Личный кабинет", ep1.label);
-const mlab = agg.buildModel({ issues: [mk("L-1", "EP-1", "AAA", "Ivan", 2, 1)], sprints, epics: [{ ...epics[0], labels: ["q4", "mobile"] }], boards, mode: "epicPeople" });
-check("подпись эпика — из меток, если они есть", mlab.groups[0].label === "EP-1 · q4, mobile", mlab.groups[0].label);
+check("EP-1 подпись: ключ и название (Epic Name пуст)", ep1.label === "EP-1 · Личный кабинет", ep1.label);
+const mlab = agg.buildModel({ issues: [mk("L-1", "EP-1", "AAA", "Ivan", 2, 1)], sprints, epics: [{ ...epics[0], epicName: "ЛК", labels: ["q4"] }], boards, mode: "epicPeople" });
+check("подпись эпика — Epic Name, если поле заполнено", mlab.groups[0].label === "EP-1 · ЛК", mlab.groups[0].label);
 check("EP-1 готовых задач (включая On Prod)", ep1.done === 3, String(ep1.done));
 check("EP-1 задач в прочих статусах", ep1.other === 4, String(ep1.other));
 check("EP-1 разбивка сходится с общим", ep1.done + ep1.other === ep1.count);

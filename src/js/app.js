@@ -892,6 +892,7 @@ function renderDetected() {
   const f = settings.get().fields;
   $("#detected").textContent = t("set.detected", {
     e: f.epicLink || t("dash"),
+    en: f.epicName || t("dash"),
     s: f.sprint || t("dash"),
     p: f.storyPoints || t("dash"),
     ps: f.plannedStart || t("dash"),

@@ -246,14 +246,13 @@ export function buildModel({ issues, others = [], sprints, epics, boards = [], m
     mode === "epicPeople"
       ? { key: i.assigneeKey || "", label: i.assigneeName || t("gantt.noAssignee") }
       : { key: i.projectKey || t("dash"), label: i.projectName || i.projectKey || t("dash") };
-  // Подпись эпика — ключ и его метки; если меток нет — название.
+  // Подпись эпика — Epic Name; если поле пустое или не найдено в Jira — название эпика.
   const groupLabelOf = (i) => {
     if (epicLike) {
       const k = i.epicKey || "";
       if (!k) return t("dash");
       const e = epicById.get(k);
-      const text = e && Array.isArray(e.labels) && e.labels.length ? e.labels.join(", ") : e?.summary || "";
-      return `${k} · ${text}`.trim();
+      return `${k} · ${e?.epicName || e?.summary || ""}`.trim();
     }
     return i.assigneeName || t("gantt.noAssignee");
   };
