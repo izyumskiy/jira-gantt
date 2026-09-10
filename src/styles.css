@@ -333,6 +333,13 @@ table.gantt { border-collapse: separate; border-spacing: 0; }
 /* Пиктограмма «прокомментировать» у эпика и окно комментариев. */
 .cmt-btn { border: none; background: none; padding: 0 3px; margin-left: 4px; font-size: 12px; line-height: 1; cursor: pointer; vertical-align: middle; opacity: .7; }
 .cmt-btn:hover { opacity: 1; }
+/* Критический путь: переключатель у эпика и оранжевая обводка полос критичного человека. */
+.crit-btn { border: none; background: none; padding: 0 3px; margin-left: 2px; font-size: 12px; line-height: 1; cursor: pointer; opacity: .45; filter: grayscale(1); vertical-align: middle; }
+.crit-btn:hover { opacity: .9; }
+.crit-btn.on { opacity: 1; filter: none; }
+.bar.crit { outline: 2px solid #ff8b00; outline-offset: -1px; }
+.crit-mark { margin-left: 4px; font-size: 12px; vertical-align: middle; cursor: default; }
+.g-row.proj.crit-row > .c-name { box-shadow: inset 3px 0 0 #ff8b00; }
 .tooltip.tip-comments { min-width: 420px; max-width: 560px; }
 .cmt-form { display: grid; grid-template-columns: 1fr auto; gap: 6px 8px; align-items: start; }
 .cmt-input { grid-column: 1 / -1; width: 100%; box-sizing: border-box; resize: vertical; min-height: 60px; }

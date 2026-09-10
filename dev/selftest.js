@@ -609,6 +609,31 @@ check("окно сравнения открывается и на «По эпи�
 document.querySelector(".tip-close").click();
 g4.remove();
 
+// 9b. критический путь на «По эпикам и людям»
+{
+  gantt.render(g3, m3, { mode: "epicPeople", onChildClick: () => {} });
+  const ep1g = m3.groups.find((g) => g.key === "EP-1");
+  const crit = gantt.criticalPeople(ep1g, m3);
+  check("критический путь: Petr определяет конец (последний спринт), Ivan не укладывается в срок (44ч > ёмкости)",
+    crit.has("petr") && crit.get("petr")[0].includes("B-Sprint 1") && crit.has("ivan") && crit.get("ivan").some((r) => r.includes("5.5д")) && !crit.has("olga"),
+    JSON.stringify([...crit]));
+  const ep1Row3 = [...g3.querySelectorAll(".g-row.group")].find((r) => r.querySelector(".glabel").textContent.startsWith("EP-1"));
+  const critBtn = ep1Row3.querySelector(".crit-btn");
+  check("пиктограмма ⚡ рядом с 💬 у эпика, по умолчанию выключена", !!critBtn && critBtn.previousElementSibling?.classList.contains("cmt-btn") && !critBtn.classList.contains("on"));
+  check("на «По эпикам» и «По людям» пиктограммы ⚡ нет", document.querySelectorAll("#g1 .crit-btn, #g2 .crit-btn").length === 0);
+  check("без включения обводок нет", g3.querySelectorAll(".bar.crit").length === 0);
+  critBtn.click();
+  const rowsCrit = [...g3.querySelectorAll(".g-row.proj.crit-row")].map((r) => r.querySelector(".plabel").textContent);
+  check("после клика подсвечены строки Petr и Ivan", rowsCrit.sort().join(",") === "Ivan,Petr", rowsCrit.join(","));
+  check("полосы критичных — с классом crit, у Olga — нет",
+    g3.querySelectorAll(".g-row.proj.crit-row .bar.crit").length > 0 && g3.querySelectorAll(".g-row.proj:not(.crit-row) .bar.crit").length === 0);
+  check("у имени критичного — ⚡ с причиной", [...g3.querySelectorAll(".g-row.proj.crit-row .crit-mark")].every((m) => m.title.length > 10));
+  const critBtn2 = [...g3.querySelectorAll(".g-row.group")].find((r) => r.querySelector(".glabel").textContent.startsWith("EP-1")).querySelector(".crit-btn");
+  check("пиктограмма включена, подсказка с причинами", critBtn2.classList.contains("on") && critBtn2.title.includes("B-Sprint 1"));
+  critBtn2.click();
+  check("повторный клик снимает подсветку", g3.querySelectorAll(".bar.crit, .crit-row").length === 0);
+}
+
 // 10. комментарии эпика (Jira подменена заглушкой)
 const fakeComments = Array.from({ length: 7 }, (_, i) => ({ id: String(i), body: `Комментарий ${i + 1}`, author: { displayName: "Ivan" }, created: new Date(Date.now() - (7 - i) * day).toISOString() }));
 const added = [];

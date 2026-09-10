@@ -14,6 +14,91 @@ export const commentsApi = {
   users: (query) => jiraUserSearch(query)
 };
 const RECENT_COMMENTS = 5;
+
+// Эпики с включённой подсветкой критического пути (ключи).
+const criticalOn = new Set();
+
+const DAY_MS_C = 86400000;
+function workdaysUntil(dueIso, now = Date.now()) {
+  const due = new Date(dueIso.length === 10 ? `${dueIso}T00:00:00` : dueIso);
+  if (Number.isNaN(+due)) return null;
+  const d = new Date(now);
+  d.setHours(0, 0, 0, 0);
+  due.setHours(0, 0, 0, 0);
+  let n = 0;
+  for (let x = new Date(d.getTime() + DAY_MS_C); x <= due; x = new Date(x.getTime() + DAY_MS_C)) {
+    const wd = x.getDay();
+    if (wd !== 0 && wd !== 6) n += 1;
+  }
+  return n;
+}
+
+// Критический путь по людям эпика: вариант 1 — чьи открытые задачи заканчиваются позже всех
+// (при равенстве — больший остаток; без спринтов — просто больший остаток); вариант 2 — чей остаток
+// оценок больше ёмкости в рабочих днях до срока эпика. Возвращает Map key → [причины].
+export function criticalPeople(g, model) {
+  const reasons = new Map();
+  const add = (key, text) => reasons.set(key, [...(reasons.get(key) || []), text]);
+  const stats = g.projects
+    .map((p) => {
+      // Остаток — по всем открытым задачам человека в эпике, включая лежащие в закрытых спринтах.
+      const open = (p.issues || []).filter((i) => !i.done);
+      const remaining = open.reduce((n, i) => n + (i.estimate || 0), 0);
+      let lastEnd = null;
+      let lastName = "";
+      for (const i of open) {
+        const sp = i.sprintId != null ? model.sprintById.get(i.sprintId) : null;
+        const end = sp && sp.endDate ? Date.parse(sp.endDate) : null;
+        if (end != null && (lastEnd == null || end > lastEnd)) {
+          lastEnd = end;
+          lastName = sp.name;
+        }
+      }
+      return { p, open, remaining, lastEnd, lastName };
+    })
+    .filter((x) => x.open.length);
+  if (!stats.length) return reasons;
+
+  // Вариант 1.
+  const withEnd = stats.filter((x) => x.lastEnd != null);
+  const pool = withEnd.length ? withEnd : stats;
+  const top = pool.reduce((a, b) => (b.lastEnd !== a.lastEnd && withEnd.length ? (b.lastEnd > a.lastEnd ? b : a) : b.remaining > a.remaining ? b : a));
+  if (top.remaining > 0 || top.lastEnd != null) {
+    add(
+      top.p.key,
+      top.lastEnd != null
+        ? t("crit.defines", { rem: fmtEstimate(top.remaining), sprint: top.lastName })
+        : t("crit.definesNoSprint", { rem: fmtEstimate(top.remaining) })
+    );
+  }
+
+  // Вариант 2: ёмкость до срока = рабочие дни × часов в дне.
+  if (g.dueDate) {
+    const days = workdaysUntil(g.dueDate);
+    if (days != null) {
+      const cap = days * (Number(settings.get().hoursPerDay) || 8) * 3600;
+      for (const x of stats) {
+        if (x.remaining > cap) {
+          add(x.p.key, t("crit.overCapacity", { rem: fmtEstimate(x.remaining), cap: fmtEstimate(cap), due: fmtDue(Date.parse(g.dueDate.length === 10 ? `${g.dueDate}T00:00:00` : g.dueDate)) }));
+        }
+      }
+    }
+  }
+  return reasons;
+}
+
+function criticalButton(g, model, rerender) {
+  const on = criticalOn.has(g.key);
+  const btn = el("button", "crit-btn" + (on ? " on" : ""), "⚡");
+  btn.type = "button";
+  btn.title = on ? t("crit.on") : t("crit.button");
+  btn.onclick = (e) => {
+    e.stopPropagation();
+    on ? criticalOn.delete(g.key) : criticalOn.add(g.key);
+    rerender();
+  };
+  return btn;
+}
 import { normName } from "./team.js";
 
 const collapsed = { epic: new Set(), epicPeople: new Set(), assignee: new Set() };
@@ -381,6 +466,12 @@ export function render(container, model, opts) {
     name.append(twisty, label);
     if (g.status && g.status.name) name.append(lozenge(g.status));
     if (epicLike && g.key) name.append(commentButton(g.key, g.label));
+    const critical = model.childKind === "person" && g.key && criticalOn.has(g.key) ? criticalPeople(g, model) : null;
+    if (model.childKind === "person" && g.key) {
+      const cb = criticalButton(g, model, () => render(container, model, opts));
+      if (critical) cb.title = critical.size ? [...critical.values()].flat().join("; ") : t("crit.none");
+      name.append(cb);
+    }
     if (profile && profile.role) {
       const role = el("span", "lozenge lz-role", t(`role.${profile.role}`));
       role.title = t("team.role");
@@ -441,6 +532,14 @@ export function render(container, model, opts) {
       for (const sec of model.columns) ptr.append(nestedCell(p.cells.get(sec.id), sec, model, `${g.label} · ${p.label}`));
       if (showBacklog) ptr.append(backlogNested(p.backlog, model, `${g.label} · ${p.label}`));
       if (due) addDueLine(ptr, due, false);
+      // Критический путь: полосы критичного человека — с оранжевой обводкой, у имени — ⚡ с причиной.
+      if (critical && critical.has(p.key)) {
+        ptr.classList.add("crit-row");
+        ptr.querySelectorAll(".bar").forEach((b) => b.classList.add("crit"));
+        const mark = el("span", "crit-mark", "⚡");
+        mark.title = critical.get(p.key).join("; ");
+        plabel.after(mark);
+      }
       tbody.append(ptr);
     }
     // «Прочие» — задачи человека в эпиках вне выбранных.

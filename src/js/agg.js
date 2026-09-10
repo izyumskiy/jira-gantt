@@ -216,6 +216,7 @@ function briefOf(issue, est, done) {
     statusCategory: issue.statusCategory || "",
     assigneeName: issue.assigneeName || "",
     sprintName: issue.sprintName || "",
+    sprintId: issue.sprintId ?? null,
     estimate: est,
     done
   };
@@ -298,13 +299,15 @@ export function buildModel({ issues, others = [], sprints, epics, boards = [], m
     const child = childOf(issue);
     const pk = child.key;
     if (!g.projects.has(pk)) {
-      g.projects.set(pk, { key: pk, label: child.label, count: 0, sum: 0, noSprint: 0, cells: new Map(), backlog: emptyCell() });
+      // issues — все задачи строки (и вне таймлайна): для остатка работы в критическом пути.
+      g.projects.set(pk, { key: pk, label: child.label, count: 0, sum: 0, noSprint: 0, cells: new Map(), backlog: emptyCell(), issues: [] });
     }
     const p = g.projects.get(pk);
     p.count += 1;
     p.sum += est;
 
     const brief = briefOf(issue, est, done);
+    p.issues.push(brief);
     if (issue.sprintId == null) {
       // Выполненную задачу вне спринта считать нечего — в бэклог идут только незакрытые.
       if (!done) {
