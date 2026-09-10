@@ -9,6 +9,8 @@ import * as gantt from "./gantt.js";
 import * as team from "./team.js";
 import { classify, isDoneStatus } from "./status.js";
 import * as configio from "./configio.js";
+import * as peopleAnalytics from "./people-analytics.js";
+import * as projectForecast from "./project-forecast/page.js";
 
 const $ = (sel) => document.querySelector(sel);
 const state = {
@@ -47,6 +49,8 @@ function showTab(name) {
   if (name === "people") drawGantt("assignee", $("#page-people"));
   if (name === "epicPeople") drawGantt("epicPeople", $("#page-epicPeople"));
   if (name === "team") team.render($("#page-team"), { notify: (m) => status(m) }).catch(fail);
+  if (name === "analysis") peopleAnalytics.open().catch(fail);
+  if (name === "forecast") projectForecast.open().catch(fail);
 }
 
 // Перерисовать активную вкладку с диаграммой (после синка, смены языка, фильтров).
@@ -56,6 +60,8 @@ function redrawActive() {
   if (active === "people") drawGantt("assignee", $("#page-people"));
   if (active === "epicPeople") drawGantt("epicPeople", $("#page-epicPeople"));
   if (active === "team") team.render($("#page-team"), { notify: (m) => status(m) }).catch(fail);
+  if (active === "analysis") peopleAnalytics.open().catch(fail);
+  if (active === "forecast") projectForecast.open().catch(fail);
 }
 
 // ---------- поиск эпиков ----------
@@ -1036,6 +1042,8 @@ async function boot() {
   applyTopHeight();
   renderAbout().catch(() => {});
   await db.open();
+  await peopleAnalytics.init($("#page-analysis"), { ensurePermission, notify: status });
+  await projectForecast.init($("#page-forecast"), { ensurePermission, notify: status });
 
   document.querySelectorAll(".tab").forEach((b) => (b.onclick = () => showTab(b.dataset.tab)));
 

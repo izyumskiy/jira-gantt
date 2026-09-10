@@ -1,0 +1,17 @@
+{
+  "name": "@asna/ohmygant-business-modules",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Переносимые read-only модули аналитики сотрудников и прогноза проектов для Jira OhMyGant",
+  "exports": {
+    ".": "./src/index.js",
+    "./people-analytics": "./src/people-analytics/index.js",
+    "./project-planning": "./src/project-planning/index.js",
+    "./people-analytics.css": "./src/people-analytics/module.css",
+    "./project-planning.css": "./src/project-planning/module.css"
+  },
+  "scripts": {
+    "test": "node tests/package-selftest.mjs"
+  }
+}

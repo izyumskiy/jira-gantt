@@ -4,6 +4,8 @@
     <meta charset="utf-8" />
     <title>Jira OhMyGant</title>
     <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="modules/people-analytics/module.css" />
+    <link rel="stylesheet" href="modules/project-planning/module.css" />
   </head>
   <body>
     <header class="top">
@@ -17,6 +19,8 @@
         <button class="tab" data-tab="epicPeople" data-i18n="tab.epicPeople"></button>
         <button class="tab" data-tab="people" data-i18n="tab.people"></button>
         <button class="tab" data-tab="team" data-i18n="tab.team"></button>
+        <button class="tab" data-tab="analysis" data-i18n="tab.analysis"></button>
+        <button class="tab" data-tab="forecast" data-i18n="tab.forecast"></button>
         <button class="tab" data-tab="settings" data-i18n="tab.settings"></button>
         <span id="today" class="today" data-i18n-title="app.today"></span>
       </nav>
@@ -76,6 +80,12 @@
 
       <!-- Вкладка 4: команда — свойства людей -->
       <section class="page hidden" id="page-team"></section>
+
+      <!-- Подключаемый модуль аналитики сотрудников -->
+      <section class="page hidden" id="page-analysis"></section>
+
+      <!-- Подключаемый модуль системного анализа и прогноза проекта -->
+      <section class="page hidden" id="page-forecast"></section>
 
       <!-- Вкладка 5: настройки -->
       <section class="page hidden" id="page-settings">

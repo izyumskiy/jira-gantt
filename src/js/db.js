@@ -1,6 +1,6 @@
 // Локальное хранилище IndexedDB: эпики, задачи, спринты, служебные ключи.
 const DB_NAME = "jiragantt";
-const DB_VER = 4;
+const DB_VER = 6;
 
 // others — задачи людей из целевых эпиков, лежащие в ДРУГИХ эпиках (текущий и будущие спринты).
 // people — введённые вручную свойства людей (роль, системы, статус); ключ — нормализованное имя.
@@ -11,7 +11,13 @@ export const STORES = {
   sprints: "sprints",
   boards: "boards",
   people: "people",
-  meta: "meta"
+  meta: "meta",
+  paTeams: "paTeams",
+  paMembers: "paMembers",
+  paIssues: "paIssues",
+  pfRoster: "pfRoster",
+  pfWorkload: "pfWorkload",
+  pfVacations: "pfVacations"
 };
 
 let dbp = null;
@@ -47,6 +53,24 @@ export function open() {
       }
       if (!db.objectStoreNames.contains(STORES.meta)) {
         db.createObjectStore(STORES.meta, { keyPath: "k" });
+      }
+      if (!db.objectStoreNames.contains(STORES.paTeams)) {
+        db.createObjectStore(STORES.paTeams, { keyPath: "id" });
+      }
+      if (!db.objectStoreNames.contains(STORES.paMembers)) {
+        db.createObjectStore(STORES.paMembers, { keyPath: "id" });
+      }
+      if (!db.objectStoreNames.contains(STORES.paIssues)) {
+        db.createObjectStore(STORES.paIssues, { keyPath: "key" });
+      }
+      if (!db.objectStoreNames.contains(STORES.pfRoster)) {
+        db.createObjectStore(STORES.pfRoster, { keyPath: "id" });
+      }
+      if (!db.objectStoreNames.contains(STORES.pfWorkload)) {
+        db.createObjectStore(STORES.pfWorkload, { keyPath: "key" });
+      }
+      if (!db.objectStoreNames.contains(STORES.pfVacations)) {
+        db.createObjectStore(STORES.pfVacations, { keyPath: "key" });
       }
     };
     req.onsuccess = () => resolve(req.result);

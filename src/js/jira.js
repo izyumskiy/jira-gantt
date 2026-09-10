@@ -94,6 +94,57 @@ export async function search(jql, fieldList, onPage) {
   return out;
 }
 
+// Расширенный поиск для подключаемых модулей: штатная авторизация Jira + changelog.
+export async function searchExpanded(jql, fieldList, onPage, expand = ["changelog"]) {
+  const out = [];
+  let startAt = 0;
+  const maxResults = 100;
+  for (;;) {
+    const page = await request("/rest/api/2/search", {
+      method: "POST",
+      body: { jql, startAt, maxResults, fields: fieldList, expand }
+    });
+    out.push(...(page.issues || []));
+    if (onPage) onPage(out.length, page.total || out.length);
+    startAt += (page.issues || []).length;
+    if (!page.issues?.length || startAt >= page.total) break;
+  }
+  return out;
+}
+
+export async function issueWorklogs(issueKey) {
+  const out = [];
+  let startAt = 0;
+  for (;;) {
+    const page = await request(`/rest/api/2/issue/${encodeURIComponent(issueKey)}/worklog?startAt=${startAt}&maxResults=1000`);
+    const rows = page?.worklogs || [];
+    out.push(...rows);
+    startAt += rows.length;
+    if (!rows.length || startAt >= Number(page?.total || 0)) break;
+  }
+  return out;
+}
+
+export async function issueChangelog(issueKey) {
+  const encoded = encodeURIComponent(issueKey);
+  const out = [];
+  let startAt = 0;
+  try {
+    for (;;) {
+      const page = await request(`/rest/api/2/issue/${encoded}/changelog?startAt=${startAt}&maxResults=100`);
+      const rows = page?.values || page?.histories || [];
+      out.push(...rows);
+      startAt += rows.length;
+      if (!rows.length || startAt >= Number(page?.total || out.length)) break;
+    }
+    return out;
+  } catch (error) {
+    if (![400, 404, 405].includes(error.code)) throw error;
+    const issue = await request(`/rest/api/2/issue/${encoded}?fields=summary&expand=changelog`);
+    return issue?.changelog?.histories || [];
+  }
+}
+
 export async function boards() {
   const out = [];
   let startAt = 0;
