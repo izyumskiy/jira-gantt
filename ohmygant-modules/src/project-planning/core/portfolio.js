@@ -1,5 +1,5 @@
-// Чистая модель портфеля: остатки активных задач, многозадачность,
-// распределение существующих эпиков внутри спринтов и backtest сроков.
+// Чистая модель портфеля: остатки активных задач, многозадачность
+// и распределение существующих эпиков внутри спринтов.
 import { addDays, dateKey, daysBetween, isWorkingDay, parseDate } from "./calendar.js";
 import { samePerson } from "./identity.js";
 
@@ -359,44 +359,6 @@ export function portfolioCapacitySummary({ employees = [], busy = new Map(), wor
   });
 }
 
-export function backtestPortfolio(history = [], employees = [], hoursPerDay = 8) {
-  const groups = new Map();
-  for (const issue of history) {
-    if (!issue.epicKey || !issue.created || !issue.resolved) continue;
-    if (!groups.has(issue.epicKey)) groups.set(issue.epicKey, { key: issue.epicKey, rows: [] });
-    groups.get(issue.epicKey).rows.push(issue);
-  }
-  const epics = [...groups.values()].map((group) => {
-    const estimateHours = group.rows.reduce((sum, issue) => sum + Number(issue.originalEstimateSeconds || 0) / 3600, 0);
-    const actual = group.rows.reduce((sum, issue) => sum + actualHours(issue), 0);
-    const start = group.rows.map((issue) => issue.created).filter(Boolean).sort()[0];
-    const end = group.rows.map((issue) => issue.resolved).filter(Boolean).sort().at(-1);
-    const staff = uniq(group.rows.map((issue) => employeeFor(issue.assignee, employees)?.id));
-    const actualDays = daysBetween(start, end, (date) => isWorkingDay(date)).length;
-    const idealDays = estimateHours / Math.max(1, staff.length) / hoursPerDay;
-    if (!(estimateHours > 0) || !(actual > 0) || !(actualDays > 0) || !(idealDays > 0)) return null;
-    return { key: group.key, estimateHours, actualHours: actual, actualDays, idealDays, ratio: actualDays / idealDays, end };
-  }).filter(Boolean).sort((left, right) => String(left.end).localeCompare(String(right.end)));
-  const rows = [];
-  for (let index = 0; index < epics.length; index += 1) {
-    const current = epics[index];
-    const previous = epics.slice(0, index).map((row) => row.ratio);
-    if (previous.length < 3) continue;
-    const p50 = current.idealDays * quantile(previous, 0.5);
-    const p80 = current.idealDays * quantile(previous, 0.8);
-    const p90 = current.idealDays * quantile(previous, 0.9);
-    rows.push({ key: current.key, actualDays: current.actualDays, p50, p80, p90 });
-  }
-  const actualDays = rows.reduce((sum, row) => sum + row.actualDays, 0);
-  return {
-    sample: rows.length,
-    maeDays: rows.length ? Number((rows.reduce((sum, row) => sum + Math.abs(row.p50 - row.actualDays), 0) / rows.length).toFixed(1)) : null,
-    wapeDays: actualDays ? Number((rows.reduce((sum, row) => sum + Math.abs(row.p50 - row.actualDays), 0) / actualDays).toFixed(3)) : null,
-    coverage: {
-      p50: rows.length ? Number((rows.filter((row) => row.actualDays <= row.p50).length / rows.length).toFixed(2)) : null,
-      p80: rows.length ? Number((rows.filter((row) => row.actualDays <= row.p80).length / rows.length).toFixed(2)) : null,
-      p90: rows.length ? Number((rows.filter((row) => row.actualDays <= row.p90).length / rows.length).toFixed(2)) : null
-    },
-    rows: rows.slice(-10)
-  };
-}
+
+// Совместимый реэкспорт: прямые импорты из portfolio.js продолжают работать.
+export { backtestPortfolio } from "./backtest.js";

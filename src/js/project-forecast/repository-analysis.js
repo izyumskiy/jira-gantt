@@ -3,12 +3,6 @@
 import { buildTechnologyProfile } from "../../modules/project-planning/repository/technology-profile.js";
 import { detectProjectIntent, repositoryWorkItems } from "../../modules/project-planning/repository/work-items.js";
 
-const GITLAB_ORIGIN = "https://gitlab.asna.pro";
-const REPOSITORIES = {
-  aoBackend: { id: "alphaone/alphaone-backend", label: "AO backend", url: `${GITLAB_ORIGIN}/alphaone/alphaone-backend`, area: "backend" },
-  sharedFrontend: { id: "alphaone/alphaone-frontend", label: "AO / DATAPLT frontend", url: `${GITLAB_ORIGIN}/alphaone/alphaone-frontend`, area: "frontend" },
-  dataPlatform: { id: "tsk-core/main-backend", label: "DATAPLT backend", url: `${GITLAB_ORIGIN}/tsk-core/main-backend`, area: "data" }
-};
 const MAX_TREE_PAGES = 12;
 const TREE_PAGE_SIZE = 100;
 const MAX_INSPECTED_FILES = 24;
@@ -31,39 +25,46 @@ const sourceText = (source = {}) => [
   ...(source.remoteLinks || []).flatMap((item) => [item.url, item.title])
 ].filter(Boolean).join("\n");
 
-export async function ensureGitLabPermission() {
-  const origins = [`${GITLAB_ORIGIN}/*`];
-  if (await chrome.permissions.contains({ origins })) return true;
-  return chrome.permissions.request({ origins });
-}
-
-function repositoryFromUrl(value) {
+function repositoryFromUrl(value, { trustedGitLabLink = false } = {}) {
   let url;
   try { url = new URL(value); } catch { return null; }
-  if (url.origin !== GITLAB_ORIGIN) return null;
+  if (!/^https?:$/.test(url.protocol)) return null;
   const path = decodeURIComponent(url.pathname).replace(/^\/+|\/+$/g, "");
+  const gitLabShaped = path.includes("/-/") || /gitlab/i.test(url.hostname);
+  if (!trustedGitLabLink && !gitLabShaped) return null;
   const projectPath = path.includes("/-/") ? path.split("/-/")[0] : path;
   if (!projectPath || projectPath.split("/").length < 2) return null;
-  return { id: projectPath, label: projectPath.split("/").pop(), url: `${GITLAB_ORIGIN}/${projectPath}`, area: "" };
+  return {
+    origin: url.origin,
+    id: projectPath,
+    label: projectPath.split("/").pop(),
+    url: `${url.origin}/${projectPath}`,
+    area: ""
+  };
 }
 
 function linkedRepositories(source = {}) {
-  const urls = sourceText(source).match(/https?:\/\/gitlab\.asna\.pro\/[^\s<>"')]+/gi) || [];
-  return urls.map((value) => repositoryFromUrl(value.replace(/[.,;!?]+$/, ""))).filter(Boolean);
+  const textUrls = sourceText(source).match(/https?:\/\/[^\s<>"')]+/gi) || [];
+  const fromText = textUrls.map((value) => repositoryFromUrl(value.replace(/[.,;!?]+$/, ""))).filter(Boolean);
+  const fromRemoteLinks = (source.remoteLinks || []).map((link) => repositoryFromUrl(link?.url, {
+    trustedGitLabLink: /gitlab/i.test(`${link?.applicationType || ""} ${link?.applicationName || ""} ${link?.title || ""}`)
+  })).filter(Boolean);
+  return [...fromText, ...fromRemoteLinks];
 }
 
 export function repositoriesFor(source = {}) {
-  const key = String(source.key || "").toUpperCase();
-  const text = normalize(sourceText(source));
-  const repositories = [...linkedRepositories(source)];
-  if (key.startsWith("AO-")) repositories.push(REPOSITORIES.aoBackend);
-  if (/^(DBD|DATAPLT|TSK)-/.test(key)) repositories.push(REPOSITORIES.dataPlatform);
-  if (/frontend|фронтенд|интерфейс|экран|форма|\bui\b/.test(text)) repositories.push(REPOSITORIES.sharedFrontend);
-  return [...new Map(repositories.map((repository) => [repository.id, repository])).values()];
+  return [...new Map(linkedRepositories(source).map((repository) => [`${repository.origin}/${repository.id}`, repository])).values()];
 }
 
-async function gitlab(path, accept = "application/json", includeMeta = false) {
-  const response = await fetch(`${GITLAB_ORIGIN}${path}`, {
+export async function ensureGitLabPermission(repositoriesOrSource = []) {
+  const repositories = Array.isArray(repositoriesOrSource) ? repositoriesOrSource : repositoriesFor(repositoriesOrSource);
+  const origins = [...new Set(repositories.map((repository) => `${repository.origin}/*`).filter(Boolean))];
+  if (!origins.length || await chrome.permissions.contains({ origins })) return true;
+  return chrome.permissions.request({ origins });
+}
+
+async function gitlab(origin, path, accept = "application/json", includeMeta = false) {
+  const response = await fetch(`${origin}${path}`, {
     method: "GET",
     credentials: "include",
     headers: { Accept: accept }
@@ -83,31 +84,31 @@ async function gitlab(path, accept = "application/json", includeMeta = false) {
   return includeMeta ? { data, totalPages: Number(response.headers.get("x-total-pages") || 0) } : data;
 }
 
-async function optionalFile(projectId, file, branch) {
+async function optionalFile(origin, projectId, file, branch) {
   try {
     const path = `/api/v4/projects/${encodeURIComponent(projectId)}/repository/files/${encodeURIComponent(file)}/raw?ref=${encodeURIComponent(branch)}`;
-    return await gitlab(path, "text/plain");
+    return await gitlab(origin, path, "text/plain");
   } catch (error) {
     if (error.status === 404) return "";
     throw error;
   }
 }
 
-async function optionalJson(path, fallback = {}) {
-  try { return await gitlab(path); } catch (error) {
+async function optionalJson(origin, path, fallback = {}) {
+  try { return await gitlab(origin, path); } catch (error) {
     if (error.status === 404) return fallback;
     throw error;
   }
 }
 
-async function repositoryTree(projectId, branch) {
+async function repositoryTree(origin, projectId, branch) {
   const pagePath = (page) => `/api/v4/projects/${encodeURIComponent(projectId)}/repository/tree?recursive=true&per_page=${TREE_PAGE_SIZE}&page=${page}&ref=${encodeURIComponent(branch)}`;
-  const first = await gitlab(pagePath(1), "application/json", true);
+  const first = await gitlab(origin, pagePath(1), "application/json", true);
   const firstRows = first.data || [];
   if (firstRows.length < TREE_PAGE_SIZE) return { rows: firstRows, truncated: false };
   const requestedPages = first.totalPages ? Math.min(first.totalPages, MAX_TREE_PAGES) : MAX_TREE_PAGES;
   const rest = requestedPages > 1
-    ? await Promise.all(Array.from({ length: requestedPages - 1 }, (_, index) => gitlab(pagePath(index + 2))))
+    ? await Promise.all(Array.from({ length: requestedPages - 1 }, (_, index) => gitlab(origin, pagePath(index + 2))))
     : [];
   const rows = [firstRows, ...rest].flat();
   const lastPage = rest.at(-1) || firstRows;
@@ -138,23 +139,18 @@ function inspectedPaths(tree) {
     .slice(0, MAX_INSPECTED_FILES);
 }
 
-function targetLaravel(source) {
-  const match = /laravel[^0-9]{0,20}(?:верс(?:ия|ии|ию)?\s*)?v?(\d{1,2})/i.exec(sourceText(source));
-  return match ? Number(match[1]) : null;
-}
-
 async function inspectRepository(repository, source, onProgress) {
   onProgress?.(`GitLab: ${repository.label} — определяю ветку`);
-  const project = await gitlab(`/api/v4/projects/${encodeURIComponent(repository.id)}`);
+  const project = await gitlab(repository.origin, `/api/v4/projects/${encodeURIComponent(repository.id)}`);
   const branch = project.default_branch || "main";
   onProgress?.(`GitLab: ${repository.label} — определяю стек и тестовый контур`);
   const [treeResult, languages] = await Promise.all([
-    repositoryTree(repository.id, branch),
-    optionalJson(`/api/v4/projects/${encodeURIComponent(repository.id)}/languages`, {})
+    repositoryTree(repository.origin, repository.id, branch),
+    optionalJson(repository.origin, `/api/v4/projects/${encodeURIComponent(repository.id)}/languages`, {})
   ]);
   const paths = treeResult.rows.filter((item) => item.type === "blob").map((item) => item.path);
   const candidates = inspectedPaths(treeResult.rows);
-  const loaded = await Promise.all(candidates.map(async (path) => [path, await optionalFile(repository.id, path, branch)]));
+  const loaded = await Promise.all(candidates.map(async (path) => [path, await optionalFile(repository.origin, repository.id, path, branch)]));
   const contents = new Map(loaded.filter(([, content]) => content));
   const technologyProfile = buildTechnologyProfile({ paths, contents, languages, treeTruncated: treeResult.truncated });
   const result = {
@@ -163,14 +159,7 @@ async function inspectRepository(repository, source, onProgress) {
     lastActivityAt: project.last_activity_at || "",
     files: [...contents.keys()],
     testFiles: technologyProfile.tests.files,
-    technologyProfile,
-    framework: {
-      // Поле совместимости со старой интеграцией; оно больше не управляет анализом.
-      laravelConstraint: technologyProfile.php.laravelConstraint,
-      laravelLocked: technologyProfile.php.laravelLocked,
-      phpConstraint: technologyProfile.php.constraint,
-      targetLaravel: targetLaravel(source)
-    }
+    technologyProfile
   };
   result.workItems = repositoryWorkItems(result, source);
   return result;
@@ -182,9 +171,9 @@ export async function loadRepositoryAnalysis(source, onProgress) {
     requested: true, complete: false, repositories: [], workItems: [],
     warnings: ["В Jira не найдено подтверждённой связи с GitLab-репозиторием. Прогноз продолжен без предположения о технологическом стеке."]
   };
-  if (!(await ensureGitLabPermission())) return {
+  if (!(await ensureGitLabPermission(repositories))) return {
     requested: true, complete: false, repositories: [], workItems: [],
-    warnings: ["Не выдано разрешение на чтение gitlab.asna.pro."]
+    warnings: [`Не выдано разрешение на чтение связанных GitLab-доменов: ${[...new Set(repositories.map((repository) => repository.origin))].join(", ")}.`]
   };
   const inspected = [];
   const warnings = [];

@@ -62,7 +62,10 @@ async function jiraRequirementSource(value, onProgress) {
     "timeoriginalestimate", "timeestimate", "timespent", "subtasks", "issuelinks", resolved.epicLink
   ].filter(Boolean);
   const issue = await jira.request(`/rest/api/2/issue/${encodeURIComponent(key)}?fields=${encodeURIComponent(fields.join(","))}`);
-  const comments = await jira.comments(key).catch(() => []);
+  const [comments, remoteLinks] = await Promise.all([
+    jira.comments(key).catch(() => []),
+    jira.request(`/rest/api/2/issue/${encodeURIComponent(key)}/remotelink`).catch(() => [])
+  ]);
   let children = [];
   if (/эпик|epic/i.test(issue.fields?.issuetype?.name || "")) {
     const childFields = [
@@ -89,6 +92,13 @@ async function jiraRequirementSource(value, onProgress) {
     type: "jira",
     url: String(value || "").includes("/") ? String(value).trim() : `${String(settings.get().baseUrl || "").replace(/\/+$/, "")}/browse/${key}`,
     comments: comments.map((comment) => ({ body: richText(comment.body), author: comment.author?.displayName || "", created: comment.created || "" })),
+    remoteLinks: (Array.isArray(remoteLinks) ? remoteLinks : []).map((link) => ({
+      url: link?.object?.url || "",
+      title: link?.object?.title || "",
+      relationship: link?.relationship || "",
+      applicationType: link?.application?.type || "",
+      applicationName: link?.application?.name || ""
+    })).filter((link) => link.url),
     children: children.map(sourceIssue)
   };
 }

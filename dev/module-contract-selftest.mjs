@@ -13,9 +13,9 @@ assert.deepEqual(moduleCatalog.map((module) => module.id), [
   "asna.project-planning"
 ]);
 assert.ok(moduleCatalog.every((module) => module.readOnly));
-assert.equal(moduleCatalog.find((module) => module.id === "asna.project-planning").version, "1.2.0");
+assert.equal(moduleCatalog.find((module) => module.id === "asna.project-planning").version, "2.0.0");
 
-const team = { id: "tempo-1", name: "AO", active: true };
+const team = { id: "tempo-1", name: "Команда продукта", active: true };
 const member = {
   id: "tempo-1::ivan",
   teamId: team.id,
@@ -27,7 +27,7 @@ const member = {
   active: true
 };
 const historyIssue = {
-  key: "AO-100",
+  key: "SAMPLE-100",
   summary: "Backend API",
   assignee: { username: "ivan", displayName: "Иванов Иван" },
   status: "Done",
@@ -61,14 +61,14 @@ assert.equal(headlessPeople.analyzeSnapshot({
   period: { from: "2026-08-01", to: "2026-08-31" }
 }).employees.length, 1);
 
-const ownWorkload = { key: "AO-5886", epicKey: "AO-5885", assignee: { username: "ivan" }, remainingDays: 10 };
+const ownWorkload = { key: "TARGET-101", epicKey: "TARGET-100", assignee: { username: "ivan" }, remainingDays: 10 };
 const otherWorkload = { key: "BAZA-1", epicKey: "BAZA-100", assignee: { username: "ivan" }, remainingDays: 1, isBaza: true };
 const filtered = excludeProjectWorkload([ownWorkload, otherWorkload], {
-  key: "AO-5885",
-  children: [{ key: "AO-5886" }]
+  key: "TARGET-100",
+  children: [{ key: "TARGET-101" }]
 });
 assert.deepEqual(filtered.workload.map((issue) => issue.key), ["BAZA-1"]);
-assert.deepEqual(filtered.excluded.map((issue) => issue.key), ["AO-5886"]);
+assert.deepEqual(filtered.excluded.map((issue) => issue.key), ["TARGET-101"]);
 
 const employee = {
   id: "person::ivan",
@@ -82,16 +82,16 @@ const employee = {
 };
 const jiraSource = {
   type: "jira",
-  key: "AO-5885",
-  title: "Переход на Laravel 11",
-  description: "Нужно обновить backend на Laravel 11. Критерии приёмки: API работает и тесты проходят.",
+  key: "TARGET-100",
+  title: "Обновление зависимостей backend",
+  description: "Нужно обновить зависимости backend. Критерии приёмки: API работает и тесты проходят.",
   comments: [],
   children: [{
     type: "jira",
-    key: "AO-5886",
-    title: "Обновить Laravel",
-    summary: "Обновить Laravel",
-    description: "Обновить framework и зависимости. Критерии приёмки: тесты проходят.",
+    key: "TARGET-101",
+    title: "Обновить зависимости",
+    summary: "Обновить зависимости",
+    description: "Обновить зависимости и устранить несовместимости. Критерии приёмки: тесты проходят.",
     originalEstimateSeconds: 16 * 3600,
     remainingEstimateSeconds: 16 * 3600,
     assignee: { username: "ivan" }
@@ -106,7 +106,7 @@ const planning = createProjectPlanningModule({
       workload: [ownWorkload, otherWorkload],
       vacations: [],
       activeProjects: [
-        { key: "AO-5885", summary: "Оцениваемый проект" },
+        { key: "TARGET-100", summary: "Оцениваемый проект" },
         { key: "BAZA-100", summary: "Внешняя нагрузка" }
       ]
     })
@@ -114,7 +114,7 @@ const planning = createProjectPlanningModule({
   settingsProvider: () => ({ hoursPerDay: 8 })
 });
 const plan = await planning.run({
-  project: "AO-5885",
+  project: "TARGET-100",
   people: [employee],
   teams: [team],
   historyFrom: "2026-08-01",
@@ -123,12 +123,13 @@ const plan = await planning.run({
 });
 assert.equal(plan.result.workloadDiagnostics.received, 2);
 assert.equal(plan.result.workloadDiagnostics.used, 1);
-assert.deepEqual(plan.result.workloadDiagnostics.excludedProjectIssues, ["AO-5886"]);
+assert.deepEqual(plan.result.workloadDiagnostics.excludedProjectIssues, ["TARGET-101"]);
 assert.equal(plan.result.workloadCount, 1);
 assert.ok(plan.analysis.baseHours > 0);
 assert.deepEqual(plan.activeProjects.map((project) => project.key), ["BAZA-100"]);
 assert.ok(Number.isFinite(plan.result.portfolio.portfolioDelayDays));
 assert.ok(Array.isArray(plan.result.portfolio.capacity));
 assert.ok(Array.isArray(plan.result.portfolio.resourceSensitivity));
+assert.ok(plan.result.workItems.every((item) => item.estimateExplanation?.scenarios?.p80));
 
 console.log("Module contract self-test: OK");

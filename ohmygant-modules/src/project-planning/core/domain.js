@@ -1,5 +1,6 @@
 // Чистая расчётная модель прогноза проекта. Здесь нет DOM, Jira API и IndexedDB.
 import { addDays, dateKey, daysBetween, isWorkingDay, parseDate } from "./calendar.js";
+import { explainWorkItem, forecastAdjustment } from "./explainability.js";
 import { normalizeIdentity, personAliases, samePerson } from "./identity.js";
 import { buildPortfolioCalendar, portfolioCapacitySummary } from "./portfolio.js";
 
@@ -138,16 +139,6 @@ function laterDate(left, right) {
   if (!left) return right || "";
   if (!right) return left;
   return parseDate(left) >= parseDate(right) ? left : right;
-}
-
-function calibratedFactor(item, scenario, fallbackFactors, minimumUnknownPercent = 0) {
-  const factors = item.calibration?.factors;
-  if (!factors) return Number(fallbackFactors[scenario] || 1);
-  const optimistic = clamp(factors.optimistic || 1, 0.4, 4);
-  const minimumUnknown = clamp(minimumUnknownPercent, 0, 200) / 100;
-  const realistic = Math.max(clamp(factors.realistic || optimistic, optimistic, 5), optimistic * (1 + minimumUnknown));
-  const pessimistic = Math.max(clamp(factors.pessimistic || realistic, realistic, 6), realistic);
-  return scenario === "optimistic" ? optimistic : scenario === "realistic" ? realistic : pessimistic;
 }
 
 function topologicalWorkItems(items) {
@@ -292,16 +283,18 @@ export function forecastProject(input) {
   const activeEpicsByEmployee = new Map(employees.map((employee) => [employee.id, new Set(
     (input.workload || []).filter((issue) => samePerson(employee, issue.assignee || {})).map((issue) => issue.epicKey || issue.projectKey).filter(Boolean)
   )]));
-  const factorFor = (scenario) => (item) => {
+  const adjustmentFor = (scenario) => (item) => {
     const employee = employees.find((candidate) => candidate.id === item.assigneeId) || employees[0];
-    const observed = activeEpicsByEmployee.get(employee.id)?.size
-      ? clamp(employee.multitaskingFactor || 1, 1, 1.5)
-      : 1;
-    const contextFactor = scenario === "optimistic" ? 1 + (observed - 1) * 0.5
-      : scenario === "realistic" ? observed
-      : 1 + (observed - 1) * 1.25;
-    return calibratedFactor(item, scenario, fallbackFactors, input.unknownPercent) * contextFactor;
+    return forecastAdjustment({
+      item,
+      employee,
+      scenario,
+      fallbackFactors,
+      minimumUnknownPercent: input.unknownPercent,
+      activeProjectCount: activeEpicsByEmployee.get(employee.id)?.size || 0
+    });
   };
+  const factorFor = (scenario) => (item) => adjustmentFor(scenario)(item).totalFactor;
   const weightedFactor = (scenario) => workItems.reduce((sum, item) => sum + item.estimateHours * factorFor(scenario)(item), 0) / scopeHours;
   const factors = {
     ...fallbackFactors,
@@ -337,6 +330,19 @@ export function forecastProject(input) {
   const optimistic = publicScenario(optimisticRun);
   const realistic = publicScenario(realisticRun);
   const pessimistic = publicScenario(pessimisticRun);
+  const explainedWorkItems = realistic.workItems.map((item) => {
+    const employee = employees.find((candidate) => candidate.id === item.assigneeId) || employees[0];
+    return {
+      ...item,
+      estimateExplanation: explainWorkItem({
+        item,
+        employee,
+        fallbackFactors,
+        minimumUnknownPercent: input.unknownPercent,
+        activeProjectCount: activeEpicsByEmployee.get(employee.id)?.size || 0
+      })
+    };
+  });
 
   const withoutPortfolio = scheduleWorkItems({
     employees, busy: emptyBusy(employees), absences: vacations.byEmployee, holidays, planningStart,
@@ -432,7 +438,7 @@ export function forecastProject(input) {
     scopeHours: Number(scopeHours.toFixed(1)),
     scopeDays,
     hoursPerDay,
-    workItems: realistic.workItems,
+    workItems: explainedWorkItems,
     factors,
     scenarios: { optimistic, realistic, pessimistic },
     employees: employeeRows,

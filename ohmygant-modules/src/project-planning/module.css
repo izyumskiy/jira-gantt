@@ -167,6 +167,16 @@
 .pf-backtest { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin-top: 12px; padding: 10px; border: 1px solid var(--line); border-radius: 5px; }
 .pf-backtest span { color: var(--muted); }
 .pf-backtest small { flex-basis: 100%; color: var(--muted); }
+.pf-backtest.has-drift { border-color: #ff8b00; }
+.pf-estimate-trace { margin-top: 7px; padding-top: 6px; border-top: 1px dashed var(--line); }
+.pf-estimate-trace summary { color: var(--accent); cursor: pointer; font-weight: 700; }
+.pf-estimate-trace p { margin: 7px 0 4px; }
+.pf-estimate-trace ul { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
+.pf-estimate-trace li { display: grid; grid-template-columns: minmax(110px, 1fr) auto; gap: 2px 8px; }
+.pf-estimate-trace li small { grid-column: 1 / -1; }
+.pf-estimate-trace > div { display: grid; gap: 4px; margin-top: 7px; }
+.pf-estimate-trace > div > span { display: grid; grid-template-columns: auto 1fr; gap: 2px 5px; }
+.pf-estimate-trace > div small { grid-column: 1 / -1; }
 .pf-muted { color: var(--muted); }
 .pf-evidence h3 { margin-top: 0; }
 .pf-facts { display: flex; flex-wrap: wrap; gap: 8px; }

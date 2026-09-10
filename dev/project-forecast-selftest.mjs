@@ -41,18 +41,18 @@ const petr = {
 };
 
 const roster = mergeRoster([
-  { id: "1::ivan", teamId: "1", teamName: "DATAPLT", username: "ivan", displayName: "Иванов Иван", role: "Backend", commitment: 60, active: true, skills: ["Python"] },
-  { id: "2::ivan", teamId: "2", teamName: "AO", username: "ivan", displayName: "Иванов Иван", role: "Reviewer", commitment: 40, active: true, skills: ["SQL"] }
+  { id: "1::ivan", teamId: "1", teamName: "Команда данных", username: "ivan", displayName: "Иванов Иван", role: "Backend", commitment: 60, active: true, skills: ["Python"] },
+  { id: "2::ivan", teamId: "2", teamName: "Команда продукта", username: "ivan", displayName: "Иванов Иван", role: "Reviewer", commitment: 40, active: true, skills: ["SQL"] }
 ]);
 assert.equal(roster.length, 1, "Сотрудник из нескольких команд должен отображаться один раз");
-assert.deepEqual(roster[0].teamNames, ["DATAPLT", "AO"]);
+assert.deepEqual(roster[0].teamNames, ["Команда данных", "Команда продукта"]);
 assert.equal(roster[0].commitment, 100);
-assert.equal(issueSourceKey("https://jira.asna.pro/browse/DBD-752"), "DBD-752");
-assert.equal(issueSourceKey("dataplt-3105"), "DATAPLT-3105");
-assert.equal(confluencePageId("https://confluence.asna.pro/pages/viewpage.action?pageId=77728022"), "77728022");
-assert.equal(confluencePageId("https://example.test/wiki/spaces/AO/pages/77728022/Requirements"), "77728022");
-assert.equal(confluenceContextPath("https://confluence.asna.pro/pages/viewpage.action?pageId=1"), "");
-assert.equal(confluenceContextPath("https://example.test/wiki/spaces/AO/pages/1/Requirements"), "/wiki");
+assert.equal(issueSourceKey("https://jira.example.test/browse/SAMPLE-752"), "SAMPLE-752");
+assert.equal(issueSourceKey("sample-3105"), "SAMPLE-3105");
+assert.equal(confluencePageId("https://confluence.example.test/pages/viewpage.action?pageId=77728022"), "77728022");
+assert.equal(confluencePageId("https://example.test/wiki/spaces/DEMO/pages/77728022/Requirements"), "77728022");
+assert.equal(confluenceContextPath("https://confluence.example.test/pages/viewpage.action?pageId=1"), "");
+assert.equal(confluenceContextPath("https://example.test/wiki/spaces/DEMO/pages/1/Requirements"), "/wiki");
 const savedChrome = globalThis.chrome;
 const savedFetch = globalThis.fetch;
 globalThis.chrome = { permissions: { contains: async () => true, request: async () => true } };
@@ -62,21 +62,24 @@ globalThis.fetch = async () => ({
   text: async () => JSON.stringify({ statusCode: 404, data: { authorized: false, valid: true } })
 });
 await assert.rejects(
-  loadRequirementSource("https://confluence.asna.pro/pages/viewpage.action?pageId=77728022"),
+  loadRequirementSource("https://confluence.example.test/pages/viewpage.action?pageId=77728022"),
   (error) => error.code === "CONFLUENCE_AUTH_REQUIRED"
     && error.actionUrl.includes("pageId=77728022")
     && !error.message.includes("statusCode")
 );
 globalThis.chrome = savedChrome;
 globalThis.fetch = savedFetch;
-assert.deepEqual(repositoriesFor({ key: "AO-5885", title: "Переход на новую версию Laravel" }).map((row) => row.id), ["alphaone/alphaone-backend"]);
-assert.deepEqual(repositoriesFor({ key: "AO-5885", title: "Переход на новую версию Laravel и обновление frontend" }).map((row) => row.id), ["alphaone/alphaone-backend", "alphaone/alphaone-frontend"]);
-assert.deepEqual(repositoriesFor({ key: "DBD-752", title: "Проект платформы данных" }).map((row) => row.id), ["tsk-core/main-backend"]);
+assert.deepEqual(repositoriesFor({ key: "SAMPLE-1", title: "Обновление backend" }), [], "Ключ и название проекта не должны неявно выбирать репозиторий");
+assert.deepEqual(repositoriesFor({ key: "SAMPLE-2", title: "Новый frontend экран" }), [], "Технологические слова не должны неявно выбирать репозиторий");
 assert.deepEqual(repositoriesFor({
   key: "OTHER-1",
-  description: "Код: https://gitlab.asna.pro/team/product/-/tree/main"
+  description: "Код: https://gitlab.example.test/team/product/-/tree/main"
 }).map((row) => row.id), ["team/product"], "Явная GitLab-ссылка должна подключать репозиторий без жёсткой привязки к Jira-проекту");
-assert.deepEqual(repositoriesFor({ key: "OTHER-2", description: "Репозиторий https://gitlab.asna.pro/group/subgroup/product" }).map((row) => row.id), ["group/subgroup/product"]);
+assert.deepEqual(repositoriesFor({ key: "OTHER-2", description: "Репозиторий https://gitlab.example.test/group/subgroup/product" }).map((row) => row.id), ["group/subgroup/product"]);
+assert.deepEqual(repositoriesFor({
+  key: "OTHER-3",
+  remoteLinks: [{ url: "https://code.example.test/group/service", title: "Repository", applicationType: "GitLab" }]
+}).map((row) => [row.origin, row.id]), [["https://code.example.test", "group/service"]], "Jira remote link должен поддерживать произвольный GitLab-домен");
 
 const airflowProfile = buildTechnologyProfile({
   paths: ["pyproject.toml", "dags/orders.py", "dags/tests/test_orders.py", "models/orders.sql", ".gitlab-ci.yml"],
@@ -88,24 +91,21 @@ const airflowProfile = buildTechnologyProfile({
 });
 assert.ok(airflowProfile.technologies.includes("Airflow"));
 assert.ok(airflowProfile.technologies.includes("dbt"));
-assert.ok(!airflowProfile.technologies.some((item) => item.includes("Laravel")), "Data-проект не должен получать Laravel-маркер");
-const airflowItems = repositoryWorkItems({ label: "DATAPLT backend", area: "data", technologyProfile: airflowProfile }, {
-  key: "DBD-999",
+const airflowItems = repositoryWorkItems({ label: "data-service", area: "data", technologyProfile: airflowProfile }, {
+  key: "SAMPLE-999",
   title: "Добавить Airflow DAG загрузки заказов",
   description: "Нужны новая витрина и сверка данных. Провести тестирование."
 });
 assert.ok(airflowItems.some((item) => item.kind === "data-pipeline"));
-assert.ok(airflowItems.every((item) => !/laravel/i.test(`${item.title} ${item.text}`)));
 const airflowAnalysis = analyzeProject({
   source: composeProjectSource({
-    jira: { type: "jira", key: "DBD-999", title: "Добавить загрузку заказов", description: "Нужны новая витрина и сверка данных.", comments: [], children: [] },
+    jira: { type: "jira", key: "SAMPLE-999", title: "Добавить загрузку заказов", description: "Нужны новая витрина и сверка данных.", comments: [], children: [] },
     repositoryAnalysis: { requested: true, complete: true, repositories: [{ technologyProfile: airflowProfile }], workItems: airflowItems }
   }),
   employees: [ivan],
   history: []
 });
 assert.ok(airflowAnalysis.technologies.includes("Airflow"), "Подтверждённый GitLab-стек должен попадать в системный анализ");
-assert.ok(!airflowAnalysis.technologies.some((item) => /laravel/i.test(item)));
 
 const frontendProfile = buildTechnologyProfile({
   paths: ["apps/web/package.json", "apps/web/src/App.tsx", "apps/web/src/App.test.tsx", "Dockerfile"],
@@ -117,21 +117,30 @@ assert.ok(repositoryWorkItems({ label: "frontend", area: "frontend", technologyP
   title: "Добавить экран управления заказами",
   description: "Реализовать интерфейс и состояния ошибок"
 }).some((item) => item.kind === "frontend-implementation"));
+const screenUpdateItems = repositoryWorkItems({ label: "web-client", technologyProfile: frontendProfile }, {
+  title: "Обновить экран управления заказами",
+  description: "Изменить интерфейс и состояния ошибок"
+});
+assert.ok(screenUpdateItems.some((item) => item.kind === "frontend-implementation"));
+assert.ok(!screenUpdateItems.some((item) => item.kind === "dependency-upgrade"), "Обычное обновление UI не должно считаться обновлением зависимостей");
 
-const laravelProfile = buildTechnologyProfile({
+const dependencyProfile = buildTechnologyProfile({
   paths: ["composer.json", "composer.lock", "app/Http/Controller.php", "tests/Feature/SmokeTest.php", ".gitlab-ci.yml"],
   contents: new Map([
-    ["composer.json", JSON.stringify({ require: { php: "^8.2", "laravel/framework": "^10.0" }, "require-dev": { "phpunit/phpunit": "^10" } })],
-    ["composer.lock", JSON.stringify({ packages: [{ name: "laravel/framework", version: "v10.4.0" }], "packages-dev": [] })],
+    ["composer.json", JSON.stringify({ require: { php: "^8.2", "vendor/runtime-core": "^4.0" }, "require-dev": { "phpunit/phpunit": "^10" } })],
+    ["composer.lock", JSON.stringify({ packages: [{ name: "vendor/runtime-core", version: "v4.2.0" }], "packages-dev": [] })],
     [".gitlab-ci.yml", "phpunit"]
   ]),
   languages: { PHP: 100 }
 });
-assert.equal(detectProjectIntent({ title: "Переход на Laravel 11" }).laravel, true);
-assert.ok(repositoryWorkItems({ label: "AO backend", area: "backend", technologyProfile: laravelProfile }, {
-  title: "Переход на Laravel 11",
+assert.equal(detectProjectIntent({ title: "Обновить зависимости", description: "Обновить Composer-пакеты" }).upgrade, true);
+const dependencyItems = repositoryWorkItems({ label: "backend-service", area: "backend", technologyProfile: dependencyProfile }, {
+  title: "Обновить зависимости",
   description: "Обновить Composer-зависимости и выполнить регрессию"
-}).some((item) => item.kind === "framework-upgrade"), "Laravel-анализ должен сохраниться для подтверждённого Laravel-проекта");
+});
+assert.ok(dependencyItems.some((item) => item.kind === "dependency-audit"));
+assert.ok(dependencyItems.some((item) => item.kind === "dependency-upgrade"));
+assert.ok(dependencyItems.some((item) => item.kind === "breaking-changes"));
 
 assert.equal(dateKey("2026-09-14T12:00:00+03:00"), "2026-09-14");
 assert.deepEqual(vacationWindow({
@@ -223,7 +232,7 @@ const parallelPortfolio = forecastProject({
   planningStart: "2026-09-14",
   unknownPercent: 0,
   workload: [{
-    key: "AO-OLD-1", epicKey: "AO-OLD", epicSummary: "Активный эпик", assignee: { username: "ivan" },
+    key: "ACTIVE-OLD-1", epicKey: "ACTIVE-OLD", epicSummary: "Активный эпик", assignee: { username: "ivan" },
     remainingHours: 20, remainingScenarios: { optimistic: 20, realistic: 20, pessimistic: 20 },
     scheduled: true, sprints: [{ id: 1, name: "Sprint 1", state: "active", startDate: "2026-09-14", endDate: "2026-09-18" }]
   }],
@@ -239,7 +248,7 @@ assert.ok(parallelPortfolio.portfolio.capacity.every((row) => row.occupiedHours 
 const spilloverPortfolio = forecastProject({
   employees: [ivan], scopeDays: 1, planningStart: "2026-09-14", unknownPercent: 0,
   workload: [{
-    key: "AO-OVER-1", epicKey: "AO-OVER", assignee: { username: "ivan" }, remainingHours: 48,
+    key: "ACTIVE-OVER-1", epicKey: "ACTIVE-OVER", assignee: { username: "ivan" }, remainingHours: 48,
     remainingScenarios: { optimistic: 48, realistic: 48, pessimistic: 48 }, scheduled: true,
     sprints: [{ id: 1, name: "Sprint 1", state: "active", startDate: "2026-09-14", endDate: "2026-09-18" }]
   }], vacations: []
@@ -282,15 +291,15 @@ assert.match(staleRemaining.workload[0].remainingSource, /не обновлял�
 assert.ok(staleRemaining.warnings.some((warning) => warning.includes("Remaining Estimate")));
 
 assert.deepEqual(jiraDependencyKeys([{
-  type: { inward: "is blocked by", outward: "blocks" }, inwardIssue: { key: "AO-10" }
+  type: { inward: "is blocked by", outward: "blocks" }, inwardIssue: { key: "LINK-10" }
 }, {
-  type: { inward: "depends on", outward: "is required for" }, inwardIssue: { key: "AO-11" }
-}]), ["AO-10", "AO-11"]);
+  type: { inward: "depends on", outward: "is required for" }, inwardIssue: { key: "LINK-11" }
+}]), ["LINK-10", "LINK-11"]);
 
 const bazaKeepsStarted = forecastProject({
   employees: [ivan], scopeDays: 1, planningStart: "2026-09-14", unknownPercent: 0, projectIsBaza: true,
   workload: [{
-    key: "AO-STARTED", epicKey: "AO-OLD", assignee: { username: "ivan" }, status: "В работе", inProgress: true,
+    key: "ACTIVE-STARTED", epicKey: "ACTIVE-OLD", assignee: { username: "ivan" }, status: "В работе", inProgress: true,
     remainingHours: 8, remainingScenarios: { optimistic: 8, realistic: 8, pessimistic: 8 }, scheduled: true,
     plannedStart: "2026-09-14", plannedEnd: "2026-09-14", isBaza: false
   }], vacations: []
@@ -318,17 +327,28 @@ const portfolioBacktest = backtestPortfolio(portfolioHistory, [ivan], 8);
 assert.equal(portfolioBacktest.sample, 3);
 assert.equal(portfolioBacktest.maeDays, 0);
 assert.equal(portfolioBacktest.coverage.p80, 1);
+assert.equal(portfolioBacktest.eligibleInitiatives, 6);
+assert.equal(portfolioBacktest.effort.wape, 0);
+assert.equal(portfolioBacktest.effort.coverage.p80, 1);
+assert.equal(portfolioBacktest.dates.maeDays, 0);
+
+const overlappingHistory = [1, 2, 3, 4].map((index) => ({
+  key: `OVERLAP-${index}-1`, epicKey: `OVERLAP-${index}`, summary: "Backend", assignee: { username: "ivan" },
+  created: "2026-01-05T10:00:00+03:00", resolved: "2026-02-06T18:00:00+03:00",
+  originalEstimateSeconds: 8 * 3600, timeSpentSeconds: 8 * 3600
+}));
+assert.equal(backtestPortfolio(overlappingHistory, [ivan], 8).sample, 0, "Пересекающиеся инициативы не должны использовать незавершённые на дату старта данные");
 
 const analysis = analyzeProject({
   source: {
     type: "jira",
-    key: "DBD-752",
+    key: "SAMPLE-752",
     title: "Выгрузка витрины и дашборд",
     description: "Нужно создать DAG Airflow для ежедневной загрузки витрины. В Superset должен отображаться дашборд. Критерии приёмки согласованы владельцем."
   },
   history: [
-    { key: "DBD-700", summary: "DAG загрузки витрины", type: "Task", originalEstimateSeconds: 28 * 3600, timeSpentSeconds: 32 * 3600, components: ["Airflow"] },
-    { key: "DBD-701", summary: "Airflow загрузка данных", type: "Task", originalEstimateSeconds: 32 * 3600, timeSpentSeconds: 30 * 3600, components: ["Airflow"] }
+    { key: "SAMPLE-700", summary: "DAG загрузки витрины", type: "Task", originalEstimateSeconds: 28 * 3600, timeSpentSeconds: 32 * 3600, components: ["Airflow"] },
+    { key: "SAMPLE-701", summary: "Airflow загрузка данных", type: "Task", originalEstimateSeconds: 32 * 3600, timeSpentSeconds: 30 * 3600, components: ["Airflow"] }
   ],
   employees: [ivan, petr],
   hoursPerDay: 8
@@ -337,9 +357,10 @@ assert.ok(analysis.baseHours > 0, "Системный анализ должен 
 assert.ok(analysis.technologies.includes("Airflow"));
 assert.ok(analysis.technologies.includes("Superset"));
 assert.ok(analysis.workItems.every((item) => item.assigneeId), "Каждая работа должна иметь ответственного");
+assert.ok(analysis.workItems.every((item) => item.estimateExplanation?.resultHours === item.estimateHours), "Каждая базовая оценка должна иметь проверяемое объяснение");
 
 const jiraProject = {
-  type: "jira", key: "DBD-752", title: "Проект витрины", description: "Нужно подготовить ежедневную витрину.",
+  type: "jira", key: "SAMPLE-752", title: "Проект витрины", description: "Нужно подготовить ежедневную витрину.",
   comments: [], children: []
 };
 const withoutArticles = analyzeProject({
@@ -372,7 +393,7 @@ assert.ok(withArticles.technologies.includes("Superset"));
 const complexProject = analyzeProject({
   source: composeProjectSource({
     jira: {
-      type: "jira", key: "DBD-999", title: "Межсистемная платформа",
+      type: "jira", key: "SAMPLE-999", title: "Межсистемная платформа",
       description: [
         "Нужно интегрировать внешний API с backend и frontend.",
         "Нужно создать несколько DAG Airflow для загрузки больших объёмов данных в DWH.",
@@ -390,10 +411,10 @@ assert.ok(complexProject.recommendedUnknownPercent > withoutArticles.recommended
 
 const repositoryBacked = analyzeProject({
   source: composeProjectSource({
-    jira: { type: "jira", key: "AO-5885", title: "Переход на Laravel 11", description: "Обновить backend AO на Laravel 11. Критерии приёмки: сервис проходит регрессионные тесты.", comments: [], children: [] },
+    jira: { type: "jira", key: "SAMPLE-300", title: "Обновление зависимостей backend", description: "Обновить зависимости backend и устранить несовместимости. Критерии приёмки: сервис проходит регрессионные тесты.", comments: [], children: [] },
     repositoryAnalysis: {
-      requested: true, complete: true, repositories: [{ id: "alphaone/alphaone-backend" }], warnings: [],
-      workItems: [{ title: "Адаптация к breaking changes · AO backend", text: "Laravel 10 → 11. Исправить несовместимости backend.", suggestedHours: 46, basis: "composer.lock · Laravel 10 → 11" }]
+      requested: true, complete: true, repositories: [{ id: "group/backend-service" }], warnings: [],
+      workItems: [{ kind: "breaking-changes", area: "backend", title: "Адаптация несовместимых изменений · backend-service", text: "Исправить подтверждённые несовместимости backend.", suggestedHours: 46, basis: "composer.lock · состав зависимостей" }]
     }
   }),
   history: [],
@@ -405,7 +426,7 @@ assert.ok(repositoryBacked.workItems.some((item) => item.basis.includes("compose
 assert.ok(repositoryBacked.workItems.some((item) => item.estimateHours === 46));
 
 const missingFrontend = analyzeProject({
-  source: { type: "jira", key: "AO-6000", title: "Новый экран", description: "Нужно реализовать frontend экран и backend API. Критерии приёмки согласованы.", children: [] },
+  source: { type: "jira", key: "SAMPLE-6000", title: "Новый экран", description: "Нужно реализовать frontend экран и backend API. Критерии приёмки согласованы.", children: [] },
   history: [],
   employees: [{ ...ivan, roles: ["Backend-разработчик"] }],
   hoursPerDay: 8
@@ -415,17 +436,17 @@ assert.ok(missingFrontend.staffingGaps.some((gap) => gap.area === "frontend"), "
 const noDoubleCount = analyzeProject({
   source: composeProjectSource({
     jira: {
-      type: "jira", key: "AO-5885", title: "Переход на Laravel 11", description: "Обновить backend AO на Laravel 11. Критерии приёмки согласованы.", comments: [],
+      type: "jira", key: "TARGET-100", title: "Обновление зависимостей сервиса", description: "Обновить зависимости backend, устранить несовместимости и провести регрессию. Критерии приёмки согласованы.", comments: [],
       children: [
-        { key: "AO-6100", summary: "Переход Laravel 10 → 11", description: "Обновить Laravel и обязательные пакеты. Критерии приёмки: приложение запускается.", originalEstimateSeconds: 24 * 3600, assignee: { username: "ivan" } },
-        { key: "AO-6101", summary: "Регрессионное тестирование Laravel", description: "Проверить критичные сценарии после обновления. Критерии приёмки: регресс пройден.", originalEstimateSeconds: 20 * 3600, assignee: { username: "qa" } }
+        { key: "TARGET-101", summary: "Обновление обязательных зависимостей", description: "Обновить обязательные пакеты и устранить несовместимости. Критерии приёмки: приложение запускается.", originalEstimateSeconds: 24 * 3600, assignee: { username: "ivan" } },
+        { key: "TARGET-102", summary: "Регрессионное тестирование обновления", description: "Проверить критичные сценарии после обновления. Критерии приёмки: регресс пройден.", originalEstimateSeconds: 20 * 3600, assignee: { username: "qa" } }
       ]
     },
     repositoryAnalysis: {
-      requested: true, complete: true, repositories: [{ id: "alphaone/alphaone-backend" }], warnings: [],
+      requested: true, complete: true, repositories: [{ id: "group/backend-service" }], warnings: [],
       workItems: [
-        { kind: "framework-upgrade", area: "backend", title: "Обновление Laravel и обязательных пакетов · AO backend", text: "Laravel 10 → 11. Обновить framework и обязательные пакеты.", suggestedHours: 38, basis: "composer.lock" },
-        { kind: "regression", area: "qa", title: "Регрессионная проверка после обновления · AO backend", text: "Laravel 10 → 11. Выполнить регрессионные тесты.", suggestedHours: 26, basis: "tests" }
+        { kind: "dependency-upgrade", area: "backend", title: "Обновление обязательных зависимостей · backend-service", text: "Обновить обязательные пакеты и устранить несовместимости.", suggestedHours: 38, basis: "dependency manifests" },
+        { kind: "regression", area: "qa", title: "Регрессионное тестирование обновления · backend-service", text: "Проверить критичные сценарии после обновления.", suggestedHours: 26, basis: "tests" }
       ]
     }
   }),
@@ -481,6 +502,10 @@ const decomposed = forecastProject({
 });
 assert.equal(decomposed.scopeHours, analysis.baseHours);
 assert.ok(decomposed.workItems.every((item) => item.start && item.end));
+assert.ok(decomposed.workItems.every((item) => item.estimateExplanation?.scenarios?.p80), "Каждая работа должна объяснять P50/P80/P90");
+assert.ok(decomposed.workItems.every((item) => item.estimateExplanation.scenarios.p50.forecastHours <= item.estimateExplanation.scenarios.p80.forecastHours));
+assert.ok(decomposed.workItems.every((item) => item.estimateExplanation.scenarios.p80.forecastHours <= item.estimateExplanation.scenarios.p90.forecastHours));
+assert.ok(decomposed.workItems.every((item) => item.forecastHours === item.estimateExplanation.scenarios.p80.forecastHours));
 assert.equal(
   decomposed.employees.reduce((sum, employee) => sum + employee.estimatedHours, 0),
   analysis.baseHours,

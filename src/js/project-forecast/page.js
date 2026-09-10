@@ -3,7 +3,6 @@ import * as db from "../db.js";
 import * as settings from "../settings.js";
 import { getLang } from "../i18n.js";
 import { createOhMyGantProjectPlanningModule } from "../../modules/project-planning/ohmygant-adapter.js";
-import { ensureGitLabPermission } from "./repository-analysis.js";
 import * as sync from "./sync.js";
 
 const planningModule = createOhMyGantProjectPlanningModule();
@@ -53,10 +52,10 @@ function shell() {
     <section class="card pf-scope">
       <div class="pf-section-title"><span>1</span><div><h3>${text("Источник и параметры анализа", "Analysis source and parameters")}</h3><small>${text("Ручная оценка не требуется: объём будет рассчитан по требованиям и истории Jira", "No manual estimate: scope is calculated from requirements and Jira history")}</small></div></div>
       <div class="pf-scope-grid">
-        <label class="pf-full"><b>${text("Проект: ключ или ссылка Jira", "Project: Jira key or link")}</b><input id="pfSourceInput" type="text" placeholder="DBD-752 или https://jira.../browse/DBD-752"></label>
+        <label class="pf-full"><b>${text("Проект: ключ или ссылка Jira", "Project: Jira key or link")}</b><input id="pfSourceInput" type="text" placeholder="PROJ-123 или https://jira.../browse/PROJ-123"></label>
         <label class="pf-document"><b>${text("Бизнес-требования · Confluence", "Business requirements · Confluence")}</b><input id="pfBusinessRequirements" type="url" placeholder="https://confluence.../"><small>${text("Опционально. Пусто — бизнес-требования не проработаны.", "Optional. Empty means business requirements are not prepared.")}</small></label>
         <label class="pf-document"><b>${text("Системный анализ · Confluence", "System analysis · Confluence")}</b><input id="pfSystemAnalysis" type="url" placeholder="https://confluence.../"><small>${text("Опционально. Если статьи нет, инструмент сформирует экспресс-анализ.", "Optional. If absent, the tool generates an express analysis.")}</small></label>
-        <label class="pf-check pf-express-option"><input id="pfExpressAnalysis" type="checkbox"><span><b>${text("Сформировать расширенный экспресс-системный анализ", "Generate extended express system analysis")}</b><small>${text("Read-only проверка эпика, задач, полноты требований и известных GitLab-репозиториев", "Read-only review of the epic, issues, requirement coverage and known GitLab repositories")}</small></span></label>
+        <label class="pf-check pf-express-option"><input id="pfExpressAnalysis" type="checkbox"><span><b>${text("Сформировать расширенный экспресс-системный анализ", "Generate extended express system analysis")}</b><small>${text("Read-only проверка эпика, задач, полноты требований и связанных GitLab-репозиториев", "Read-only review of the epic, issues, requirement coverage and linked GitLab repositories")}</small></span></label>
         <label><b>${text("Расчёт не раньше", "Calculate no earlier than")}</b><input id="pfStart" type="date" value="${today()}"></label>
         <label><b>${text("Минимальная неопределённость P80, %", "Minimum P80 uncertainty, %")}</b><input id="pfUnknown" type="number" min="0" max="200" step="5" value="0"><small>${text("Только нижняя граница; основное распределение рассчитывается по plan/fact аналогов", "Floor only; the main distribution is calibrated from analogue plan/fact")}</small></label>
         <label><b>${text("История сотрудника", "Employee history")}</b><select id="pfHistoryMonths"><option value="3">3 ${text("месяца", "months")}</option><option value="9">9 ${text("месяцев", "months")}</option><option value="12">${text("Год", "Year")}</option></select></label>
@@ -259,6 +258,23 @@ function repositoryProfileMarkup(repository) {
   return `<p class="pf-repository-stack"><b>${text("Обнаруженный стек", "Detected stack")}:</b> ${stackText}</p><small>${evidence}</small><small>${text("Проверенные технические файлы", "Inspected technical files")}: ${esc((repository.files || []).join(", ") || "—")}</small>`;
 }
 
+function estimateExplanationMarkup(item) {
+  const explanation = item.estimateExplanation;
+  if (!explanation?.base || !explanation?.scenarios) return "";
+  const base = explanation.base;
+  const inputs = (base.inputs || []).map((input) => {
+    const weight = Number.isFinite(Number(input.weight)) ? ` × ${num(Number(input.weight) * 100, 0)}%` : "";
+    const sample = input.sample ? ` · n=${num(input.sample, 0)}` : "";
+    return `<li><span>${esc(input.label)}</span><b>${num(input.value, 2)} ${esc(input.unit || "")}${weight}</b><small>${sample}</small></li>`;
+  }).join("");
+  const scenarios = [explanation.scenarios.p50, explanation.scenarios.p80, explanation.scenarios.p90].filter(Boolean);
+  return `<details class="pf-estimate-trace"><summary>${text("Показать формулу оценки", "Show estimate formula")}</summary>
+    <p><b>${esc(base.label || text("Базовая оценка", "Base estimate"))}:</b> ${esc(base.formula || "—")} = ${num(base.resultHours, 1)} ч</p>
+    ${inputs ? `<ul>${inputs}</ul>` : ""}
+    <div>${scenarios.map((scenario) => `<span><b>${esc(scenario.percentile)}</b> ${num(scenario.baseHours, 1)} × ${num(scenario.calibration.factor, 3)} × ${num(scenario.multitasking.factor, 3)} = <strong>${num(scenario.forecastHours, 1)} ч</strong><small>${esc(scenario.calibration.sourceLabel)}${scenario.calibration.sample ? ` · n=${scenario.calibration.sample}` : ""}${scenario.multitasking.activeProjectCount ? ` · ${text("активных проектов", "active projects")}: ${scenario.multitasking.activeProjectCount}` : ""}</small></span>`).join("")}</div>
+  </details>`;
+}
+
 function renderAnalysis() {
   const analysis = state.analysis;
   const documents = analysis.source.documents;
@@ -322,7 +338,7 @@ function renderResult() {
   $("#pfDates").innerHTML = cards.map(([label, value, hint, cls]) => `<div class="card ${cls}"><span>${esc(label)}</span><strong>${esc(value)}</strong><small>${esc(hint)}</small></div>`).join("");
   renderAnalysis();
   renderReconciliation();
-  $("#pfWorkRows").innerHTML = result.workItems.map((item) => `<tr class="${item.staffingGap ? "staffing-gap" : ""}"><td><b>${esc(item.id)}</b>${item.sourceKey ? `<small>${esc(item.sourceKey)}</small>` : ""}</td><td><b>${esc(item.result || item.title)}</b><small>${esc(item.workPool || "")}</small>${item.questions?.length ? `<em>${esc(item.questions.join(" · "))}</em>` : ""}</td><td><span class="pf-origin ${esc(item.origin || "jira")}">${esc(item.originLabel || "Jira")}</span><small>${esc((item.evidenceSources || []).join(" + "))}</small></td><td>${esc(item.assigneeName)}${item.staffingGap ? `<small class="pf-gap-label">${text("Роль не подтверждена", "Role not covered")}</small>` : ""}</td><td>${num(item.estimateHours, 0)} ч</td><td>${num(item.forecastHours, 0)} ч<small>×${num(item.scenarioFactor, 2)}</small></td><td>${item.forecastConfidence == null ? "—" : `${num(item.forecastConfidence, 0)}%`}<small>${esc(item.calibration?.sourceLabel || "")}${item.calibration?.sample ? ` · n=${item.calibration.sample}` : ""}</small></td><td>${esc(formatDate(item.start))} — ${esc(formatDate(item.end))}</td><td>${esc(item.basis || "—")}${item.analogueKeys?.length ? `<small>${esc(item.analogueKeys.join(", "))}</small>` : ""}${item.repositoryEvidence?.length ? `<small>${text("GitLab подтверждений", "GitLab evidence")}: ${item.repositoryEvidence.length}</small>` : ""}</td></tr>`).join("");
+  $("#pfWorkRows").innerHTML = result.workItems.map((item) => `<tr class="${item.staffingGap ? "staffing-gap" : ""}"><td><b>${esc(item.id)}</b>${item.sourceKey ? `<small>${esc(item.sourceKey)}</small>` : ""}</td><td><b>${esc(item.result || item.title)}</b><small>${esc(item.workPool || "")}</small>${item.questions?.length ? `<em>${esc(item.questions.join(" · "))}</em>` : ""}</td><td><span class="pf-origin ${esc(item.origin || "jira")}">${esc(item.originLabel || "Jira")}</span><small>${esc((item.evidenceSources || []).join(" + "))}</small></td><td>${esc(item.assigneeName)}${item.staffingGap ? `<small class="pf-gap-label">${text("Роль не подтверждена", "Role not covered")}</small>` : ""}</td><td>${num(item.estimateHours, 0)} ч</td><td>${num(item.forecastHours, 0)} ч<small>×${num(item.scenarioFactor, 2)}</small></td><td>${item.forecastConfidence == null ? "—" : `${num(item.forecastConfidence, 0)}%`}<small>${esc(item.calibration?.sourceLabel || "")}${item.calibration?.sample ? ` · n=${item.calibration.sample}` : ""}</small></td><td>${esc(formatDate(item.start))} — ${esc(formatDate(item.end))}</td><td>${esc(item.basis || "—")}${item.analogueKeys?.length ? `<small>${esc(item.analogueKeys.join(", "))}</small>` : ""}${item.repositoryEvidence?.length ? `<small>${text("GitLab подтверждений", "GitLab evidence")}: ${item.repositoryEvidence.length}</small>` : ""}${estimateExplanationMarkup(item)}</td></tr>`).join("");
   $("#pfActiveRows").innerHTML = state.activeProjects.map((project) => `<tr><td><b>${esc(project.key || "—")}</b><small>${esc(project.summary)}</small></td><td>${project.isBaza ? '<span class="pf-baza">BAZA</span>' : text("Обычный", "Regular")}</td><td>${esc(project.people.join(", "))}</td><td>${num(project.remainingHours, 0)} ч · ${project.taskCount} ${text("задач", "tasks")}<small>${project.inProgressTasks || 0} ${text("уже в работе", "already in progress")} · ${project.lowConfidenceTasks || 0} ${text("со слабой оценкой", "with weak estimate")}</small></td><td>${esc(project.sprints.map((sprint) => sprint.name).join(", ") || "—")}<small>${esc(project.plannedEnd ? `Planned End: ${formatDate(project.plannedEnd)}` : project.sprints.at(-1)?.end ? `до ${formatDate(project.sprints.at(-1).end)}` : "")}</small></td><td>${esc(formatDate(project.predictedEnd))}${project.spilloverHours > 0 ? `<small class="pf-gap-label">${text("Перенос", "Spillover")}: ${num(project.spilloverHours, 0)} ч</small>` : `<small>${text("В границах плана", "Within plan")}</small>`}${project.criticalPressureHours > 0 ? `<small>${text("Давление на критический путь", "Critical-path pressure")}: ${num(project.criticalPressureHours, 0)} ч</small>` : project.parallelWithProject ? `<small>${text("Идёт параллельно без прямого сдвига критического пути", "Runs in parallel without a direct critical-path shift")}</small>` : ""}</td></tr>`).join("") || `<tr><td colspan="6">${text("У выбранных сотрудников нет активных задач, влияющих на календарь.", "Selected employees have no active issues affecting the calendar.")}</td></tr>`;
   const criticalTitles = (result.portfolio?.criticalPath || []).map((id) => result.workItems.find((item) => item.id === id)?.title || id);
   const sensitivity = result.portfolio?.resourceSensitivity || [];
@@ -338,7 +354,9 @@ function renderResult() {
   const portfolioBacktest = result.portfolio?.backtest;
   const blockers = state.analysis.forecastStatus?.blockers || [];
   const warnings = [...blockers, ...(state.context?.warnings || []), ...(state.analysis.repositoryAnalysis?.warnings || []), ...result.warnings];
-  $("#pfEvidence").innerHTML = `<h3>${text("Основание и качество прогноза", "Forecast evidence and quality")}</h3><div class="pf-facts"><span>${text("Исторических задач", "Historical issues")} <b>${state.context?.history.length || 0}</b></span><span>${text("Plan/fact для калибровки", "Plan/fact calibration sample")} <b>${state.analysis.calibration?.historicalTasks || 0}</b></span><span>${text("Активных задач Jira", "Active Jira issues")} <b>${result.workloadCount}</b></span><span>${text("Активных эпиков", "Active epics")} <b>${state.activeProjects.length}</b></span><span>${text("Отпусков Jira", "Jira vacations")} <b>${result.vacationIssueCount}</b></span></div>${backtest?.sample ? `<div class="pf-backtest"><span>${text("Backtest трудоёмкости", "Effort backtest")}</span><b>WAPE ${num(backtest.wape * 100, 0)}%</b><b>${text("смещение", "bias")} ×${num(backtest.bias, 2)}</b><b>P80 ${num(backtest.coverage?.p80 * 100, 0)}%</b><small>${backtest.sample} ${text("последовательных прогнозов без использования будущих данных", "sequential forecasts without future data")}</small></div>` : `<p class="pf-muted">${text("Для backtest трудоёмкости пока недостаточно последовательных задач с plan/fact.", "There are not enough sequential issues with plan/fact for effort backtesting.")}</p>`}${portfolioBacktest?.sample ? `<div class="pf-backtest"><span>${text("Backtest дат эпиков", "Epic date backtest")}</span><b>MAE ${num(portfolioBacktest.maeDays, 1)} ${text("раб. дн.", "workdays")}</b><b>P80 ${num(portfolioBacktest.coverage.p80 * 100, 0)}%</b><small>${portfolioBacktest.sample} ${text("последовательных эпиков; целевое покрытие P80 — около 80%", "sequential epics; target P80 coverage is about 80%")}</small></div>` : `<p class="pf-muted">${text("Для backtest дат недостаточно завершённых эпиков с оценками.", "There are not enough completed estimated epics for date backtesting.")}</p>`}${warnings.length ? `<h4>${text("Ограничения", "Limitations")}</h4><ul>${warnings.map((warning) => `<li>${esc(warning)}</li>`).join("")}</ul>` : `<p class="pf-ok">${text("Критичных ограничений данных не обнаружено", "No critical data limitations detected")}</p>`}`;
+  const drift = portfolioBacktest?.drift;
+  const driftText = [drift?.effort?.alert ? `${text("дрейф трудоёмкости", "effort drift")} ${drift.effort.changePercent > 0 ? "+" : ""}${drift.effort.changePercent}%` : "", drift?.duration?.alert ? `${text("дрейф сроков", "schedule drift")} ${drift.duration.changePercent > 0 ? "+" : ""}${drift.duration.changePercent}%` : ""].filter(Boolean).join(" · ");
+  $("#pfEvidence").innerHTML = `<h3>${text("Основание и качество прогноза", "Forecast evidence and quality")}</h3><div class="pf-facts"><span>${text("Исторических задач", "Historical issues")} <b>${state.context?.history.length || 0}</b></span><span>${text("Plan/fact для калибровки", "Plan/fact calibration sample")} <b>${state.analysis.calibration?.historicalTasks || 0}</b></span><span>${text("Активных задач Jira", "Active Jira issues")} <b>${result.workloadCount}</b></span><span>${text("Активных эпиков", "Active epics")} <b>${state.activeProjects.length}</b></span><span>${text("Отпусков Jira", "Jira vacations")} <b>${result.vacationIssueCount}</b></span></div>${backtest?.sample ? `<div class="pf-backtest"><span>${text("Backtest задач", "Issue backtest")}</span><b>WAPE ${num(backtest.wape * 100, 0)}%</b><b>${text("смещение", "bias")} ×${num(backtest.bias, 2)}</b><b>P80 ${num(backtest.coverage?.p80 * 100, 0)}%</b><small>${backtest.sample} ${text("последовательных прогнозов без использования будущих данных", "sequential forecasts without future data")}</small></div>` : `<p class="pf-muted">${text("Для backtest задач пока недостаточно последовательных plan/fact.", "There are not enough sequential issue plan/fact records for backtesting.")}</p>`}${portfolioBacktest?.sample ? `<div class="pf-backtest ${driftText ? "has-drift" : ""}"><span>${text("Backtest завершённых инициатив", "Completed-initiative backtest")}</span><b>${text("часы WAPE", "hours WAPE")} ${num(portfolioBacktest.effort?.wape * 100, 0)}%</b><b>${text("даты MAE", "date MAE")} ${num(portfolioBacktest.dates?.maeDays, 1)} ${text("раб. дн.", "workdays")}</b><b>P80 ${text("часы", "hours")} ${num(portfolioBacktest.effort?.coverage?.p80 * 100, 0)}% · ${text("даты", "dates")} ${num(portfolioBacktest.dates?.coverage?.p80 * 100, 0)}%</b><small>${portfolioBacktest.sample} ${text("последовательных инициатив; используются только данные, завершённые до старта проверяемой инициативы", "sequential initiatives; only data completed before the evaluated initiative starts is used")}${driftText ? ` · ${esc(driftText)}` : ""}</small></div>` : `<p class="pf-muted">${text("Для backtest инициатив недостаточно завершённых непересекающихся инициатив с оценками.", "There are not enough completed non-overlapping estimated initiatives for backtesting.")}</p>`}${warnings.length ? `<h4>${text("Ограничения", "Limitations")}</h4><ul>${warnings.map((warning) => `<li>${esc(warning)}</li>`).join("")}</ul>` : `<p class="pf-ok">${text("Критичных ограничений данных не обнаружено", "No critical data limitations detected")}</p>`}`;
 }
 
 async function calculate() {
@@ -416,20 +434,10 @@ function bind() {
     await persistDraft();
     invalidateForecast(text("Режим анализа изменён — пересчитайте прогноз", "Analysis mode changed — recalculate the forecast"));
     if (!$("#pfExpressAnalysis").checked) return;
-    try {
-      const granted = await ensureGitLabPermission();
-      if (!granted) {
-        $("#pfExpressAnalysis").checked = false;
-        await persistDraft();
-        progress(text("Для расширенного анализа требуется разрешить read-only доступ к gitlab.asna.pro", "Extended analysis requires read-only access to gitlab.asna.pro"), "warn");
-      } else {
-        progress(text("Расширенный анализ включён: GitLab будет прочитан без изменений репозиториев", "Extended analysis enabled: GitLab will be read without modifying repositories"), "ok");
-      }
-    } catch (error) {
-      $("#pfExpressAnalysis").checked = false;
-      await persistDraft();
-      progress(error.message, "error");
-    }
+    progress(text(
+      "Расширенный анализ включён: связанные с Jira/Confluence GitLab-репозитории будут прочитаны без изменений",
+      "Extended analysis enabled: GitLab repositories linked from Jira/Confluence will be read without changes"
+    ), "ok");
   };
 }
 

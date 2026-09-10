@@ -12,16 +12,6 @@ const sourceText = (source = {}) => [
   ...(source.children || []).flatMap((item) => [item.summary, item.description])
 ].filter(Boolean).join("\n");
 
-function versionMajor(value) {
-  const match = /(?:^|[^0-9])(\d{1,2})(?:\.|[^0-9]|$)/.exec(String(value || ""));
-  return match ? Number(match[1]) : null;
-}
-
-function targetLaravel(source) {
-  const match = /laravel[^0-9]{0,20}(?:верс(?:ия|ии|ию)?\s*)?v?(\d{1,2})/i.exec(sourceText(source));
-  return match ? Number(match[1]) : null;
-}
-
 export function detectProjectIntent(source = {}) {
   const text = normalize(sourceText(source));
   return {
@@ -36,9 +26,9 @@ export function detectProjectIntent(source = {}) {
     analytics: /superset|дашборд|dashboard|отчет|витрин|аналитик/.test(text),
     schema: /схем\w*\s+данн|таблиц|колонк|структур\w*\s+данн|миграц\w*\s+(?:бд|данн)|backfill/.test(text),
     ciRuntime: /gitlab-ci|\bci\/?cd\b|docker|runtime|сборк|деплой|deploy|образ/.test(text),
+    technologyUpgrade: /framework|фреймворк|runtime|платформ\w*\s+верс|верс\w*\s+(?:язык|платформ|фреймворк)/.test(text),
     security: /уязвим|security|cve|безопасн/.test(text),
-    testing: /тест|регресс|qa|провер|приемк/.test(text),
-    laravel: /\blaravel\b/.test(text)
+    testing: /тест|регресс|qa|провер|приемк/.test(text)
   };
 }
 
@@ -46,33 +36,43 @@ function workItem(kind, area, title, text, suggestedHours, basis) {
   return { kind, area, title, text, suggestedHours: roundHours(suggestedHours), basis };
 }
 
-function laravelUpgradeItems(repository, source, intent) {
-  const profile = repository.technologyProfile;
-  if (!intent.laravel || !intent.upgrade || (!profile.php.laravelConstraint && !profile.php.laravelLocked)) return [];
-  const currentVersion = profile.php.laravelLocked || profile.php.laravelConstraint;
-  const currentMajor = versionMajor(currentVersion);
-  const targetMajor = targetLaravel(source);
-  const gap = currentMajor && targetMajor ? Math.max(1, targetMajor - currentMajor) : 1;
-  const dependencyCount = profile.dependencies.direct;
-  const context = currentMajor && targetMajor ? `Laravel ${currentMajor} → ${targetMajor}` : `Laravel ${currentVersion || "—"}; целевую версию требуется подтвердить`;
-  return [
-    workItem("dependency-audit", "backend", `Аудит совместимости зависимостей · ${repository.label}`, `${context}. Проверить PHP, Composer и прямые зависимости.`, clamp(8 + dependencyCount * 0.6, 10, 36), `${context} · ${dependencyCount} прямых зависимостей`),
-    workItem("framework-upgrade", "backend", `Обновление Laravel и обязательных пакетов · ${repository.label}`, `${context}. Обновить framework и совместимые версии обязательных пакетов.`, clamp(20 + gap * 12, 24, 84), `${context} · разрыв major-версий ${gap}`),
-    workItem("breaking-changes", "backend", `Адаптация к breaking changes · ${repository.label}`, `${context}. Исправить подтверждаемые несовместимости приложения, конфигурации и интеграций.`, clamp(20 + gap * 10 + dependencyCount * 0.5, 28, 96), `${context} · состав приложения и зависимостей`)
-  ];
+function repositoryArea(repository) {
+  if (repository.area) return repository.area;
+  const profile = repository.technologyProfile || {};
+  const technologies = (profile.technologies || []).join(" ");
+  if (profile.scope?.dagFiles || profile.scope?.sqlFiles || /Airflow|dbt|Superset|SQL|DWH/i.test(technologies)) return "data";
+  const frontend = /React|Vue|Angular|Next\.js|Nuxt|TypeScript/i.test(technologies);
+  const server = /PHP|Python|Java|JVM|Go|Rust|Ruby/i.test(technologies);
+  return frontend && !server ? "frontend" : "backend";
 }
 
 function dependencyChangeItems(repository, intent) {
   const profile = repository.technologyProfile;
-  if (!intent.upgrade || intent.laravel || !(intent.dependency || intent.security || intent.ciRuntime)) return [];
+  if (!intent.upgrade || !(intent.dependency || intent.security || intent.ciRuntime || intent.technologyUpgrade)) return [];
   if (!(profile.dependencies.direct > 0 || profile.runtimes.length)) return [];
   const stack = profile.technologies.slice(0, 3).join(", ") || repository.label;
-  return [workItem(
-    "dependency-upgrade", repository.area || "backend", `Обновление и проверка зависимостей · ${repository.label}`,
-    `Проверить совместимость целевых версий с обнаруженным стеком ${stack}; обновить только используемые зависимости и устранить несовместимости.`,
-    clamp(10 + profile.dependencies.direct * 0.45, 12, 56),
-    `${profile.dependencies.direct} прямых зависимостей · ${profile.runtimes.join(", ") || "runtime определяется конфигурацией"}`
-  )];
+  const dependencyCount = profile.dependencies.direct;
+  const runtime = profile.runtimes.join(", ") || "runtime определяется конфигурацией";
+  return [
+    workItem(
+      "dependency-audit", repositoryArea(repository), `Аудит совместимости зависимостей · ${repository.label}`,
+      `Зафиксировать текущие и целевые версии, проверить ограничения совместимости обнаруженного стека ${stack}.`,
+      clamp(8 + dependencyCount * 0.35, 10, 32),
+      `${dependencyCount} прямых зависимостей · ${runtime}`
+    ),
+    workItem(
+      "dependency-upgrade", repositoryArea(repository), `Обновление зависимостей · ${repository.label}`,
+      "Обновить только используемые зависимости и конфигурацию запуска в рамках существующей архитектуры.",
+      clamp(12 + dependencyCount * 0.5, 14, 60),
+      `${dependencyCount} прямых зависимостей · ${profile.dependencies.locked} зафиксированных зависимостей`
+    ),
+    workItem(
+      "breaking-changes", repositoryArea(repository), `Адаптация несовместимых изменений · ${repository.label}`,
+      "Устранить подтверждённые несовместимости приложения, конфигурации и интеграционных контрактов.",
+      clamp(16 + dependencyCount * 0.55, 20, 72),
+      `${stack} · масштаб исходного кода ${profile.scope.sourceFiles} файлов`
+    )
+  ];
 }
 
 function dataItems(repository, intent) {
@@ -97,14 +97,15 @@ function dataItems(repository, intent) {
 
 function applicationItems(repository, intent) {
   const profile = repository.technologyProfile;
+  const area = repositoryArea(repository);
   const rows = [];
-  if (intent.frontend && (repository.area === "frontend" || profile.technologies.some((item) => /React|Vue|Angular|Next|Nuxt|Node|TypeScript/i.test(item)))) rows.push(workItem(
+  if (intent.frontend && (area === "frontend" || profile.technologies.some((item) => /React|Vue|Angular|Next|Nuxt|Node|TypeScript/i.test(item)))) rows.push(workItem(
     "frontend-implementation", "frontend", `Изменения пользовательского интерфейса · ${repository.label}`,
     "Реализовать состояния интерфейса и интеграцию с существующим API в обнаруженном frontend-стеке.",
     clamp(20 + Math.sqrt(Math.max(1, profile.scope.sourceFiles)) * 1.5, 24, 64),
     `${profile.technologies.join(", ") || "frontend"} · подтверждено ${profile.scope.sourceFiles} исходных файлов`
   ));
-  if ((intent.api || intent.integration) && repository.area !== "frontend") rows.push(workItem(
+  if ((intent.api || intent.integration) && area !== "frontend") rows.push(workItem(
     intent.integration ? "integration-change" : "backend-implementation", "backend",
     `${intent.integration ? "Интеграционный контракт" : "Изменение backend/API"} · ${repository.label}`,
     intent.integration
@@ -118,6 +119,7 @@ function applicationItems(repository, intent) {
 
 function crossCuttingItems(repository, intent, implementationItems) {
   const profile = repository.technologyProfile;
+  const area = repositoryArea(repository);
   if (!implementationItems.length) return [];
   const rows = [];
   if (profile.tests.files || intent.testing) rows.push(workItem(
@@ -127,7 +129,7 @@ function crossCuttingItems(repository, intent, implementationItems) {
     `${profile.tests.files} файлов тестового контура${profile.tests.tools.length ? ` · ${profile.tests.tools.join(", ")}` : ""}`
   ));
   if (profile.delivery.ciFiles.length && (intent.upgrade || intent.ciRuntime || intent.migration)) rows.push(workItem(
-    "ci-runtime", repository.area === "frontend" ? "frontend" : "backend", `Проверка CI и runtime · ${repository.label}`,
+    "ci-runtime", area === "frontend" ? "frontend" : "backend", `Проверка CI и runtime · ${repository.label}`,
     "Подтвердить сборку, версии runtime, миграции и запуск в существующем CI/CD без внедрения нового инструментария.",
     clamp(8 + profile.delivery.ciFiles.length * 2, 10, 24),
     `обнаружены ${profile.delivery.ciFiles.join(", ")}`
@@ -138,7 +140,6 @@ function crossCuttingItems(repository, intent, implementationItems) {
 export function repositoryWorkItems(repository, source) {
   const intent = detectProjectIntent(source);
   const implementation = [
-    ...laravelUpgradeItems(repository, source, intent),
     ...dependencyChangeItems(repository, intent),
     ...dataItems(repository, intent),
     ...applicationItems(repository, intent)

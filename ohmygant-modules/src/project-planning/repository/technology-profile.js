@@ -8,11 +8,6 @@ function json(value) {
   try { return JSON.parse(value); } catch { return null; }
 }
 
-function lockedVersion(lock, packageName) {
-  const packages = [...(lock?.packages || []), ...(lock?.["packages-dev"] || [])];
-  return packages.find((item) => item.name === packageName)?.version || "";
-}
-
 function dependenciesOf(packageJson) {
   return { ...(packageJson?.dependencies || {}), ...(packageJson?.devDependencies || {}) };
 }
@@ -49,11 +44,8 @@ export function buildTechnologyProfile({ paths = [], contents = new Map(), langu
   const detectedLanguages = languageRows(languages);
 
   const phpConstraint = composerFiles.map((item) => item?.require?.php).find(Boolean) || "";
-  const laravelConstraint = composerDeps["laravel/framework"] || "";
-  const laravelLocked = composerLocks.map((item) => lockedVersion(item, "laravel/framework")).find(Boolean) || "";
   if (composerFiles.length || detectedLanguages.some((item) => item.name.toLowerCase() === "php")) technologies.push("PHP");
   if (composerFiles.length) technologies.push("Composer");
-  if (laravelConstraint || laravelLocked) frameworks.push(`Laravel ${laravelLocked || laravelConstraint}`.trim());
   if (hasDependency("symfony/framework-bundle")) frameworks.push("Symfony");
   if (hasDependency("yiisoft/yii2")) frameworks.push("Yii");
   if (phpConstraint) runtimes.push(`PHP ${phpConstraint}`);
@@ -108,6 +100,6 @@ export function buildTechnologyProfile({ paths = [], contents = new Map(), langu
     scope: { files: allPaths.length, sourceFiles, sqlFiles, dagFiles, migrationFiles, treeTruncated },
     dependencies: { direct: directDependencies, locked: lockedComposerDependencies },
     delivery: { ciFiles },
-    php: { constraint: phpConstraint, laravelConstraint, laravelLocked }
+    php: { constraint: phpConstraint }
   };
 }

@@ -1,4 +1,5 @@
-import { analyzeProject, composeProjectSource } from "./core/analysis.js";
+import { analyzeProject } from "./core/analysis.js";
+import { composeProjectSource } from "./core/source-composition.js";
 import { forecastProject } from "./core/domain.js";
 import * as portfolioModel from "./core/portfolio.js";
 import {
@@ -11,7 +12,7 @@ import {
 
 export const projectPlanningManifest = defineModuleManifest({
   id: "asna.project-planning",
-  version: "1.2.0",
+  version: "2.0.0",
   title: "Планирование проектов",
   kind: "planning",
   route: "forecast",
@@ -184,7 +185,7 @@ export function createProjectPlanningModule({
     let composed = composeProjectSource({ jira: jiraSource, businessRequirements, systemAnalysis });
     let repositoryAnalysis = null;
     if (request.expressAnalysis && analyzeRepository) {
-      progress("Проверяю технический контур в известных GitLab-репозиториях");
+      progress("Проверяю технический контур в связанных GitLab-репозиториях");
       repositoryAnalysis = await analyzeRepository(composed, progress);
       composed = composeProjectSource({ jira: jiraSource, businessRequirements, systemAnalysis, repositoryAnalysis });
     }
@@ -231,6 +232,26 @@ export {
   calibrationFor,
   quantile
 } from "./core/calibration.js";
+export { backtestPortfolio } from "./core/backtest.js";
+export { createEstimationPolicy } from "./core/estimation.js";
+export { calibratedFactor, explainWorkItem, forecastAdjustment } from "./core/explainability.js";
+export {
+  AREAS,
+  TECHNOLOGIES,
+  classifyWork,
+  normalizeText,
+  plainLines,
+  tokenize,
+  unique
+} from "./core/classification.js";
+export { reconcileRequirements, requirementRows } from "./core/requirements.js";
+export { assignWork, employeeAreas, staffingGaps } from "./core/staffing.js";
+export {
+  buildQuestions,
+  expressSystemAnalysis,
+  projectCompleteness,
+  projectComplexity
+} from "./core/system-analysis.js";
 export {
   DAY_MS,
   addDays,
@@ -249,7 +270,6 @@ export { buildTechnologyProfile } from "./repository/technology-profile.js";
 export { detectProjectIntent, repositoryWorkItems } from "./repository/work-items.js";
 export {
   aggregateActiveProjects,
-  backtestPortfolio,
   buildPortfolioCalendar,
   calibrateWorkload,
   multitaskingProfiles,
