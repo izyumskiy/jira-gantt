@@ -301,8 +301,9 @@ function listHead() {
   head.append(
     cell("inum", "#"), cell("", ""), cell("iplus", ""), cell("ikey", t("search.col.key")), cell("isum", t("search.col.name")), dates,
     cell("ilabels", t("search.col.labels")),
-    cell("iperson", t("search.assignee")), cell("iperson", t("search.reporter")),
-    cell("ispent", t("search.col.spent")), cell("ipct", t("search.col.pct")), cell("istatus", t("search.col.status"))
+    cell("iperson", t("search.assignee")),
+    cell("iest", t("search.col.estimate")), cell("ispent", t("search.col.spent")),
+    cell("ipct", t("search.col.pct")), cell("istatus", t("search.col.status"))
   );
   // Активные фильтры и «Снять фильтры» — второй строкой шапки во всю ширину, чтобы не зависеть от ширины колонок.
   if (hasFilter()) head.append(filterControls());
@@ -458,6 +459,19 @@ function showEpicInfo(anchor, epic, spent, pct) {
   box.style.left = `${Math.max(8, Math.min(window.innerWidth - box.offsetWidth - 12, r.left))}px`;
 }
 
+// Сумма оценок всех задач эпика (отменённые дают 0 — см. estimateOf).
+function epicEstimate(pct) {
+  const cell = document.createElement("span");
+  cell.className = "iest" + (pct && pct.count ? "" : " iperson-empty");
+  if (!pct || !pct.count) {
+    cell.textContent = t("dash");
+    return cell;
+  }
+  cell.textContent = agg.fmtEstimate(pct.total);
+  cell.title = t("search.estimateFull", { sum: agg.fmtEstimate(pct.total), n: pct.count });
+  return cell;
+}
+
 function epicRow(epic, checked, index, spent = null, pct = null) {
   const row = document.createElement("label");
   row.className = "item" + (isDueSoon(epic) ? " due-soon" : "");
@@ -512,7 +526,7 @@ function epicRow(epic, checked, index, spent = null, pct = null) {
     num, cb, plusCell, key, sum, epicDates(epic),
     epicLabels(epic),
     epicPerson("search.assignee", epic.assigneeName, true),
-    epicPerson("search.reporter", epic.reporterName, false),
+    epicEstimate(pct),
     epicSpent(spent),
     epicPct(pct),
     status

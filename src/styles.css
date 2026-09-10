@@ -114,7 +114,7 @@ main { padding: 14px 16px 40px; }
 .list { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; overflow: clip; }
 .item {
   display: grid;
-  grid-template-columns: 34px 22px 24px 90px 1fr 160px 220px 140px 140px 70px 76px 130px;
+  grid-template-columns: 34px 22px 24px 90px 1fr 160px 220px 140px 70px 70px 76px 130px;
   align-items: center;
   gap: 8px;
   padding: 6px 10px;
@@ -140,7 +140,7 @@ main { padding: 14px 16px 40px; }
 .iperson { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; min-width: 0; }
 .iperson-empty { color: var(--muted); }
 .list-head .iperson { font-size: 10px; }
-.ispent { font-variant-numeric: tabular-nums; white-space: nowrap; font-weight: 600; }
+.iest, .ispent { font-variant-numeric: tabular-nums; white-space: nowrap; font-weight: 600; }
 .iperson-link { cursor: pointer; color: var(--accent); }
 .iperson-link:hover { text-decoration: underline; }
 .iperson-link.on { font-weight: 700; background: var(--accent-soft); border-radius: 4px; padding: 0 5px; }
