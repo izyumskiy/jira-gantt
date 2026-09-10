@@ -1009,12 +1009,15 @@ function showTooltip(anchor, g, mode, model, profile = null) {
   }
   tip.append(rows);
 
-  tip.append(el("div", "tip-sub", t("tip.byProject")));
+  // Вложенные строки — проекты (по людям) или исполнители (по эпикам); ссылки по соответствующему полю.
+  const byPerson = model && model.childKind === "person";
+  tip.append(el("div", "tip-sub", byPerson ? t("tip.byAssignee") : t("tip.byProject")));
   const tbl = el("table", "tip-table");
   for (const p of g.projects) {
     const tr = el("tr");
     const nameCell = el("td", "tp-name");
-    nameCell.append(maybeLink(p.label, scope ? issuesUrl(`${scope} AND project = "${p.key}"`) : "", "tip-link"));
+    const childJql = byPerson ? (p.key ? `assignee = "${escapeJql(p.key)}"` : "assignee is EMPTY") : `project = "${p.key}"`;
+    nameCell.append(maybeLink(p.label, scope ? issuesUrl(`${scope} AND ${childJql}`) : "", "tip-link"));
     tr.append(nameCell, el("td", "tp-num", String(p.count)), el("td", "tp-num", fmtEstimate(p.sum)));
     tbl.append(tr);
   }

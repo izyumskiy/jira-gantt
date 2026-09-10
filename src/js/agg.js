@@ -224,7 +224,7 @@ function briefOf(issue, est, done) {
 
 export const BACKLOG_ID = "sec:backlog";
 
-// mode: "epic" (эпики → проекты) | "epicPeople" (эпики → исполнители) | "assignee" (люди → проекты);
+// mode: "epicPeople" (эпики → исполнители, вкладка «По эпикам») | "assignee" (люди → проекты);
 // others — задачи людей вне целевых эпиков (учитываются только по людям).
 export function buildModel({ issues, others = [], sprints, epics, boards = [], mode }) {
   const epicLike = mode !== "assignee"; // группы — эпики
@@ -246,10 +246,14 @@ export function buildModel({ issues, others = [], sprints, epics, boards = [], m
     mode === "epicPeople"
       ? { key: i.assigneeKey || "", label: i.assigneeName || t("gantt.noAssignee") }
       : { key: i.projectKey || t("dash"), label: i.projectName || i.projectKey || t("dash") };
+  // Подпись эпика — ключ и его метки; если меток нет — название.
   const groupLabelOf = (i) => {
     if (epicLike) {
       const k = i.epicKey || "";
-      return k ? `${k} · ${epicById.get(k)?.summary || ""}`.trim() : t("dash");
+      if (!k) return t("dash");
+      const e = epicById.get(k);
+      const text = e && Array.isArray(e.labels) && e.labels.length ? e.labels.join(", ") : e?.summary || "";
+      return `${k} · ${text}`.trim();
     }
     return i.assigneeName || t("gantt.noAssignee");
   };

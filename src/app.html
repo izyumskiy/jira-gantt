@@ -14,9 +14,8 @@
 
       <nav class="tabs">
         <button class="tab active" data-tab="search" data-i18n="tab.search"></button>
-        <button class="tab" data-tab="epics" data-i18n="tab.epics"></button>
-        <button class="tab" data-tab="people" data-i18n="tab.people"></button>
         <button class="tab" data-tab="epicPeople" data-i18n="tab.epicPeople"></button>
+        <button class="tab" data-tab="people" data-i18n="tab.people"></button>
         <button class="tab" data-tab="team" data-i18n="tab.team"></button>
         <button class="tab" data-tab="settings" data-i18n="tab.settings"></button>
         <span id="today" class="today" data-i18n-title="app.today"></span>
@@ -59,22 +58,10 @@
         <div id="results" class="list"></div>
       </section>
 
-      <!-- Вкладка 2: Гант по эпикам -->
-      <section class="page hidden" id="page-epics">
-        <div class="filter-bar">
-          <label>
-            <span data-i18n="gantt.filterAssignee"></span>
-            <select id="epicAssignee"></select>
-          </label>
-          <span id="ganttFilterNote" class="filter-note"></span>
-        </div>
-        <div id="epicsChart"></div>
-      </section>
-
       <!-- Вкладка 3: Гант по людям -->
       <section class="page hidden" id="page-people"></section>
 
-      <!-- Вкладка 3b: Гант по эпикам и людям — эпики → исполнители -->
+      <!-- Вкладка 2: По эпикам — эпики → исполнители -->
       <section class="page hidden" id="page-epicPeople">
         <div class="filter-bar">
           <label>
