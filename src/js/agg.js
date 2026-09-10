@@ -411,10 +411,12 @@ export function buildModel({ issues, others = [], sprints, epics, boards = [], m
       for (const [key, p] of g.projects) if (!p.cells.size && !p.backlog.count) g.projects.delete(key);
     }
   }
-  // «По людям»: внутри человека — только эпики, где у него есть задачи в текущем или будущих спринтах.
+  // «По людям»: внутри человека — только эпики, где у него есть задачи в текущем или будущих
+  // спринтах; сами люди без таких задач с вкладки убираются.
   if (mode === "assignee") {
-    for (const g of groups.values()) {
-      for (const [key, p] of g.projects) if (!p.cells.size) g.projects.delete(key);
+    for (const [key, g] of groups) {
+      for (const [pk, p] of g.projects) if (!p.cells.size) g.projects.delete(pk);
+      if (!g.cells.size && !g.otherCells.size) groups.delete(key);
     }
   }
 

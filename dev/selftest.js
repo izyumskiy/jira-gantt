@@ -265,13 +265,26 @@ const petr = m2.groups.find((g) => g.key === "petr");
 check("Petr в команде Beta", petr.team?.name === "Beta", petr.team?.name);
 check("Petr: прочие — 2 задачи / 6ч, задача без эпика учтена", petr.otherCount === 2 && petr.otherSum === 6 * H, `${petr.otherCount} / ${petr.otherSum / H}`);
 check("Petr: прочие эпики отсортированы по объёму, без эпика — прочерком", petr.otherEpics.map((e) => e.key || "—").join(",") === "EP-8,—", petr.otherEpics.map((e) => e.key).join(","));
-const nobody = m2.groups.find((g) => g.key === "");
-check("группа «без исполнителя»", nobody && nobody.label === t("gantt.noAssignee"), nobody && nobody.label);
-check("без спринтов — без команды", nobody.team?.id === "" && nobody.team?.name === t("gantt.noTeam"), nobody.team?.name);
+// «Без исполнителя» в фикстуре — только задача без спринта и готовая, значит человека на вкладке нет.
+check("человек без задач в текущих/будущих спринтах убран с вкладки", !m2.groups.some((g) => g.key === ""), m2.groups.map((g) => g.label).join(","));
+{
+  const withNobody = agg.buildModel({ issues: [...issues, { ...mk("N-1", "EP-1", "AAA", null, 2, 3, "new"), assigneeKey: "", assigneeName: "" }], others, sprints, epics, boards, mode: "assignee" });
+  const nb = withNobody.groups.find((g) => g.key === "");
+  check("человек с задачей в текущем спринте остаётся", nb && nb.label === t("gantt.noAssignee"), nb && nb.label);
+}
+{
+  // Спринт без доски → человек без команды.
+  const noBoard = agg.buildModel({
+    issues: [mk("T-1", "EP-1", "AAA", "Ivan", 55, 3, "new")],
+    sprints: [...sprints, { id: 55, name: "Free", state: "ACTIVE", startDate: iso(-1), endDate: iso(12), boardId: null }],
+    epics, boards, mode: "assignee"
+  });
+  check("спринт без доски — человек без команды", noBoard.groups[0].team?.id === "" && noBoard.groups[0].team?.name === t("gantt.noTeam"), noBoard.groups[0].team?.name);
+}
 check("люди отсортированы по командам: Alpha, Beta, без команды",
   m2.groups.map((g) => `${g.team.name}/${g.label}`).join(","),
   m2.groups.map((g) => `${g.team.name}/${g.label}`).join(","));
-check("порядок команд", m2.groups.map((g) => g.team.name).join(",") === "Alpha,Alpha,Beta,Без команды", m2.groups.map((g) => g.team.name).join(","));
+check("порядок команд", m2.groups.map((g) => g.team.name).join(",") === "Alpha,Alpha,Beta", m2.groups.map((g) => g.team.name).join(","));
 
 // 4b. вкладка «Команда»: люди из выгрузки и сопоставление профилей по имени
 const people = collectPeople(issues, others);
@@ -555,7 +568,7 @@ check("клик по бэклогу — задача A-6", issueRows.length === 
 document.querySelector(".tip-close").click();
 check("окно закрывается крестиком", !document.querySelector(".tooltip"));
 const teamRows = [...document.querySelectorAll("#g2 .g-row.team .tlabel")].map((n) => n.textContent);
-check("строки команд на вкладке по людям", teamRows.join(",") === "Alpha,Beta,Без команды", teamRows.join(","));
+check("строки команд на вкладке по людям", teamRows.join(",") === "Alpha,Beta", teamRows.join(","));
 {
   // Ivan в секции 0: 12ч целевых + 4ч прочих = 16ч > ёмкости 8ч (1 день × 8ч) → красная обводка.
   await settings.save({ sprintDays: 1 });
