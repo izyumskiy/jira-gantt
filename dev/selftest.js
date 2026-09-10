@@ -466,11 +466,11 @@ check("в Ганте по людям лейблов статуса нет (то�
 const nums = [...document.querySelectorAll("#g1 .gnum")].map((n) => n.textContent);
 check("эпики пронумерованы подряд", nums.join(" ") === "1. 2. 3. 4. 5.", nums.join(" "));
 check("исполнители не нумеруются", document.querySelectorAll("#g2 .gnum").length === 0);
-check("цифр нет у фамилий на обеих вкладках, у эпиков внутри людей — есть",
-  document.querySelectorAll("#g1 .badges").length === 0 &&
-    document.querySelectorAll("#g2 .g-row.group .badges").length === 0 &&
-    document.querySelectorAll("#g2 .g-row.proj .badges").length > 0,
-  `${document.querySelectorAll("#g1 .badges").length} / ${document.querySelectorAll("#g2 .g-row.group .badges").length} / ${document.querySelectorAll("#g2 .g-row.proj .badges").length}`);
+check("числовых меток нет ни у фамилий, ни у эпиков, ни у досок",
+  document.querySelectorAll("#g1 .badges").length === 0 && document.querySelectorAll("#g2 .badges").length === 0,
+  `${document.querySelectorAll("#g1 .badges").length} / ${document.querySelectorAll("#g2 .badges").length}`);
+check("строка доски — только точка и название", document.querySelector("#g2 .g-row.team .c-name").textContent === document.querySelector("#g2 .g-row.team .tlabel").textContent,
+  document.querySelector("#g2 .g-row.team .c-name").textContent);
 
 // зелёная заливка — доля готовых задач по оценке
 const ep1Sec0Bar = [...document.querySelectorAll("#g1 .g-row.group")][0].querySelectorAll(".c-cell")[0].querySelector(".bar-group");

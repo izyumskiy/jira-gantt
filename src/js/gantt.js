@@ -127,24 +127,6 @@ function dot(team) {
   return d;
 }
 
-// Бейджи строки: всего задач, [осталось — у эпиков], [прочие эпики — у людей], оценка.
-function badges(count, sum, { left = null, other = null } = {}) {
-  const wrap = el("span", "badges");
-  wrap.append(el("span", "badge b-count", String(count)));
-  if (left != null) {
-    const b = el("span", "badge b-left", String(left));
-    b.title = t("gantt.left");
-    wrap.append(b);
-  }
-  wrap.append(el("span", "badge b-sum", fmtEstimate(sum)));
-  if (other && other.count) {
-    const b = el("span", "badge b-other", `+${other.count} · ${fmtEstimate(other.sum)}`);
-    b.title = t("gantt.othersHint");
-    wrap.append(b);
-  }
-  return wrap;
-}
-
 // Доля готовых задач в ячейке: по оценке, а если оценок нет — по количеству. Это и есть зелёная заливка.
 function doneShare(issues) {
   const total = issues.reduce((n, i) => n + (i.estimate || 0), 0);
@@ -458,16 +440,9 @@ export function render(container, model, opts) {
     // На вкладке по людям перед первым человеком команды — строка-заголовок команды.
     if (mode === "assignee" && g.team && g.team.id !== lastTeamId) {
       lastTeamId = g.team.id;
-      const members = model.groups.filter((x) => x.team && x.team.id === g.team.id);
       const tr = el("tr", "g-row team");
       const td = el("td", "c-name");
       td.append(dot(g.team), el("span", "tlabel", g.team.name));
-      td.append(
-        badges(
-          members.reduce((n, x) => n + x.count, 0),
-          members.reduce((n, x) => n + x.sum, 0)
-        )
-      );
       tr.append(td, ...emptyCells(model.columns.length + extraCols));
       tbody.append(tr);
     }
@@ -500,16 +475,6 @@ export function render(container, model, opts) {
       name.append(role);
     }
     if (mode === "assignee" && g.key) name.append(compareButton(g.label, profile, profiles, personLoad));
-    // У строк-групп цифры не показываем — только дерево и полосы (итоги есть в подсказке).
-    const showBadges = false;
-    if (showBadges) {
-      name.append(
-        badges(g.count, g.sum, {
-          left: epicLike ? g.other : null,
-          other: mode === "assignee" ? { count: g.otherCount, sum: g.otherSum } : null
-        })
-      );
-    }
     tr.append(name);
     const capacity = mode === "assignee" ? sprintCapacity() : 0;
     for (const sec of model.columns) {
@@ -563,8 +528,6 @@ export function render(container, model, opts) {
       }
       pname.append(el("span", "indent"), plabel);
       if (isPersonChild && p.key) pname.append(compareButton(p.label, profileOf.get(normName(p.label)) || null, profiles, personLoad));
-      // Цифры показываем у эпиков и не показываем у фамилий.
-      if (model.childKind === "epic") pname.append(badges(p.count, p.sum));
       ptr.append(pname);
       for (const sec of model.columns) ptr.append(nestedCell(p.cells.get(sec.id), sec, model, `${g.label} · ${p.label}`));
       if (showBacklog) ptr.append(backlogNested(p.backlog, model, `${g.label} · ${p.label}`));
