@@ -1,0 +1,3 @@
+# Владелец всего кода — PR не смержится без его одобрения
+# (при включённом «Require review from Code Owners» в защите ветки main).
+* @izyumskiy
