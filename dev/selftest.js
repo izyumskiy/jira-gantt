@@ -658,6 +658,19 @@ const cmpProfiles = [
   { name: "zed", displayName: "Zed", role: "qa", status: "staff", systems: ["CRM"] },              // другая роль
   { name: "lee", displayName: "Lee", role: "developer", status: "fired", systems: ["CRM", "Mobile"] } // уволен
 ];
+// Занятость кандидатов по ближайшим спринтам (в окне замены).
+const loadFixture = {
+  capacity: 8 * H, // 1 день × 8 часов
+  byName: new Map([
+    ["petr", new Map([["sec:0", 12 * H], ["sec:1", 4 * H]])],
+    ["olga", new Map([["sec:0", 2 * H]])]
+  ]),
+  sections: [
+    { id: "sec:0", caption: t("cmp.loadCurrent"), title: "Sprint 2" },
+    { id: "sec:1", caption: "+1", title: "Sprint 3" },
+    { id: "sec:2", caption: "+2", title: "Sprint 4" }
+  ]
+};
 const si = gantt.standIns(cmpProfiles[0], cmpProfiles);
 check("standIns: та же роль, общие системы, без уволенных; по числу общих", si.candidates.map((c) => `${c.profile.displayName}:${c.common.join("+")}`).join(",") === "Olga:Billing+CRM,Petr:CRM",
   si.candidates.map((c) => `${c.profile.displayName}:${c.common.join("+")}`).join(","));
@@ -666,7 +679,7 @@ check("standIns: без роли/систем — пусто", gantt.standIns({ 
 
 const g4 = document.createElement("div");
 document.body.append(g4);
-gantt.render(g4, m2, { mode: "assignee", profiles: cmpProfiles });
+gantt.render(g4, m2, { mode: "assignee", profiles: cmpProfiles, personLoad: loadFixture });
 const cmpBtnOf = (n) => [...g4.querySelectorAll(".g-row.group")].find((r) => r.querySelector(".glabel").textContent === n)?.querySelector(".cmp-btn");
 check("пиктограмма ⇄ у каждого человека на «По людям»", g4.querySelectorAll(".g-row.group .cmp-btn").length === m2.groups.filter((g) => g.key).length && !cmpBtnOf("Без исполнителя"));
 cmpBtnOf("Ivan").click();
@@ -677,6 +690,14 @@ check("кандидаты: Olga (2 общих), Petr (1); Kim, Zed, Lee отсу
 check("общие системы подсвечены, остальные — нет", [...rowsCmp[1].querySelectorAll(".chip")].map((c) => `${c.textContent}${c.classList.contains("on") ? "*" : ""}`).join(",") === "CRM*,Web",
   [...rowsCmp[1].querySelectorAll(".chip")].map((c) => `${c.textContent}${c.classList.contains("on") ? "*" : ""}`).join(","));
 check("аутстаф-кандидат помечен", rowsCmp[0].querySelector(".cmp-name").classList.contains("p-outstaff"));
+// занятость: у Olga 2ч из 8ч = 25%, у Petr 12ч из 8ч = 150% (перегруз), третья секция пустая
+const loadOf = (name) => [...rowsCmp].find((r) => r.querySelector(".cmp-name").textContent === name)?.querySelectorAll(".load-chip");
+check("у каждого кандидата — занятость по трём ближайшим спринтам", loadOf("Olga")?.length === 3 && loadOf("Petr")?.length === 3);
+check("проценты считаются от ёмкости спринта", [...loadOf("Olga")].map((c) => c.textContent).join(",") === "25%,0%,0%", [...loadOf("Olga")].map((c) => c.textContent).join(","));
+check("перегрузка выделена", [...loadOf("Petr")].map((c) => c.textContent).join(",") === "150%,50%,0%" && loadOf("Petr")[0].classList.contains("over"),
+  [...loadOf("Petr")].map((c) => `${c.textContent}${c.classList.contains("over") ? "!" : ""}`).join(","));
+check("в подсказке чипа — спринт, часы и ёмкость", loadOf("Petr")[0].title.includes("Sprint 2") && loadOf("Petr")[0].title.includes("150"), loadOf("Petr")[0].title);
+check("в заголовке блока перечислены секции", cmpTip.textContent.includes(t("cmp.load")) && cmpTip.textContent.includes("+1"));
 check("системы без замены: Mobile", [...cmpTip.querySelectorAll(".cmp-uncovered .chip")].map((c) => c.textContent).join(",") === "Mobile");
 cmpTip.querySelector(".tip-close").click();
 cmpBtnOf("Petr").click();

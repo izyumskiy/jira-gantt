@@ -370,6 +370,21 @@ table.gantt { border-collapse: separate; border-spacing: 0; }
 .cmp-name { font-weight: 600; }
 .cmp-name.p-outstaff { color: #a16207; }
 .cmp-systems { display: flex; flex-wrap: wrap; gap: 4px; padding: 4px 0; }
+/* Занятость кандидата по ближайшим спринтам. */
+.cmp-load { vertical-align: top; padding-right: 10px; white-space: nowrap; }
+.load-cells { display: inline-flex; gap: 3px; }
+.load-chip {
+  min-width: 38px;
+  text-align: center;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: #ebecf0;
+  color: var(--text);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  cursor: default;
+}
+.load-chip.over { background: #ffebe6; color: #bf2600; font-weight: 700; }
 .cmp-uncovered { margin-top: 10px; display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
 .chip.static.uncovered { border-color: #ffbdad; background: #ffebe6; color: #bf2600; }
 .cmp-criteria { margin-top: 8px; }
@@ -672,6 +687,8 @@ textarea { font: inherit; padding: 5px 8px; border: 1px solid var(--line); borde
   .glabel.p-outstaff, .tip-pstatus.p-outstaff, .plabel-link.p-outstaff { color: #f5d565; }
   .badge.b-left { background: #4a3b0b; color: #f5d565; }
   .badge.b-other { background: #3c4147; color: #c7d1db; }
+  .load-chip { background: #333a41; }
+  .load-chip.over { background: #4f1c14; color: #ffbdad; }
   .part-target { background: color-mix(in srgb, #ffab00 45%, var(--panel)); color: var(--text); }
   .part-other { background: color-mix(in srgb, #8993a4 40%, var(--panel)); }
   .status { background: #2b2f4a; }

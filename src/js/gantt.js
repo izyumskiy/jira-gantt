@@ -327,7 +327,7 @@ function emptyCells(n) {
 }
 
 export function render(container, model, opts) {
-  const { mode, profiles = [], highlightChild = "", onChildClick = null } = opts;
+  const { mode, profiles = [], highlightChild = "", onChildClick = null, personLoad = null } = opts;
   const epicLike = mode !== "assignee";
   // Профили людей (вкладка «Команда») — по нормализованному имени.
   const profileOf = new Map(profiles.map((p) => [p.name, p]));
@@ -478,7 +478,7 @@ export function render(container, model, opts) {
       role.title = t("team.role");
       name.append(role);
     }
-    if (mode === "assignee" && g.key) name.append(compareButton(g.label, profile, profiles));
+    if (mode === "assignee" && g.key) name.append(compareButton(g.label, profile, profiles, personLoad));
     // У строк-групп цифры не показываем — только дерево и полосы (итоги есть в подсказке).
     const showBadges = false;
     if (showBadges) {
@@ -541,7 +541,7 @@ export function render(container, model, opts) {
         plabel.title = p.label + (p.target ? ` · ${t("gantt.targetEpic")}` : "");
       }
       pname.append(el("span", "indent"), plabel);
-      if (isPersonChild && p.key) pname.append(compareButton(p.label, profileOf.get(normName(p.label)) || null, profiles));
+      if (isPersonChild && p.key) pname.append(compareButton(p.label, profileOf.get(normName(p.label)) || null, profiles, personLoad));
       // Цифры показываем у эпиков и не показываем у фамилий.
       if (model.childKind === "epic") pname.append(badges(p.count, p.sum));
       ptr.append(pname);
@@ -764,15 +764,33 @@ function showComments(anchor, key, label) {
 
 // ---------- сравнение с коллегами: кто может подменить ----------
 
-function compareButton(name, profile, profiles) {
+function compareButton(name, profile, profiles, personLoad) {
   const btn = el("button", "cmp-btn", "⇄");
   btn.type = "button";
   btn.title = t("cmp.button");
   btn.onclick = (e) => {
     e.stopPropagation();
-    showCompare(e.currentTarget, name, profile, profiles);
+    showCompare(e.currentTarget, name, profile, profiles, personLoad);
   };
   return btn;
+}
+
+// Занятость человека по ближайшим спринтам: процент от ёмкости спринта (длительность × часы в дне).
+function loadCells(displayName, personLoad) {
+  const box = el("span", "load-cells");
+  const row = personLoad.byName.get(normName(displayName)) || new Map();
+  for (const sec of personLoad.sections) {
+    const sum = row.get(sec.id) || 0;
+    const pct = personLoad.capacity > 0 ? Math.round((sum / personLoad.capacity) * 100) : null;
+    const chip = el("span", "load-chip" + (pct != null && pct > 100 ? " over" : ""), pct != null ? `${pct}%` : fmtEstimate(sum));
+    chip.title = `${sec.title} · ${
+      pct != null
+        ? t("cmp.loadHint", { caption: sec.caption, sum: fmtEstimate(sum), cap: fmtEstimate(personLoad.capacity), pct })
+        : t("cmp.loadNoCap", { caption: sec.caption, sum: fmtEstimate(sum) })
+    }`;
+    box.append(chip);
+  }
+  return box;
 }
 
 // Кандидаты: та же роль, хотя бы одна общая система, не уволен, не сам; по числу общих систем.
@@ -788,7 +806,7 @@ export function standIns(profile, profiles) {
   return { candidates, uncovered: profile.systems.filter((x) => !covered.has(x)) };
 }
 
-function showCompare(anchor, name, profile, profiles) {
+function showCompare(anchor, name, profile, profiles, personLoad = null) {
   closeTooltip();
   tip = el("div", "tooltip tip-compare");
   const head = el("div", "tip-head");
@@ -809,7 +827,16 @@ function showCompare(anchor, name, profile, profiles) {
     tip.append(me);
 
     const { candidates, uncovered } = standIns(profile, profiles);
-    tip.append(el("div", "tip-sub", t("cmp.candidates")));
+    const showLoad = personLoad && personLoad.sections.length;
+    tip.append(
+      el(
+        "div",
+        "tip-sub",
+        showLoad
+          ? `${t("cmp.candidates")} · ${t("cmp.load")}: ${personLoad.sections.map((s) => s.caption).join(" · ")}`
+          : t("cmp.candidates")
+      )
+    );
     if (!candidates.length) {
       tip.append(el("div", "muted", t("cmp.none")));
     } else {
@@ -819,13 +846,19 @@ function showCompare(anchor, name, profile, profiles) {
         const who = el("td", "tp-name");
         who.append(el("div", "cmp-name" + (c.profile.status ? ` p-${c.profile.status}` : ""), c.profile.displayName));
         if (c.profile.status === "outstaff") who.append(el("div", "small muted", t("pstatus.outstaff")));
+        if (showLoad) {
+          const loadCell = el("td", "cmp-load");
+          loadCell.append(loadCells(c.profile.displayName, personLoad));
+          tr.append(who, loadCell);
+        }
         const sys = el("td", "cmp-systems");
         const common = new Set(c.common);
         // Сначала общие (подсвечены), потом остальные системы кандидата серым.
         for (const sName of [...c.common, ...(c.profile.systems || []).filter((x) => !common.has(x))]) {
           sys.append(el("span", "chip static" + (common.has(sName) ? " on" : ""), sName));
         }
-        tr.append(who, sys, el("td", "tp-num", t("cmp.common", { n: c.common.length })));
+        if (!showLoad) tr.append(who);
+        tr.append(sys, el("td", "tp-num", t("cmp.common", { n: c.common.length })));
         tbl.append(tr);
       }
       tip.append(tbl);

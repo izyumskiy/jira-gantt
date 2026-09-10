@@ -811,6 +811,35 @@ function epicMatchesFilter(epic, filter) {
   return epic.assigneeKey === filter;
 }
 
+const LOAD_SECTIONS = 3;
+
+// Занятость людей по ближайшим секциям (текущая и две следующие) — для окна «кто может подменить».
+// Считаем по всей выгрузке, а не по видимым эпикам: фильтры не должны искажать нагрузку.
+function buildPersonLoad(model, issues, others) {
+  const sections = model.columns.filter((c) => c.start != null).slice(0, LOAD_SECTIONS);
+  const sectionOf = new Map();
+  for (const sec of sections) for (const sp of sec.sprints) sectionOf.set(sp.id, sec.id);
+  const byName = new Map();
+  for (const i of [...issues, ...others]) {
+    if (!i.assigneeName) continue;
+    const secId = sectionOf.get(i.sprintId);
+    if (!secId) continue;
+    const key = team.normName(i.assigneeName);
+    if (!byName.has(key)) byName.set(key, new Map());
+    const row = byName.get(key);
+    row.set(secId, (row.get(secId) || 0) + agg.estimateOf(i));
+  }
+  return {
+    capacity: agg.sprintCapacity(),
+    byName,
+    sections: sections.map((sec, i) => ({
+      id: sec.id,
+      caption: i === 0 ? t("cmp.loadCurrent") : `+${i}`,
+      title: sec.sprints.map((sp) => sp.name).join(", ") || agg.sectionLabel(sec)
+    }))
+  };
+}
+
 async function drawGantt(mode, container) {
   try {
     const [issues, others, sprints, epics, boards, profiles] = await Promise.all([
@@ -849,7 +878,7 @@ async function drawGantt(mode, container) {
       mode,
       timelineIssues: [...issues, ...others]
     });
-    const opts = { mode, profiles }; // профили людей нужны на обеих вкладках
+    const opts = { mode, profiles, personLoad: buildPersonLoad(model, issues, others) };
     if (mode === "epicPeople") {
       applyPersonFilter(model);
       renderPersonFilterNote();
