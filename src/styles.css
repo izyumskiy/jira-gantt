@@ -133,7 +133,11 @@ main { padding: 14px 16px 40px; }
 .ipct-bar { flex: none; width: 34px; height: 8px; border-radius: 4px; background: #ebecf0; position: relative; overflow: hidden; }
 .ipct-bar::before { content: ""; position: absolute; inset: 0 auto 0 0; width: var(--pct, 0%); background: #36b37e; }
 .ipct-num { font-variant-numeric: tabular-nums; font-weight: 600; font-size: 12px; }
-.tooltip.epic-info { min-width: 420px; max-width: 620px; }
+.tooltip.epic-info { min-width: 460px; max-width: 640px; }
+.share-block { margin-top: 4px; }
+.share-table .tp-name { white-space: nowrap; }
+.share-table .share-pct { min-width: 90px; }
+.share-table .ipct-bar { width: 40px; margin-right: 6px; }
 .tooltip.epic-info .tip-v { text-align: right; max-width: 380px; white-space: normal; }
 .idate { font-variant-numeric: tabular-nums; }
 .idate-empty { color: var(--muted); }

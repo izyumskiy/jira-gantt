@@ -17,7 +17,9 @@ const state = {
   boards: [],
   filter: { label: "", assignee: "" },
   personFilter: null, // «По эпикам»: { key, name } человека, чьи эпики раскрыты
-  epicFilter: null // «По людям»: { key, name } эпика, чьи люди раскрыты
+  epicFilter: null, // «По людям»: { key, name } эпика, чьи люди раскрыты
+  issuesByEpic: new Map(), // ключ эпика → ключи его задач (для расчёта долей команд)
+  shareCache: new Map() // ключ эпика → посчитанные доли участия команд
 };
 
 // ---------- статус-строка ----------
@@ -453,6 +455,12 @@ function showEpicInfo(anchor, epic, spent, pct) {
     }
     box.append(tbl);
   }
+
+  const shares = document.createElement("div");
+  shares.className = "share-block";
+  box.append(shares);
+  renderTeamShares(shares, epic);
+
   document.body.append(box);
   epicInfoBox = box;
   const r = anchor.getBoundingClientRect();
@@ -481,6 +489,128 @@ function epicEstimate(pct) {
   cell.textContent = agg.fmtEstimate(pct.total);
   cell.title = t("search.estimateFull", { sum: agg.fmtEstimate(pct.total), n: pct.count });
   return cell;
+}
+
+const DAY_MS_SHARE = 86400000;
+
+// Доля участия команд в эпике.
+// Ёмкость команды = участники × длительность спринта (раб. дней) × часов в дне × число спринтов
+// с даты создания эпика. Списания берутся из ворклогов эпика и его задач с той же даты и
+// раскладываются по командам Tempo (автор ищется по ключу, логину и имени).
+async function computeTeamShares(epic) {
+  const cached = state.shareCache.get(epic.key);
+  if (cached) return cached;
+  const [tempo, sprints] = await Promise.all([db.all(db.STORES.tempo), db.all(db.STORES.sprints)]);
+  const index = agg.buildTempoIndex(tempo);
+  const keys = [epic.key, ...(state.issuesByEpic.get(epic.key) || [])];
+  const since = epic.created ? new Date(epic.created) : null;
+
+  const spentByTeam = new Map();
+  let earliest = null;
+  for (let i = 0; i < keys.length; i += 5) {
+    const pages = await Promise.all(keys.slice(i, i + 5).map((k) => jira.worklogs(k).catch(() => [])));
+    for (const rows of pages) {
+      for (const w of rows) {
+        const started = w.started ? new Date(w.started) : null;
+        if (since && started && started < since) continue;
+        if (started && (!earliest || started < earliest)) earliest = started;
+        const author = w.author || w.updateAuthor || {};
+        const team = index.of({ key: author.key || "", login: author.name || "", name: author.displayName || "" });
+        const id = team ? team.id : "";
+        if (!spentByTeam.has(id)) spentByTeam.set(id, { team, sum: 0 });
+        spentByTeam.get(id).sum += Number(w.timeSpentSeconds) || 0;
+      }
+    }
+  }
+
+  const from = since || earliest || new Date();
+  const stepDays = agg.sprintStepDays(sprints); // календарная длина спринта из данных
+  const sprintsInPeriod = Math.max(1, Math.round(((Date.now() - from.getTime()) / (stepDays * DAY_MS_SHARE)) * 10) / 10);
+  const hpd = Number(settings.get().hoursPerDay) || 8;
+  const sprintDays = Number(settings.get().sprintDays) || 10;
+  const rows = [...spentByTeam.values()]
+    .map(({ team, sum }) => {
+      const capacity = team ? team.members * sprintDays * hpd * 3600 * sprintsInPeriod : 0;
+      return {
+        name: team ? team.name : t("share.noTeam"),
+        color: team ? team.color : -1,
+        members: team ? team.members : 0,
+        spent: sum,
+        capacity,
+        pct: capacity > 0 ? Math.round((sum / capacity) * 100) : null
+      };
+    })
+    .sort((a, b) => b.spent - a.spent);
+  const result = { rows, sprintsInPeriod, sprintDays, hpd, from };
+  state.shareCache.set(epic.key, result);
+  return result;
+}
+
+function renderTeamShares(box, epic) {
+  box.textContent = "";
+  box.append(Object.assign(document.createElement("div"), { className: "tip-sub", textContent: t("share.title") }));
+  const body = document.createElement("div");
+  body.className = "muted";
+  body.textContent = t("share.loading");
+  box.append(body);
+  computeTeamShares(epic)
+    .then((res) => {
+      body.remove();
+      if (!res.rows.length) {
+        box.append(Object.assign(document.createElement("div"), { className: "muted", textContent: t("share.none") }));
+        return;
+      }
+      const tbl = document.createElement("table");
+      tbl.className = "tip-table share-table";
+      for (const r of res.rows) {
+        const tr = document.createElement("tr");
+        const name = document.createElement("td");
+        name.className = "tp-name";
+        const dot = document.createElement("i");
+        dot.className = `dot ${r.color >= 0 ? `tc-${r.color}` : "tc-none"}`;
+        name.append(dot, document.createTextNode(r.name));
+        const spent = document.createElement("td");
+        spent.className = "tp-num";
+        spent.textContent = fmtSpentDays(r.spent);
+        const pctCell = document.createElement("td");
+        pctCell.className = "tp-num share-pct";
+        if (r.pct == null) pctCell.textContent = t("dash");
+        else {
+          const bar = document.createElement("span");
+          bar.className = "ipct-bar";
+          bar.style.setProperty("--pct", `${Math.min(100, r.pct)}%`);
+          const num = document.createElement("span");
+          num.className = "ipct-num";
+          num.textContent = `${r.pct}%`;
+          pctCell.append(bar, num);
+        }
+        tr.title = t("share.rowHint", {
+          team: r.name,
+          spent: fmtSpentDays(r.spent),
+          cap: r.capacity ? fmtSpentDays(r.capacity) : t("dash"),
+          members: r.members,
+          pct: r.pct == null ? t("dash") : r.pct
+        });
+        tr.append(name, spent, pctCell);
+        tbl.append(tr);
+      }
+      box.append(tbl);
+      box.append(
+        Object.assign(document.createElement("div"), {
+          className: "muted small",
+          textContent: t("share.formula", {
+            days: res.sprintDays,
+            hours: res.hpd,
+            sprints: res.sprintsInPeriod,
+            from: fmtDay(res.from.toISOString())
+          })
+        })
+      );
+    })
+    .catch((e) => {
+      body.className = "cmt-error";
+      body.textContent = t("share.error", { msg: e && e.message ? e.message : e });
+    });
 }
 
 function epicRow(epic, checked, index, spent = null, pct = null) {
@@ -612,6 +742,7 @@ async function renderStored() {
   renderStatusSummary($("#storedSummary"), shown);
   if (stored.length || hasFilter()) box.append(listHead());
   // Списано: на сам эпик + на его задачи из выгрузки.
+  state.issuesByEpic = new Map();
   const spentByEpic = new Map(stored.map((e) => [e.key, { epic: e.timeSpent || 0, issues: 0, withLogs: 0, total: 0 }]));
   // Доля выполнения: оценки сделанных задач (Готово / On Prod / Cancel) относительно всех.
   const pctByEpic = new Map(stored.map((e) => [e.key, { done: 0, total: 0, doneCount: 0, count: 0, projects: new Map() }]));
@@ -623,6 +754,8 @@ async function renderStored() {
       acc.issues += i.timeSpent;
       acc.withLogs += 1;
     }
+    if (!state.issuesByEpic.has(i.epicKey)) state.issuesByEpic.set(i.epicKey, []);
+    state.issuesByEpic.get(i.epicKey).push(i.key);
     const p = pctByEpic.get(i.epicKey);
     const est = agg.estimateOf(i);
     p.count += 1;
@@ -681,6 +814,7 @@ async function doSync({ full = false } = {}) {
   try {
     const result = await sync.sync({ full, onProgress: (m) => status(m) });
     await refreshHeader();
+    state.shareCache.clear(); // ворклоги могли измениться
     // Статусы, даты, метки эпиков обновились в базе — перерисовать список «Сохранённые эпики».
     await renderStored();
     // Сводка по спринтам — чтобы было видно, почему у спринта нет дат, а не гадать.

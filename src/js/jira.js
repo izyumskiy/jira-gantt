@@ -148,6 +148,12 @@ export function sprint(sprintId) {
   return request(`/rest/agile/1.0/sprint/${encodeURIComponent(sprintId)}`);
 }
 
+// Ворклоги задачи: автор, дата, секунды. Для доли участия команд в эпике.
+export async function worklogs(issueKey) {
+  const page = await request(`/rest/api/2/issue/${encodeURIComponent(issueKey)}/worklog?maxResults=1000`);
+  return page && Array.isArray(page.worklogs) ? page.worklogs : [];
+}
+
 // ---------- Tempo Teams (дополнение Tempo в самой Jira, та же сессия) ----------
 
 export function tempoTeams() {

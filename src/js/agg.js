@@ -218,7 +218,7 @@ export function nameFromSprints(names) {
 
 // Команды Tempo: соответствие человек → команда. Ключ, логин и имя — три способа найти,
 // потому что в задачах Jira отдаёт то одно, то другое.
-function buildTempoIndex(tempo) {
+export function buildTempoIndex(tempo) {
   const byKey = new Map();
   const byLogin = new Map();
   const byName = new Map();
@@ -233,7 +233,7 @@ function buildTempoIndex(tempo) {
   [...tempo]
     .sort((a, b) => String(a.name).localeCompare(String(b.name)))
     .forEach((tm, i) => {
-      const team = { id: `t:${tm.id}`, name: tm.name, color: i % TEAM_COLORS, tempo: true };
+      const team = { id: `t:${tm.id}`, name: tm.name, color: i % TEAM_COLORS, tempo: true, members: (tm.members || []).length };
       teams.set(team.id, team);
       size.set(team.id, (tm.members || []).length);
       for (const m of tm.members || []) {
