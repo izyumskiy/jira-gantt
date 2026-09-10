@@ -459,13 +459,12 @@ function showEpicInfo(anchor, epic, spent, pct) {
   const shares = document.createElement("div");
   shares.className = "share-block";
   box.append(shares);
-  renderTeamShares(shares, epic);
 
   document.body.append(box);
   epicInfoBox = box;
-  const r = anchor.getBoundingClientRect();
-  box.style.top = `${Math.max(8, Math.min(window.innerHeight - box.offsetHeight - 12, r.bottom + 6))}px`;
-  box.style.left = `${Math.max(8, Math.min(window.innerWidth - box.offsetWidth - 12, r.left))}px`;
+  gantt.placePopover(box, anchor);
+  // Доли команд считаются асинхронно: когда блок вырастет, положение уточняем.
+  renderTeamShares(shares, epic, () => gantt.placePopover(box, anchor));
 }
 
 // Экспресс-оценка: оценка, внесённая в сам эпик (в сумму по задачам не входит).
@@ -546,7 +545,7 @@ async function computeTeamShares(epic) {
   return result;
 }
 
-function renderTeamShares(box, epic) {
+function renderTeamShares(box, epic, onDone = () => {}) {
   box.textContent = "";
   box.append(Object.assign(document.createElement("div"), { className: "tip-sub", textContent: t("share.title") }));
   const body = document.createElement("div");
@@ -558,6 +557,7 @@ function renderTeamShares(box, epic) {
       body.remove();
       if (!res.rows.length) {
         box.append(Object.assign(document.createElement("div"), { className: "muted", textContent: t("share.none") }));
+        onDone();
         return;
       }
       const tbl = document.createElement("table");
@@ -606,10 +606,12 @@ function renderTeamShares(box, epic) {
           })
         })
       );
+      onDone();
     })
     .catch((e) => {
       body.className = "cmt-error";
       body.textContent = t("share.error", { msg: e && e.message ? e.message : e });
+      onDone();
     });
 }
 

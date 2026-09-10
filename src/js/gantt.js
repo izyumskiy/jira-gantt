@@ -15,6 +15,24 @@ export const commentsApi = {
 };
 const RECENT_COMMENTS = 5;
 
+// Позиционирование всплывающих окон: ниже якоря, если помещается; иначе выше; иначе прижимаем
+// к нижнему краю экрана. Вызывается повторно, когда содержимое подгрузилось и высота выросла.
+export function placePopover(box, anchor) {
+  if (!box || !anchor || !box.isConnected) return;
+  const margin = 8;
+  const r = anchor.getBoundingClientRect();
+  const h = box.offsetHeight;
+  const w = box.offsetWidth;
+  const below = window.innerHeight - r.bottom - margin;
+  const above = r.top - margin;
+  let top;
+  if (h <= below) top = r.bottom + 6;
+  else if (h <= above) top = r.top - h - 6;
+  else top = Math.max(margin, window.innerHeight - h - margin);
+  box.style.top = `${top}px`;
+  box.style.left = `${Math.max(margin, Math.min(window.innerWidth - w - margin, r.left))}px`;
+}
+
 // Эпики с включённой подсветкой критического пути (ключи).
 const criticalOn = new Set();
 
@@ -724,6 +742,7 @@ function showComments(anchor, key, label) {
       list.textContent = "";
       list.append(el("div", "cmt-error", t("cmt.error", { msg: e && e.message ? e.message : e })));
     }
+    placePopover(tip, anchor); // список подгрузился — окно выросло
   };
   save.onclick = async () => {
     const text = ta.value.trim();
@@ -743,10 +762,7 @@ function showComments(anchor, key, label) {
   load();
 
   document.body.append(tip);
-  const r = anchor.getBoundingClientRect();
-  const top = Math.min(window.innerHeight - tip.offsetHeight - 12, r.bottom + 6);
-  tip.style.top = `${Math.max(8, top)}px`;
-  tip.style.left = `${Math.max(8, Math.min(window.innerWidth - tip.offsetWidth - 12, r.left))}px`;
+  placePopover(tip, anchor);
   ta.focus();
 }
 
@@ -861,10 +877,7 @@ function showCompare(anchor, name, profile, profiles, personLoad = null) {
   tip.append(el("div", "small muted cmp-criteria", t("cmp.criteria")));
 
   document.body.append(tip);
-  const r = anchor.getBoundingClientRect();
-  const top = Math.min(window.innerHeight - tip.offsetHeight - 12, r.bottom + 6);
-  tip.style.top = `${Math.max(8, top)}px`;
-  tip.style.left = `${Math.max(8, Math.min(window.innerWidth - tip.offsetWidth - 12, r.left))}px`;
+  placePopover(tip, anchor);
 }
 
 // ---------- ссылки в Jira ----------
@@ -956,10 +969,7 @@ function showIssues(anchor, title, issues) {
   tip.append(tbl);
 
   document.body.append(tip);
-  const r = anchor.getBoundingClientRect();
-  const top = Math.min(window.innerHeight - tip.offsetHeight - 12, r.bottom + 6);
-  tip.style.top = `${Math.max(8, top)}px`;
-  tip.style.left = `${Math.max(8, Math.min(window.innerWidth - tip.offsetWidth - 12, r.left))}px`;
+  placePopover(tip, anchor);
 }
 
 function showTooltip(anchor, g, mode, model, profile = null) {
@@ -1063,10 +1073,7 @@ function showTooltip(anchor, g, mode, model, profile = null) {
   }
 
   document.body.append(tip);
-  const r = anchor.getBoundingClientRect();
-  const top = Math.min(window.innerHeight - tip.offsetHeight - 12, r.bottom + 6);
-  tip.style.top = `${Math.max(8, top)}px`;
-  tip.style.left = `${Math.max(8, Math.min(window.innerWidth - tip.offsetWidth - 12, r.left))}px`;
+  placePopover(tip, anchor);
 }
 
 export function resetCollapse() {

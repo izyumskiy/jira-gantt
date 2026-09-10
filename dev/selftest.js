@@ -795,6 +795,38 @@ g4.remove();
   check("повторный клик снимает подсветку", g3.querySelectorAll(".bar.crit, .crit-row").length === 0);
 }
 
+// 9c. позиционирование всплывающих окон (размеры окна подменяем: панель может быть скрыта)
+{
+  const realW = window.innerWidth;
+  const realH = window.innerHeight;
+  Object.defineProperty(window, "innerWidth", { value: 1200, configurable: true });
+  Object.defineProperty(window, "innerHeight", { value: 800, configurable: true });
+  const anchor = document.createElement("button");
+  Object.assign(anchor.style, { position: "fixed", left: "40px", top: "760px", width: "20px", height: "20px" });
+  document.body.append(anchor);
+  const box = document.createElement("div");
+  box.className = "tooltip";
+  Object.assign(box.style, { width: "300px", height: "260px", maxHeight: "none" });
+  document.body.append(box);
+
+  gantt.placePopover(box, anchor);
+  let top = parseFloat(box.style.top);
+  check("окно у нижнего края экрана не уезжает за границу", top >= 8 && top + 260 <= 800, `${top} + 260`);
+  box.style.height = "420px";
+  gantt.placePopover(box, anchor);
+  top = parseFloat(box.style.top);
+  check("после роста содержимого окно всё ещё в экране", top >= 8 && top + 420 <= 800, `${top} + 420`);
+  anchor.style.top = "10px";
+  gantt.placePopover(box, anchor);
+  check("у верхнего края окно открывается вниз", parseFloat(box.style.top) >= 30, box.style.top);
+  check("окно не выходит за правый край", parseFloat(box.style.left) + 300 <= 1200);
+
+  box.remove();
+  anchor.remove();
+  Object.defineProperty(window, "innerWidth", { value: realW, configurable: true });
+  Object.defineProperty(window, "innerHeight", { value: realH, configurable: true });
+}
+
 // 10. комментарии эпика (Jira подменена заглушкой)
 const fakeComments = Array.from({ length: 7 }, (_, i) => ({ id: String(i), body: `Комментарий ${i + 1}`, author: { displayName: "Ivan" }, created: new Date(Date.now() - (7 - i) * day).toISOString() }));
 const added = [];
