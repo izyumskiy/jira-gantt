@@ -388,7 +388,8 @@ export function render(container, model, opts) {
   const hr = el("tr");
   const th0 = el("th", "c-name");
   th0.append(el("span", null, epicLike ? t("gantt.epic") : t("gantt.assignee")));
-  th0.append(el("span", "th-hint", ` / ${model.childKind === "person" ? t("gantt.assignee") : t("gantt.project")}`));
+  const childTitle = { person: t("gantt.assignee"), epic: t("gantt.epic") }[model.childKind] || t("gantt.project");
+  th0.append(el("span", "th-hint", ` / ${childTitle}`));
   hr.append(th0);
   for (const sec of model.columns) {
     const th = el("th", "c-sprint" + (sec.id === model.currentId ? " current" : ""));
