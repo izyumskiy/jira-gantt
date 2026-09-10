@@ -1,4 +1,4 @@
-// Отрисовка диаграммы Ганта: слева дерево (эпик/исполнитель → проекты [+ «Прочие»]), справа полосы
+// Отрисовка диаграммы Ганта: слева дерево (эпик → исполнители, исполнитель → эпики), справа полосы
 // по временным секциям. Группы: у эпика одна жёлтая полоса-итог; у человека полоса делится на
 // жёлтую (целевые эпики) и серую (прочие эпики) части пропорционально объёму. Вложенные строки
 // рисуются тонкими голубыми отрезками — по одному на каждый спринт секции.
@@ -207,7 +207,7 @@ function splitBar(target, other) {
   return bar;
 }
 
-// Вложенная строка (проект, «Прочие»): тонкий голубой отрезок на каждый спринт секции.
+// Вложенная строка (исполнитель или эпик): тонкий голубой отрезок на каждый спринт секции.
 function nestedCell(cell, section, model, rowLabel) {
   const td = el("td", "c-cell");
   if (!cell || !cell.count) return td;
@@ -523,7 +523,7 @@ export function render(container, model, opts) {
 
     if (isCollapsed) return;
     for (const p of g.projects) {
-      const ptr = el("tr", "g-row proj" + (highlightChild && p.key === highlightChild ? " hl" : ""));
+      const ptr = el("tr", "g-row proj" + (highlightChild && p.key === highlightChild ? " hl" : "") + (p.target ? " epic-target" : ""));
       const pname = el("td", "c-name");
       let plabel;
       if (model.childKind === "person" && onChildClick) {
@@ -535,6 +535,7 @@ export function render(container, model, opts) {
         plabel.onclick = () => onChildClick(p.key, p.label);
       } else {
         plabel = el("span", "plabel", p.label);
+        plabel.title = p.label + (p.target ? ` · ${t("gantt.targetEpic")}` : "");
       }
       pname.append(el("span", "indent"), plabel);
       if (model.childKind === "person" && p.key) pname.append(compareButton(p.label, profileOf.get(normName(p.label)) || null, profiles));
@@ -552,18 +553,6 @@ export function render(container, model, opts) {
         plabel.after(mark);
       }
       tbody.append(ptr);
-    }
-    // «Прочие» — задачи человека в эпиках вне выбранных.
-    if (mode === "assignee" && g.otherCount) {
-      const otr = el("tr", "g-row proj others");
-      const oname = el("td", "c-name");
-      const olabel = el("span", "plabel plabel-others", t("gantt.others"));
-      olabel.title = t("gantt.othersHint");
-      oname.append(el("span", "indent"), olabel, badges(g.otherCount, g.otherSum));
-      otr.append(oname);
-      for (const sec of model.columns) otr.append(nestedCell(g.otherCells.get(sec.id), sec, model, `${g.label} · ${t("gantt.others")}`));
-      if (showBacklog) otr.append(el("td", "c-cell c-backlog")); // прочие эпики — только спринты, бэклога нет
-      tbody.append(otr);
     }
   });
   table.append(tbody);

@@ -292,6 +292,10 @@ table.gantt { border-collapse: separate; border-spacing: 0; }
 }
 .gantt thead .c-name { z-index: 4; background: #fafbfc; }
 .gantt.mode-assignee { --name-w: 456px; } /* на 20% шире: имя + роль + бейджи */
+.gantt.mode-assignee .plabel, .gantt.mode-epicPeople .plabel { max-width: 300px; }
+/* Эпик, отмеченный галочкой на «Поиске», — светло-жёлтой заливкой. */
+.g-row.proj.epic-target > .c-name { background: #fff7d6; }
+.g-row.proj.epic-target.hl > .c-name { background: var(--accent-soft); }
 .g-row { height: var(--row-h); }
 .g-row.group > .c-name { font-weight: 600; }
 .g-row.group { background: #fbfcfd; }
@@ -308,7 +312,7 @@ table.gantt { border-collapse: separate; border-spacing: 0; }
   font: inherit;
   font-weight: 600;
   cursor: pointer;
-  max-width: 170px;
+  max-width: 240px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -374,7 +378,7 @@ table.gantt { border-collapse: separate; border-spacing: 0; }
 .g-row.proj.hl .plabel-link { font-weight: 700; }
 .plabel {
   display: inline-block;
-  max-width: 210px;
+  max-width: 260px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -653,6 +657,7 @@ textarea { font: inherit; padding: 5px 8px; border: 1px solid var(--line); borde
   .chip { background: #2c333a; }
   .gantt thead th, .gantt thead .c-name { background: #262c31; }
   .g-row.group { background: #252b30; }
+  .g-row.proj.epic-target > .c-name { background: #3b3620; }
   .item:hover, .g-row:hover > td { background: #272e34; }
   .badge { background: #333a41; }
   .lozenge { background: #3c4147; color: #c7d1db; }

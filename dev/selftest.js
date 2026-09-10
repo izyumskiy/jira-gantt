@@ -231,7 +231,16 @@ check("Ivan задач в прочих статусах", ivan.other === 2, Stri
 check("у исполнителя нет лейбла статуса", ivan.status === null);
 check("Ivan в команде Alpha", ivan.team?.name === "Alpha", ivan.team?.name);
 // «По людям»: внутри человека — эпики (ключ + Epic Name), только с задачами в секциях таймлайна
-check("внутри Ivan — эпики, а не проекты", ivan.projects.map((p) => p.key).sort().join(",") === "EP-1,EP-2", ivan.projects.map((p) => p.label).join(" | "));
+check("внутри Ivan — эпики (целевые и прочие), а не проекты", ivan.projects.map((p) => p.key).sort().join(",") === "EP-1,EP-2,EP-9", ivan.projects.map((p) => p.label).join(" | "));
+check("прочий эпик EP-9 подписан ключом и названием, не помечен целевым",
+  ivan.projects.find((p) => p.key === "EP-9")?.label === "EP-9 · Миграция" && ivan.projects.find((p) => p.key === "EP-9")?.target === false,
+  ivan.projects.find((p) => p.key === "EP-9")?.label);
+check("целевые эпики помечены target", ivan.projects.filter((p) => p.target).map((p) => p.key).sort().join(",") === "EP-1,EP-2");
+{
+  const hid = agg.buildModel({ issues, others, sprints, epics: epics.map((e) => (e.key === "EP-1" ? { ...e, hidden: true } : e)), boards, mode: "assignee" });
+  const iv = hid.groups.find((g) => g.key === "ivan");
+  check("снятая галочка на «Поиске» → эпик без подсветки", iv.projects.find((p) => p.key === "EP-1")?.target === false);
+}
 check("подпись вложенного эпика — ключ и название", ivan.projects.find((p) => p.key === "EP-1")?.label === "EP-1 · Личный кабинет", ivan.projects.find((p) => p.key === "EP-1")?.label);
 check("childKind по людям = epic", m2.childKind === "epic");
 {
@@ -487,9 +496,17 @@ check("ширины частей пропорциональны оценке (12
 check("в секции 1 у Ivan только жёлтая часть на всю ширину",
   ivanRow.querySelectorAll(".c-cell")[1].querySelectorAll(".part").length === 1 &&
   ivanRow.querySelectorAll(".c-cell")[1].querySelector(".part-target").style.flexBasis === "100%");
-check("строка «Прочие» у Ivan и Petr", document.querySelectorAll("#g2 .g-row.others").length === 2);
-check("«Прочие» у Ivan: 1 задача / 8ч, голубой отрезок Sprint 2",
-  ivanRow.nextElementSibling && [...document.querySelectorAll("#g2 .g-row.others")][0].querySelector(".bar.nested .bar-sprint")?.textContent === "Sprint 2");
+check("строки «Прочие» больше нет — прочие эпики отдельными строками", document.querySelectorAll("#g2 .g-row.others").length === 0);
+const ivanChildren = [];
+for (let r = ivanRow.nextElementSibling; r && r.classList.contains("proj"); r = r.nextElementSibling) ivanChildren.push(r);
+check("у Ivan среди вложенных строк — прочий эпик EP-9", ivanChildren.some((r) => r.querySelector(".plabel").textContent.startsWith("EP-9")),
+  ivanChildren.map((r) => r.querySelector(".plabel").textContent).join(" | "));
+check("целевые эпики подсвечены жёлтым, прочий — нет",
+  ivanChildren.filter((r) => r.classList.contains("epic-target")).every((r) => !r.querySelector(".plabel").textContent.startsWith("EP-9")) &&
+    !ivanChildren.find((r) => r.querySelector(".plabel").textContent.startsWith("EP-9")).classList.contains("epic-target"),
+  ivanChildren.map((r) => `${r.querySelector(".plabel").textContent}:${r.classList.contains("epic-target")}`).join(" | "));
+check("целевые эпики идут выше прочих", ivanChildren.findIndex((r) => r.querySelector(".plabel").textContent.startsWith("EP-9")) === ivanChildren.length - 1,
+  ivanChildren.map((r) => r.querySelector(".plabel").textContent).join(" | "));
 check("серый бейдж прочих у человека (8ч = 1д)", ivanRow.querySelector(".badge.b-other")?.textContent === "+1 · 1д", ivanRow.querySelector(".badge.b-other")?.textContent);
 check("у эпиков серого бейджа нет", document.querySelectorAll("#g1 .badge.b-other").length === 0);
 // профиль человека на вкладке по людям: цвет имени, лейбл роли, ширина колонки
