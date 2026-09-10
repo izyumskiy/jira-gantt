@@ -153,6 +153,19 @@ check("подпись секции — диапазон дат", /^\d{2}\.\d{2} 
   check("сдвиг команд: спринт, закончившийся до сегодня, на график не попадает", secOf(16) === "—", secOf(16));
 }
 
+// 2c. шкала одинакова на вкладках и не зависит от фильтров
+{
+  const all = [...issues, ...others];
+  const cols1 = agg.buildModel({ issues, others, sprints, epics, boards, mode: "epicPeople", timelineIssues: all }).columns.map((c) => c.id);
+  const cols2 = agg.buildModel({ issues, others, sprints, epics, boards, mode: "assignee", timelineIssues: all }).columns.map((c) => c.id);
+  check("колонки одинаковы на «По эпикам» и «По людям»", cols1.join(",") === cols2.join(","), `${cols1.join(",")} / ${cols2.join(",")}`);
+  const oneEpic = agg.buildModel({
+    issues: issues.filter((i) => i.epicKey === "EP-3"),
+    others, sprints, epics, boards, mode: "epicPeople", timelineIssues: all
+  }).columns.map((c) => c.id);
+  check("фильтр по одному эпику не укорачивает шкалу", oneEpic.join(",") === cols1.join(","), oneEpic.join(","));
+}
+
 // 3. модель по эпикам
 const m1 = agg.buildModel({ issues, sprints, epics, boards, mode: "epicPeople" });
 const ep1 = m1.groups.find((g) => g.key === "EP-1");
@@ -165,9 +178,9 @@ check("EP-1 в секции 0 разложен по спринтам 2 и 5 (д�
   [...(ep1.cells.get("sec:0")?.bySprint.keys() || [])].join(","));
 check("EP-1 закрытый спринт не в ячейках", ![...ep1.cells.values()].some((c) => c.bySprint.has(1)));
 check("EP-1 вложенные строки — исполнители (A-4 без спринта и готова → «Без исполнителя» скрыт)", ep1.projects.map((p) => p.label).sort().join(",") === "Ivan,Olga,Petr", ep1.projects.map((p) => p.label).join(","));
-check("EP-1 подпись: ключ и название (меток нет)", ep1.label === "EP-1 · Личный кабинет", ep1.label);
-const mlab = agg.buildModel({ issues: [mk("L-1", "EP-1", "AAA", "Ivan", 2, 1)], sprints, epics: [{ ...epics[0], labels: ["q4", "mobile"] }], boards, mode: "epicPeople" });
-check("подпись эпика — из меток, если они есть", mlab.groups[0].label === "EP-1 · q4, mobile", mlab.groups[0].label);
+check("EP-1 подпись: ключ и название (Epic Name пуст)", ep1.label === "EP-1 · Личный кабинет", ep1.label);
+const mlab = agg.buildModel({ issues: [mk("L-1", "EP-1", "AAA", "Ivan", 2, 1)], sprints, epics: [{ ...epics[0], epicName: "ЛК", labels: ["q4"] }], boards, mode: "epicPeople" });
+check("подпись эпика — Epic Name, если поле заполнено", mlab.groups[0].label === "EP-1 · ЛК", mlab.groups[0].label);
 check("EP-1 готовых задач (включая On Prod)", ep1.done === 3, String(ep1.done));
 check("EP-1 задач в прочих статусах", ep1.other === 4, String(ep1.other));
 check("EP-1 разбивка сходится с общим", ep1.done + ep1.other === ep1.count);
@@ -230,6 +243,33 @@ check("Ivan готовых задач", ivan.done === 2, String(ivan.done));
 check("Ivan задач в прочих статусах", ivan.other === 2, String(ivan.other));
 check("у исполнителя нет лейбла статуса", ivan.status === null);
 check("Ivan в команде Alpha", ivan.team?.name === "Alpha", ivan.team?.name);
+// «По людям»: внутри человека — эпики (ключ + Epic Name), только с задачами в секциях таймлайна
+check("внутри Ivan — эпики (целевые и прочие), а не проекты", ivan.projects.map((p) => p.key).sort().join(",") === "EP-1,EP-2,EP-9", ivan.projects.map((p) => p.label).join(" | "));
+check("прочий эпик EP-9 подписан ключом и названием, не помечен целевым",
+  ivan.projects.find((p) => p.key === "EP-9")?.label === "EP-9 · Миграция" && ivan.projects.find((p) => p.key === "EP-9")?.target === false,
+  ivan.projects.find((p) => p.key === "EP-9")?.label);
+check("целевые эпики помечены target", ivan.projects.filter((p) => p.target).map((p) => p.key).sort().join(",") === "EP-1,EP-2");
+{
+  const hid = agg.buildModel({ issues, others, sprints, epics: epics.map((e) => (e.key === "EP-1" ? { ...e, hidden: true } : e)), boards, mode: "assignee" });
+  const iv = hid.groups.find((g) => g.key === "ivan");
+  check("снятая галочка на «Поиске» → эпик без подсветки", iv.projects.find((p) => p.key === "EP-1")?.target === false);
+}
+check("подпись вложенного эпика — ключ и название", ivan.projects.find((p) => p.key === "EP-1")?.label === "EP-1 · Личный кабинет", ivan.projects.find((p) => p.key === "EP-1")?.label);
+check("childKind по людям = epic", m2.childKind === "epic");
+{
+  const only = agg.buildModel({
+    issues: [mk("Z-1", "EP-1", "AAA", "Ivan", 1, 8, "prog"), mk("Z-2", "EP-2", "BBB", "Ivan", 2, 4, "prog")],
+    sprints, epics, boards, mode: "assignee"
+  });
+  check("эпик только с задачами в закрытом спринте внутрь человека не попадает",
+    only.groups[0].projects.map((p) => p.key).join(",") === "EP-2", only.groups[0].projects.map((p) => p.key).join(","));
+}
+// перегрузка спринта: ёмкость = длительность спринта × часов в дне
+await settings.save({ sprintDays: 1, hoursPerDay: 8 });
+check("sprintCapacity = 1д × 8ч", agg.sprintCapacity() === 8 * H, String(agg.sprintCapacity() / H));
+await settings.save({ estimateField: "points" });
+check("для story points подсветка перегруза выключена", agg.sprintCapacity() === 0);
+await settings.save({ estimateField: "original" });
 check("Ivan: прочие эпики — 1 задача / 8ч", ivan.otherCount === 1 && ivan.otherSum === 8 * H, `${ivan.otherCount} / ${ivan.otherSum / H}`);
 check("Ivan: целевые итоги не смешаны с прочими", ivan.count === 4 && ivan.sum === 58 * H, `${ivan.count} / ${ivan.sum / H}`);
 check("Ivan: прочие в секции 0 по спринту 2", ivan.otherCells.get("sec:0")?.bySprint.get(2)?.count === 1);
@@ -238,13 +278,26 @@ const petr = m2.groups.find((g) => g.key === "petr");
 check("Petr в команде Beta", petr.team?.name === "Beta", petr.team?.name);
 check("Petr: прочие — 2 задачи / 6ч, задача без эпика учтена", petr.otherCount === 2 && petr.otherSum === 6 * H, `${petr.otherCount} / ${petr.otherSum / H}`);
 check("Petr: прочие эпики отсортированы по объёму, без эпика — прочерком", petr.otherEpics.map((e) => e.key || "—").join(",") === "EP-8,—", petr.otherEpics.map((e) => e.key).join(","));
-const nobody = m2.groups.find((g) => g.key === "");
-check("группа «без исполнителя»", nobody && nobody.label === t("gantt.noAssignee"), nobody && nobody.label);
-check("без спринтов — без команды", nobody.team?.id === "" && nobody.team?.name === t("gantt.noTeam"), nobody.team?.name);
+// «Без исполнителя» в фикстуре — только задача без спринта и готовая, значит человека на вкладке нет.
+check("человек без задач в текущих/будущих спринтах убран с вкладки", !m2.groups.some((g) => g.key === ""), m2.groups.map((g) => g.label).join(","));
+{
+  const withNobody = agg.buildModel({ issues: [...issues, { ...mk("N-1", "EP-1", "AAA", null, 2, 3, "new"), assigneeKey: "", assigneeName: "" }], others, sprints, epics, boards, mode: "assignee" });
+  const nb = withNobody.groups.find((g) => g.key === "");
+  check("человек с задачей в текущем спринте остаётся", nb && nb.label === t("gantt.noAssignee"), nb && nb.label);
+}
+{
+  // Спринт без доски → человек без команды.
+  const noBoard = agg.buildModel({
+    issues: [mk("T-1", "EP-1", "AAA", "Ivan", 55, 3, "new")],
+    sprints: [...sprints, { id: 55, name: "Free", state: "ACTIVE", startDate: iso(-1), endDate: iso(12), boardId: null }],
+    epics, boards, mode: "assignee"
+  });
+  check("спринт без доски — человек без команды", noBoard.groups[0].team?.id === "" && noBoard.groups[0].team?.name === t("gantt.noTeam"), noBoard.groups[0].team?.name);
+}
 check("люди отсортированы по командам: Alpha, Beta, без команды",
   m2.groups.map((g) => `${g.team.name}/${g.label}`).join(","),
   m2.groups.map((g) => `${g.team.name}/${g.label}`).join(","));
-check("порядок команд", m2.groups.map((g) => g.team.name).join(",") === "Alpha,Alpha,Beta,Без команды", m2.groups.map((g) => g.team.name).join(","));
+check("порядок команд", m2.groups.map((g) => g.team.name).join(",") === "Alpha,Alpha,Beta", m2.groups.map((g) => g.team.name).join(","));
 
 // 4b. вкладка «Команда»: люди из выгрузки и сопоставление профилей по имени
 const people = collectPeople(issues, others);
@@ -335,6 +388,18 @@ check("epicPeople: аутстаф Olga — жёлтым, Petr без профи�
 check("epicPeople: колонка «Бэклог» и нумерация как у эпиков", g3.querySelectorAll("thead .c-sprint.backlog").length === 1 && g3.querySelectorAll(".gnum").length === m3.groups.length);
 check("epicPeople: имена людей — кнопки", g3.querySelectorAll(".g-row.proj .plabel-link").length > 0);
 check("epicPeople: лейблов с цифрами нет ни у эпиков, ни у людей", g3.querySelectorAll(".badges").length === 0, String(g3.querySelectorAll(".badges").length));
+check("epicPeople: имена людей кликабельны", g3.querySelectorAll(".g-row.proj .plabel-link").length > 0);
+// прокрутка не сбрасывается при сворачивании/разворачивании узла
+{
+  const wrap = g3.querySelector(".gantt-wrap");
+  wrap.scrollLeft = 40;
+  const row = g3.querySelector(".g-row.group");
+  row.querySelector(".twisty").click();
+  check("горизонтальная прокрутка таблицы сохраняется при сворачивании", g3.querySelector(".gantt-wrap").scrollLeft === 40,
+    String(g3.querySelector(".gantt-wrap").scrollLeft));
+  g3.querySelector(".g-row.group .twisty").click();
+  check("и при разворачивании обратно", g3.querySelector(".gantt-wrap").scrollLeft === 40, String(g3.querySelector(".gantt-wrap").scrollLeft));
+}
 check("epicPeople: строка выбранного человека подсвечена", [...g3.querySelectorAll(".g-row.proj.hl")].every((r) => r.querySelector(".plabel").textContent === "Ivan") && g3.querySelectorAll(".g-row.proj.hl").length === 2, String(g3.querySelectorAll(".g-row.proj.hl").length));
 g3.querySelector(".g-row.proj .plabel-link").click();
 check("epicPeople: клик по имени отдаёт ключ и имя", /^[a-z]+:.+$/.test(clicked || ""), clicked);
@@ -401,8 +466,11 @@ check("в Ганте по людям лейблов статуса нет (то�
 const nums = [...document.querySelectorAll("#g1 .gnum")].map((n) => n.textContent);
 check("эпики пронумерованы подряд", nums.join(" ") === "1. 2. 3. 4. 5.", nums.join(" "));
 check("исполнители не нумеруются", document.querySelectorAll("#g2 .gnum").length === 0);
-check("на «По эпикам» лейблов с цифрами нет, на «По людям» остались",
-  document.querySelectorAll("#g1 .g-row.group .badges").length === 0 && document.querySelectorAll("#g2 .g-row.group .badges").length === m2.groups.length);
+check("числовых меток нет ни у фамилий, ни у эпиков, ни у досок",
+  document.querySelectorAll("#g1 .badges").length === 0 && document.querySelectorAll("#g2 .badges").length === 0,
+  `${document.querySelectorAll("#g1 .badges").length} / ${document.querySelectorAll("#g2 .badges").length}`);
+check("строка доски — только точка и название", document.querySelector("#g2 .g-row.team .c-name").textContent === document.querySelector("#g2 .g-row.team .tlabel").textContent,
+  document.querySelector("#g2 .g-row.team .c-name").textContent);
 
 // зелёная заливка — доля готовых задач по оценке
 const ep1Sec0Bar = [...document.querySelectorAll("#g1 .g-row.group")][0].querySelectorAll(".c-cell")[0].querySelector(".bar-group");
@@ -431,6 +499,11 @@ check("EP-2: готов и просрочен — зелёная у левого
   `${df2?.className} / ${df2?.title}`);
 check("на «По людям» вех нет", document.querySelectorAll("#g2 .due-flag, #g2 .due-line").length === 0);
 check("легенда вехи на вкладке по эпикам", document.querySelector("#g1 .swatch-due") != null);
+check("веха срока лежит ниже липкой колонки имён (не наезжает при горизонтальной прокрутке)",
+  Number(getComputedStyle(document.querySelector("#g1 tbody .c-name")).zIndex) > Number(getComputedStyle(document.querySelector("#g1 .due-flag")).zIndex) &&
+    Number(getComputedStyle(document.querySelector("#g1 tbody .c-name")).zIndex) > Number(getComputedStyle(document.querySelector("#g1 .due-line")).zIndex),
+  `${getComputedStyle(document.querySelector("#g1 tbody .c-name")).zIndex} / ${getComputedStyle(document.querySelector("#g1 .due-flag")).zIndex}`);
+check("шапка таблицы выше строк тела", Number(getComputedStyle(document.querySelector("#g1 thead th.c-sprint")).zIndex) > Number(getComputedStyle(document.querySelector("#g1 tbody .c-name")).zIndex));
 check("полосы групп — жёлтые (.bar-group), у проектов их нет",
   document.querySelectorAll("#g1 .g-row.group .bar").length > 0 &&
   [...document.querySelectorAll("#g1 .g-row.group .bar")].every((b) => b.classList.contains("bar-group")) &&
@@ -469,10 +542,18 @@ check("ширины частей пропорциональны оценке (12
 check("в секции 1 у Ivan только жёлтая часть на всю ширину",
   ivanRow.querySelectorAll(".c-cell")[1].querySelectorAll(".part").length === 1 &&
   ivanRow.querySelectorAll(".c-cell")[1].querySelector(".part-target").style.flexBasis === "100%");
-check("строка «Прочие» у Ivan и Petr", document.querySelectorAll("#g2 .g-row.others").length === 2);
-check("«Прочие» у Ivan: 1 задача / 8ч, голубой отрезок Sprint 2",
-  ivanRow.nextElementSibling && [...document.querySelectorAll("#g2 .g-row.others")][0].querySelector(".bar.nested .bar-sprint")?.textContent === "Sprint 2");
-check("серый бейдж прочих у человека (8ч = 1д)", ivanRow.querySelector(".badge.b-other")?.textContent === "+1 · 1д", ivanRow.querySelector(".badge.b-other")?.textContent);
+check("строки «Прочие» больше нет — прочие эпики отдельными строками", document.querySelectorAll("#g2 .g-row.others").length === 0);
+const ivanChildren = [];
+for (let r = ivanRow.nextElementSibling; r && r.classList.contains("proj"); r = r.nextElementSibling) ivanChildren.push(r);
+check("у Ivan среди вложенных строк — прочий эпик EP-9", ivanChildren.some((r) => r.querySelector(".plabel").textContent.startsWith("EP-9")),
+  ivanChildren.map((r) => r.querySelector(".plabel").textContent).join(" | "));
+check("целевые эпики подсвечены жёлтым, прочий — нет",
+  ivanChildren.filter((r) => r.classList.contains("epic-target")).every((r) => !r.querySelector(".plabel").textContent.startsWith("EP-9")) &&
+    !ivanChildren.find((r) => r.querySelector(".plabel").textContent.startsWith("EP-9")).classList.contains("epic-target"),
+  ivanChildren.map((r) => `${r.querySelector(".plabel").textContent}:${r.classList.contains("epic-target")}`).join(" | "));
+check("целевые эпики идут выше прочих", ivanChildren.findIndex((r) => r.querySelector(".plabel").textContent.startsWith("EP-9")) === ivanChildren.length - 1,
+  ivanChildren.map((r) => r.querySelector(".plabel").textContent).join(" | "));
+check("серого бейджа прочих у фамилии больше нет — прочие эпики отдельными строками", !ivanRow.querySelector(".badge.b-other"));
 check("у эпиков серого бейджа нет", document.querySelectorAll("#g1 .badge.b-other").length === 0);
 // профиль человека на вкладке по людям: цвет имени, лейбл роли, ширина колонки
 const labelOf = (name) => [...document.querySelectorAll("#g2 .glabel")].find((b) => b.textContent === name);
@@ -484,9 +565,10 @@ const roleOf = (name) => labelOf(name).parentElement.querySelector(".lozenge.lz-
 check("зелёный лейбл роли у Ivan и Olga", roleOf("Ivan")?.textContent === "Developer" && roleOf("Olga")?.textContent === "QA" && !roleOf("Petr"),
   `${roleOf("Ivan")?.textContent} / ${roleOf("Olga")?.textContent}`);
 check("лейбл роли зелёный", getComputedStyle(roleOf("Ivan")).backgroundColor === "rgb(227, 252, 239)", getComputedStyle(roleOf("Ivan")).backgroundColor);
-check("на вкладке по людям колонка имён на 20% шире (456px)",
-  Math.round(document.querySelector("#g2 thead .c-name").getBoundingClientRect().width) === 456 && Math.round(document.querySelector("#g1 thead .c-name").getBoundingClientRect().width) === 380,
-  `${document.querySelector("#g2 thead .c-name").getBoundingClientRect().width} / ${document.querySelector("#g1 thead .c-name").getBoundingClientRect().width}`);
+check("колонка дерева одинакова на «По эпикам» и «По людям» (456px)",
+  Math.round(document.querySelector("#g1 thead .c-name").getBoundingClientRect().width) === 456 &&
+    Math.round(document.querySelector("#g2 thead .c-name").getBoundingClientRect().width) === 456,
+  `${document.querySelector("#g1 thead .c-name").getBoundingClientRect().width} / ${document.querySelector("#g2 thead .c-name").getBoundingClientRect().width}`);
 check("без профилей лейблов роли нет", document.querySelectorAll("#g1 .lz-role").length === 0);
 
 // бэклог: колонка справа, задачи без спринта и не готово
@@ -520,7 +602,23 @@ check("клик по бэклогу — задача A-6", issueRows.length === 
 document.querySelector(".tip-close").click();
 check("окно закрывается крестиком", !document.querySelector(".tooltip"));
 const teamRows = [...document.querySelectorAll("#g2 .g-row.team .tlabel")].map((n) => n.textContent);
-check("строки команд на вкладке по людям", teamRows.join(",") === "Alpha,Beta,Без команды", teamRows.join(","));
+check("строки команд на вкладке по людям", teamRows.join(",") === "Alpha,Beta", teamRows.join(","));
+{
+  // Ivan в секции 0: 12ч целевых + 4ч прочих = 16ч > ёмкости 8ч (1 день × 8ч) → красная обводка.
+  await settings.save({ sprintDays: 1 });
+  const gO = document.createElement("div");
+  document.body.append(gO);
+  gantt.render(gO, m2, { mode: "assignee" });
+  const rowIvan = [...gO.querySelectorAll(".g-row.group")].find((r) => r.querySelector(".glabel").textContent === "Ivan");
+  const cells = rowIvan.querySelectorAll(".c-cell");
+  check("перегруженная секция обведена красным", cells[0].querySelector(".bar-split")?.classList.contains("overload"), cells[0].querySelector(".bar-split")?.className);
+  check("в подсказке — нагрузка и ёмкость", (cells[0].querySelector(".bar-split")?.title || "").includes("2.5д") && cells[0].querySelector(".bar-split").title.includes("1д"), cells[0].querySelector(".bar-split")?.title);
+  check("секция в пределах ёмкости не обведена", !cells[1].querySelector(".bar-split")?.classList.contains("overload"));
+  await settings.save({ sprintDays: 10 });
+  gantt.render(gO, m2, { mode: "assignee" });
+  check("при ёмкости 10д перегрузки нет", gO.querySelectorAll(".bar.overload").length === 0);
+  gO.remove();
+}
 
 document.querySelector("#g1 .glabel").click();
 const tipRows = [...document.querySelectorAll(".tooltip .tip-row")].map((r) => r.textContent);
@@ -572,6 +670,19 @@ const cmpProfiles = [
   { name: "zed", displayName: "Zed", role: "qa", status: "staff", systems: ["CRM"] },              // другая роль
   { name: "lee", displayName: "Lee", role: "developer", status: "fired", systems: ["CRM", "Mobile"] } // уволен
 ];
+// Занятость кандидатов по ближайшим спринтам (в окне замены).
+const loadFixture = {
+  capacity: 8 * H, // 1 день × 8 часов
+  byName: new Map([
+    ["petr", new Map([["sec:0", 12 * H], ["sec:1", 4 * H]])],
+    ["olga", new Map([["sec:0", 2 * H]])]
+  ]),
+  sections: [
+    { id: "sec:0", caption: t("cmp.loadCurrent"), title: "Sprint 2" },
+    { id: "sec:1", caption: "+1", title: "Sprint 3" },
+    { id: "sec:2", caption: "+2", title: "Sprint 4" }
+  ]
+};
 const si = gantt.standIns(cmpProfiles[0], cmpProfiles);
 check("standIns: та же роль, общие системы, без уволенных; по числу общих", si.candidates.map((c) => `${c.profile.displayName}:${c.common.join("+")}`).join(",") === "Olga:Billing+CRM,Petr:CRM",
   si.candidates.map((c) => `${c.profile.displayName}:${c.common.join("+")}`).join(","));
@@ -580,7 +691,7 @@ check("standIns: без роли/систем — пусто", gantt.standIns({ 
 
 const g4 = document.createElement("div");
 document.body.append(g4);
-gantt.render(g4, m2, { mode: "assignee", profiles: cmpProfiles });
+gantt.render(g4, m2, { mode: "assignee", profiles: cmpProfiles, personLoad: loadFixture });
 const cmpBtnOf = (n) => [...g4.querySelectorAll(".g-row.group")].find((r) => r.querySelector(".glabel").textContent === n)?.querySelector(".cmp-btn");
 check("пиктограмма ⇄ у каждого человека на «По людям»", g4.querySelectorAll(".g-row.group .cmp-btn").length === m2.groups.filter((g) => g.key).length && !cmpBtnOf("Без исполнителя"));
 cmpBtnOf("Ivan").click();
@@ -591,6 +702,14 @@ check("кандидаты: Olga (2 общих), Petr (1); Kim, Zed, Lee отсу
 check("общие системы подсвечены, остальные — нет", [...rowsCmp[1].querySelectorAll(".chip")].map((c) => `${c.textContent}${c.classList.contains("on") ? "*" : ""}`).join(",") === "CRM*,Web",
   [...rowsCmp[1].querySelectorAll(".chip")].map((c) => `${c.textContent}${c.classList.contains("on") ? "*" : ""}`).join(","));
 check("аутстаф-кандидат помечен", rowsCmp[0].querySelector(".cmp-name").classList.contains("p-outstaff"));
+// занятость: у Olga 2ч из 8ч = 25%, у Petr 12ч из 8ч = 150% (перегруз), третья секция пустая
+const loadOf = (name) => [...rowsCmp].find((r) => r.querySelector(".cmp-name").textContent === name)?.querySelectorAll(".load-chip");
+check("у каждого кандидата — занятость по трём ближайшим спринтам", loadOf("Olga")?.length === 3 && loadOf("Petr")?.length === 3);
+check("проценты считаются от ёмкости спринта", [...loadOf("Olga")].map((c) => c.textContent).join(",") === "25%,0%,0%", [...loadOf("Olga")].map((c) => c.textContent).join(","));
+check("перегрузка выделена", [...loadOf("Petr")].map((c) => c.textContent).join(",") === "150%,50%,0%" && loadOf("Petr")[0].classList.contains("over"),
+  [...loadOf("Petr")].map((c) => `${c.textContent}${c.classList.contains("over") ? "!" : ""}`).join(","));
+check("в подсказке чипа — спринт, часы и ёмкость", loadOf("Petr")[0].title.includes("Sprint 2") && loadOf("Petr")[0].title.includes("150"), loadOf("Petr")[0].title);
+check("в заголовке блока перечислены секции", cmpTip.textContent.includes(t("cmp.load")) && cmpTip.textContent.includes("+1"));
 check("системы без замены: Mobile", [...cmpTip.querySelectorAll(".cmp-uncovered .chip")].map((c) => c.textContent).join(",") === "Mobile");
 cmpTip.querySelector(".tip-close").click();
 cmpBtnOf("Petr").click();

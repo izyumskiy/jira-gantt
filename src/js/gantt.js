@@ -1,9 +1,9 @@
-// Отрисовка диаграммы Ганта: слева дерево (эпик/исполнитель → проекты [+ «Прочие»]), справа полосы
+// Отрисовка диаграммы Ганта: слева дерево (эпик → исполнители, исполнитель → эпики), справа полосы
 // по временным секциям. Группы: у эпика одна жёлтая полоса-итог; у человека полоса делится на
 // жёлтую (целевые эпики) и серую (прочие эпики) части пропорционально объёму. Вложенные строки
 // рисуются тонкими голубыми отрезками — по одному на каждый спринт секции.
 import { t } from "./i18n.js";
-import { fmtEstimate, NO_DATES_ID, BACKLOG_ID } from "./agg.js";
+import { fmtEstimate, NO_DATES_ID, BACKLOG_ID, sprintCapacity } from "./agg.js";
 import * as settings from "./settings.js";
 import { cfId, escapeJql, comments as jiraComments, addComment as jiraAddComment, userSearch as jiraUserSearch } from "./jira.js";
 
@@ -127,24 +127,6 @@ function dot(team) {
   return d;
 }
 
-// Бейджи строки: всего задач, [осталось — у эпиков], [прочие эпики — у людей], оценка.
-function badges(count, sum, { left = null, other = null } = {}) {
-  const wrap = el("span", "badges");
-  wrap.append(el("span", "badge b-count", String(count)));
-  if (left != null) {
-    const b = el("span", "badge b-left", String(left));
-    b.title = t("gantt.left");
-    wrap.append(b);
-  }
-  wrap.append(el("span", "badge b-sum", fmtEstimate(sum)));
-  if (other && other.count) {
-    const b = el("span", "badge b-other", `+${other.count} · ${fmtEstimate(other.sum)}`);
-    b.title = t("gantt.othersHint");
-    wrap.append(b);
-  }
-  return wrap;
-}
-
 // Доля готовых задач в ячейке: по оценке, а если оценок нет — по количеству. Это и есть зелёная заливка.
 function doneShare(issues) {
   const total = issues.reduce((n, i) => n + (i.estimate || 0), 0);
@@ -207,7 +189,7 @@ function splitBar(target, other) {
   return bar;
 }
 
-// Вложенная строка (проект, «Прочие»): тонкий голубой отрезок на каждый спринт секции.
+// Вложенная строка (исполнитель или эпик): тонкий голубой отрезок на каждый спринт секции.
 function nestedCell(cell, section, model, rowLabel) {
   const td = el("td", "c-cell");
   if (!cell || !cell.count) return td;
@@ -326,19 +308,40 @@ function emptyCells(n) {
   return out;
 }
 
+// Перерисовка стирает таблицу целиком, страница на миг становится короче и браузер сбрасывает
+// прокрутку. Запоминаем её (страницы и самой таблицы) и возвращаем после сборки DOM.
+function keepScroll(container) {
+  const scroller = document.scrollingElement || document.documentElement;
+  const pageY = scroller.scrollTop;
+  const wrap = container.querySelector(".gantt-wrap");
+  const left = wrap ? wrap.scrollLeft : 0;
+  const top = wrap ? wrap.scrollTop : 0;
+  return () => {
+    const next = container.querySelector(".gantt-wrap");
+    if (next) {
+      next.scrollLeft = left;
+      next.scrollTop = top;
+    }
+    scroller.scrollTop = pageY;
+  };
+}
+
 export function render(container, model, opts) {
-  const { mode, profiles = [], highlightChild = "", onChildClick = null } = opts;
+  const { mode, profiles = [], highlightChild = "", onChildClick = null, personLoad = null } = opts;
   const epicLike = mode !== "assignee";
   // Профили людей (вкладка «Команда») — по нормализованному имени.
   const profileOf = new Map(profiles.map((p) => [p.name, p]));
+  const restoreScroll = keepScroll(container);
   container.textContent = "";
 
   if (!model.groups.length) {
     container.append(el("div", "empty", t("gantt.noData")));
+    restoreScroll();
     return;
   }
   if (!model.columns.length) {
     container.append(el("div", "empty", t("gantt.noSprints")));
+    restoreScroll();
     return;
   }
 
@@ -388,7 +391,8 @@ export function render(container, model, opts) {
   const hr = el("tr");
   const th0 = el("th", "c-name");
   th0.append(el("span", null, epicLike ? t("gantt.epic") : t("gantt.assignee")));
-  th0.append(el("span", "th-hint", ` / ${model.childKind === "person" ? t("gantt.assignee") : t("gantt.project")}`));
+  const childTitle = { person: t("gantt.assignee"), epic: t("gantt.epic") }[model.childKind] || t("gantt.project");
+  th0.append(el("span", "th-hint", ` / ${childTitle}`));
   hr.append(th0);
   for (const sec of model.columns) {
     const th = el("th", "c-sprint" + (sec.id === model.currentId ? " current" : ""));
@@ -436,16 +440,9 @@ export function render(container, model, opts) {
     // На вкладке по людям перед первым человеком команды — строка-заголовок команды.
     if (mode === "assignee" && g.team && g.team.id !== lastTeamId) {
       lastTeamId = g.team.id;
-      const members = model.groups.filter((x) => x.team && x.team.id === g.team.id);
       const tr = el("tr", "g-row team");
       const td = el("td", "c-name");
       td.append(dot(g.team), el("span", "tlabel", g.team.name));
-      td.append(
-        badges(
-          members.reduce((n, x) => n + x.count, 0),
-          members.reduce((n, x) => n + x.sum, 0)
-        )
-      );
       tr.append(td, ...emptyCells(model.columns.length + extraCols));
       tbody.append(tr);
     }
@@ -477,24 +474,24 @@ export function render(container, model, opts) {
       role.title = t("team.role");
       name.append(role);
     }
-    if (mode === "assignee" && g.key) name.append(compareButton(g.label, profile, profiles));
-    // На «По эпикам и людям» цифры не показываем — только дерево и полосы (итоги есть в подсказке).
-    const showBadges = mode !== "epicPeople";
-    if (showBadges) {
-      name.append(
-        badges(g.count, g.sum, {
-          left: epicLike ? g.other : null,
-          other: mode === "assignee" ? { count: g.otherCount, sum: g.otherSum } : null
-        })
-      );
-    }
+    if (mode === "assignee" && g.key) name.append(compareButton(g.label, profile, profiles, personLoad));
     tr.append(name);
+    const capacity = mode === "assignee" ? sprintCapacity() : 0;
     for (const sec of model.columns) {
       const td = el("td", "c-cell");
       const cell = g.cells.get(sec.id);
       if (mode === "assignee") {
-        const split = splitBar(cell, g.otherCells.get(sec.id));
-        if (split) td.append(split);
+        const other = g.otherCells.get(sec.id);
+        const split = splitBar(cell, other);
+        if (split) {
+          // Перегрузка спринта: суммарные оценки человека за секцию больше ёмкости спринта.
+          const load = (cell ? cell.sum : 0) + (other ? other.sum : 0);
+          if (capacity > 0 && load > capacity) {
+            split.classList.add("overload");
+            split.title = t("gantt.overload", { sum: fmtEstimate(load), cap: fmtEstimate(capacity) });
+          }
+          td.append(split);
+        }
       } else if (cell && cell.count) {
         td.append(groupBar(cell, model.maxCell, `${g.label} · ${sectionTitle(sec)}`));
       }
@@ -512,22 +509,25 @@ export function render(container, model, opts) {
 
     if (isCollapsed) return;
     for (const p of g.projects) {
-      const ptr = el("tr", "g-row proj" + (highlightChild && p.key === highlightChild ? " hl" : ""));
+      const ptr = el("tr", "g-row proj" + (highlightChild && p.key === highlightChild ? " hl" : "") + (p.target ? " epic-target" : ""));
       const pname = el("td", "c-name");
       let plabel;
-      if (model.childKind === "person" && onChildClick) {
-        // Имя человека — кнопка: раскрывает его эпики, остальные сворачивает.
-        // Статус из профиля «Команды»: уволенный — серым, аутстаф — жёлтым (как на «По людям»).
-        const prof = profileOf.get(normName(p.label));
+      const isPersonChild = model.childKind === "person";
+      if (onChildClick) {
+        // Клик по вложенной строке раскрывает связанные группы, остальные сворачивает.
+        // У человека дополнительно статус из профиля «Команды»: уволенный — серым, аутстаф — жёлтым.
+        const prof = isPersonChild ? profileOf.get(normName(p.label)) : null;
         plabel = el("button", "plabel plabel-link" + (prof && prof.status ? ` p-${prof.status}` : ""), p.label);
-        plabel.title = t("gantt.personClick", { name: p.label }) + (prof && prof.status ? ` · ${t(`pstatus.${prof.status}`)}` : "");
+        plabel.title = isPersonChild
+          ? t("gantt.personClick", { name: p.label }) + (prof && prof.status ? ` · ${t(`pstatus.${prof.status}`)}` : "")
+          : t("gantt.epicClick", { name: p.label }) + (p.target ? ` · ${t("gantt.targetEpic")}` : "");
         plabel.onclick = () => onChildClick(p.key, p.label);
       } else {
         plabel = el("span", "plabel", p.label);
+        plabel.title = p.label + (p.target ? ` · ${t("gantt.targetEpic")}` : "");
       }
       pname.append(el("span", "indent"), plabel);
-      if (model.childKind === "person" && p.key) pname.append(compareButton(p.label, profileOf.get(normName(p.label)) || null, profiles));
-      if (showBadges) pname.append(badges(p.count, p.sum));
+      if (isPersonChild && p.key) pname.append(compareButton(p.label, profileOf.get(normName(p.label)) || null, profiles, personLoad));
       ptr.append(pname);
       for (const sec of model.columns) ptr.append(nestedCell(p.cells.get(sec.id), sec, model, `${g.label} · ${p.label}`));
       if (showBacklog) ptr.append(backlogNested(p.backlog, model, `${g.label} · ${p.label}`));
@@ -542,22 +542,11 @@ export function render(container, model, opts) {
       }
       tbody.append(ptr);
     }
-    // «Прочие» — задачи человека в эпиках вне выбранных.
-    if (mode === "assignee" && g.otherCount) {
-      const otr = el("tr", "g-row proj others");
-      const oname = el("td", "c-name");
-      const olabel = el("span", "plabel plabel-others", t("gantt.others"));
-      olabel.title = t("gantt.othersHint");
-      oname.append(el("span", "indent"), olabel, badges(g.otherCount, g.otherSum));
-      otr.append(oname);
-      for (const sec of model.columns) otr.append(nestedCell(g.otherCells.get(sec.id), sec, model, `${g.label} · ${t("gantt.others")}`));
-      if (showBacklog) otr.append(el("td", "c-cell c-backlog")); // прочие эпики — только спринты, бэклога нет
-      tbody.append(otr);
-    }
   });
   table.append(tbody);
   wrap.append(table);
   container.append(wrap);
+  restoreScroll();
 }
 
 // Статус эпика — лейбл в стиле Jira: цвет берётся из таблицы статусов.
@@ -760,15 +749,33 @@ function showComments(anchor, key, label) {
 
 // ---------- сравнение с коллегами: кто может подменить ----------
 
-function compareButton(name, profile, profiles) {
+function compareButton(name, profile, profiles, personLoad) {
   const btn = el("button", "cmp-btn", "⇄");
   btn.type = "button";
   btn.title = t("cmp.button");
   btn.onclick = (e) => {
     e.stopPropagation();
-    showCompare(e.currentTarget, name, profile, profiles);
+    showCompare(e.currentTarget, name, profile, profiles, personLoad);
   };
   return btn;
+}
+
+// Занятость человека по ближайшим спринтам: процент от ёмкости спринта (длительность × часы в дне).
+function loadCells(displayName, personLoad) {
+  const box = el("span", "load-cells");
+  const row = personLoad.byName.get(normName(displayName)) || new Map();
+  for (const sec of personLoad.sections) {
+    const sum = row.get(sec.id) || 0;
+    const pct = personLoad.capacity > 0 ? Math.round((sum / personLoad.capacity) * 100) : null;
+    const chip = el("span", "load-chip" + (pct != null && pct > 100 ? " over" : ""), pct != null ? `${pct}%` : fmtEstimate(sum));
+    chip.title = `${sec.title} · ${
+      pct != null
+        ? t("cmp.loadHint", { caption: sec.caption, sum: fmtEstimate(sum), cap: fmtEstimate(personLoad.capacity), pct })
+        : t("cmp.loadNoCap", { caption: sec.caption, sum: fmtEstimate(sum) })
+    }`;
+    box.append(chip);
+  }
+  return box;
 }
 
 // Кандидаты: та же роль, хотя бы одна общая система, не уволен, не сам; по числу общих систем.
@@ -784,7 +791,7 @@ export function standIns(profile, profiles) {
   return { candidates, uncovered: profile.systems.filter((x) => !covered.has(x)) };
 }
 
-function showCompare(anchor, name, profile, profiles) {
+function showCompare(anchor, name, profile, profiles, personLoad = null) {
   closeTooltip();
   tip = el("div", "tooltip tip-compare");
   const head = el("div", "tip-head");
@@ -805,7 +812,16 @@ function showCompare(anchor, name, profile, profiles) {
     tip.append(me);
 
     const { candidates, uncovered } = standIns(profile, profiles);
-    tip.append(el("div", "tip-sub", t("cmp.candidates")));
+    const showLoad = personLoad && personLoad.sections.length;
+    tip.append(
+      el(
+        "div",
+        "tip-sub",
+        showLoad
+          ? `${t("cmp.candidates")} · ${t("cmp.load")}: ${personLoad.sections.map((s) => s.caption).join(" · ")}`
+          : t("cmp.candidates")
+      )
+    );
     if (!candidates.length) {
       tip.append(el("div", "muted", t("cmp.none")));
     } else {
@@ -815,13 +831,19 @@ function showCompare(anchor, name, profile, profiles) {
         const who = el("td", "tp-name");
         who.append(el("div", "cmp-name" + (c.profile.status ? ` p-${c.profile.status}` : ""), c.profile.displayName));
         if (c.profile.status === "outstaff") who.append(el("div", "small muted", t("pstatus.outstaff")));
+        if (showLoad) {
+          const loadCell = el("td", "cmp-load");
+          loadCell.append(loadCells(c.profile.displayName, personLoad));
+          tr.append(who, loadCell);
+        }
         const sys = el("td", "cmp-systems");
         const common = new Set(c.common);
         // Сначала общие (подсвечены), потом остальные системы кандидата серым.
         for (const sName of [...c.common, ...(c.profile.systems || []).filter((x) => !common.has(x))]) {
           sys.append(el("span", "chip static" + (common.has(sName) ? " on" : ""), sName));
         }
-        tr.append(who, sys, el("td", "tp-num", t("cmp.common", { n: c.common.length })));
+        if (!showLoad) tr.append(who);
+        tr.append(sys, el("td", "tp-num", t("cmp.common", { n: c.common.length })));
         tbl.append(tr);
       }
       tip.append(tbl);
