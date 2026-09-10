@@ -566,6 +566,8 @@ table.gantt { border-collapse: separate; border-spacing: 0; }
 .swatch-done { background: #36b37e; opacity: .7; }
 .legend-item { display: inline-flex; align-items: center; gap: 2px; }
 .tlabel { text-transform: uppercase; letter-spacing: .03em; font-size: 11px; }
+/* Имя доски выведено из названий спринтов — помечаем пунктиром. */
+.tlabel.derived, .legend-item.derived { border-bottom: 1px dashed var(--muted); cursor: help; }
 
 /* Список спринтов секции в шапке. */
 .sp-list { margin-top: 3px; display: flex; flex-direction: column; gap: 1px; }

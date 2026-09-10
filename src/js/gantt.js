@@ -123,7 +123,7 @@ const teamClass = (team) => (team && team.color >= 0 ? `tc-${team.color}` : "tc-
 
 function dot(team) {
   const d = el("i", `dot ${teamClass(team)}`);
-  d.title = team ? team.name : "";
+  d.title = team ? team.hint || team.name : "";
   return d;
 }
 
@@ -372,7 +372,8 @@ export function render(container, model, opts) {
     legend.append(el("span", "legend-title", t("gantt.teams")));
     const scroll = el("span", "legend-scroll");
     for (const tm of model.teams) {
-      const item = el("span", "legend-item");
+      const item = el("span", "legend-item" + (tm.derived ? " derived" : ""));
+      if (tm.hint) item.title = tm.hint;
       item.append(dot(tm), el("span", null, tm.name));
       scroll.append(item);
     }
@@ -442,7 +443,9 @@ export function render(container, model, opts) {
       lastTeamId = g.team.id;
       const tr = el("tr", "g-row team");
       const td = el("td", "c-name");
-      td.append(dot(g.team), el("span", "tlabel", g.team.name));
+      const tname = el("span", "tlabel" + (g.team.derived ? " derived" : ""), g.team.name);
+      if (g.team.hint) tname.title = g.team.hint;
+      td.append(dot(g.team), tname);
       tr.append(td, ...emptyCells(model.columns.length + extraCols));
       tbody.append(tr);
     }

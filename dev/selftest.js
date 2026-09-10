@@ -166,6 +166,33 @@ check("подпись секции — диапазон дат", /^\d{2}\.\d{2} 
   check("фильтр по одному эпику не укорачивает шкалу", oneEpic.join(",") === cols1.join(","), oneEpic.join(","));
 }
 
+// 2d. имя доски из названий спринтов, когда доска недоступна
+{
+  check("имя доски выводится из общего слова в названиях спринтов",
+    agg.nameFromSprints(["20.2026 WEB[08.10 - 21.10]", "21.2026 WEB[22.10 - 04.11]", "19.2026 WEB[24.09 - 07.10]"]) === "WEB",
+    agg.nameFromSprints(["20.2026 WEB[08.10 - 21.10]", "21.2026 WEB[22.10 - 04.11]"]));
+  check("числа, даты и слово «спринт» именем не становятся",
+    agg.nameFromSprints(["17 BI [07.09.26 - 13.09.26]", "18 BI [14.09.26 - 27.09.26]"]) === "BI" &&
+      agg.nameFromSprints(["Sprint1 Disc [14.06 - 28.06]", "Sprint2 Disc [29.06 - 12.07]"]) === "Disc",
+    agg.nameFromSprints(["Sprint1 Disc [14.06 - 28.06]", "Sprint2 Disc [29.06 - 12.07]"]));
+  check("имя из скобок, если больше ничего нет", agg.nameFromSprints(["Служебный спринт (МДЛП)"]) === "МДЛП", agg.nameFromSprints(["Служебный спринт (МДЛП)"]));
+  check("без подходящих слов — пусто", agg.nameFromSprints(["12.2026 [01.01 - 14.01]", "13.2026"]) === "");
+
+  const mixed = agg.buildModel({
+    issues: [mk("Q-1", "EP-1", "AAA", "Ivan", 71, 2, "prog"), mk("Q-2", "EP-1", "AAA", "Olga", 72, 2, "prog")],
+    sprints: [
+      { id: 71, name: "20.2026 WEB[08.10 - 21.10]", state: "ACTIVE", startDate: iso(-1), endDate: iso(12), boardId: 36 },
+      { id: 72, name: "21.2026 WEB[22.10 - 04.11]", state: "FUTURE", startDate: iso(13), endDate: iso(26), boardId: 36 },
+      { id: 73, name: "Sprint X", state: "ACTIVE", startDate: iso(-1), endDate: iso(12), boardId: 3 }
+    ],
+    epics, boards: [{ id: 3, name: "Alpha" }], mode: "assignee"
+  });
+  const derived = mixed.teams.find((x) => x.id === "36");
+  check("недоступная доска подписана именем из спринтов, а не «#36»", derived?.name === "WEB" && derived?.derived === true, JSON.stringify(derived));
+  check("у выведенного имени есть пояснение с номером доски", (derived?.hint || "").includes("36"), derived?.hint);
+  check("известная доска сохраняет своё имя", mixed.teams.every((x) => x.id !== "3" || (x.name === "Alpha" && !x.derived)));
+}
+
 // 3. модель по эпикам
 const m1 = agg.buildModel({ issues, sprints, epics, boards, mode: "epicPeople" });
 const ep1 = m1.groups.find((g) => g.key === "EP-1");

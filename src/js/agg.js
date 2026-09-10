@@ -186,12 +186,56 @@ export function timeline(sprints, issues, now = Date.now()) {
 const TEAM_COLORS = 8;
 
 // Команды = доски: у каждой свой цвет (индекс палитры), безкомандные спринты — серые.
+// Слова, которые не могут быть именем команды: служебные и любые числа/даты.
+const SPRINT_STOP = /^(sprint\d*|спринт[а-яё]*|служебн[а-яё]*|доска|board|the)$/i;
+const isNumberish = (w) => /^[\d.,/-]+$/.test(w);
+
+// Имя доски из названий её спринтов: у команд оно обычно зашито в название
+// («20.2026 WEB[08.10 - 21.10]» → WEB). Берём слово, которое встречается чаще других.
+export function nameFromSprints(names) {
+  const freq = new Map();
+  for (const raw of names) {
+    const clean = String(raw || "")
+      .replace(/\[[^\]]*\]/g, " ") // диапазоны дат в скобках
+      .replace(/[()«»"'|]/g, " ")
+      .trim();
+    const seen = new Set();
+    for (const word of clean.split(/[\s,;:_—–-]+/)) {
+      const w = word.trim();
+      if (w.length < 2 || isNumberish(w) || SPRINT_STOP.test(w) || !/[\p{L}]/u.test(w)) continue;
+      const key = w.toLowerCase();
+      if (seen.has(key)) continue; // одно слово — один голос от спринта
+      seen.add(key);
+      if (!freq.has(key)) freq.set(key, { word: w, count: 0 });
+      freq.get(key).count += 1;
+    }
+  }
+  const best = [...freq.values()].sort(
+    (a, b) => b.count - a.count || b.word.length - a.word.length || a.word.localeCompare(b.word)
+  )[0];
+  return best ? best.word : "";
+}
+
 function buildTeams(sprints, boards) {
   const boardName = new Map(boards.map((b) => [String(b.id), b.name]));
-  const ids = [...new Set(sprints.map((s) => s.boardId).filter(Boolean).map(String))];
+  const byBoard = new Map();
+  for (const s of sprints) {
+    if (!s.boardId) continue;
+    const id = String(s.boardId);
+    if (!byBoard.has(id)) byBoard.set(id, []);
+    byBoard.get(id).push(s.name);
+  }
   const teams = new Map();
-  ids
-    .map((id) => ({ id, name: boardName.get(id) || `#${id}` }))
+  [...byBoard.keys()]
+    .map((id) => {
+      const known = boardName.get(id);
+      if (known) return { id, name: known, derived: false };
+      // Доска недоступна или удалена — выводим имя из названий её спринтов.
+      const guess = nameFromSprints(byBoard.get(id));
+      return guess
+        ? { id, name: guess, derived: true, hint: t("gantt.teamFromSprints", { id }) }
+        : { id, name: `#${id}`, derived: false };
+    })
     .sort((a, b) => a.name.localeCompare(b.name))
     .forEach((tm, i) => teams.set(tm.id, { ...tm, color: i % TEAM_COLORS }));
   const none = { id: "", name: t("gantt.noTeam"), color: -1 };
