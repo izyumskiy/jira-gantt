@@ -260,7 +260,7 @@ table.gantt { border-collapse: separate; border-spacing: 0; }
 .gantt thead th {
   position: sticky;
   top: 0;
-  z-index: 3;
+  z-index: 5;
   background: #fafbfc;
   padding: 6px 8px;
   text-align: left;
@@ -283,14 +283,14 @@ table.gantt { border-collapse: separate; border-spacing: 0; }
 .gantt .c-name {
   position: sticky;
   left: 0;
-  z-index: 2;
+  z-index: 4;
   background: var(--panel);
   width: var(--name-w);
   min-width: var(--name-w);
   max-width: var(--name-w);
   padding: 3px 8px;
 }
-.gantt thead .c-name { z-index: 4; background: #fafbfc; }
+.gantt thead .c-name { z-index: 6; background: #fafbfc; }
 .gantt.mode-assignee { --name-w: 456px; } /* на 20% шире: имя + роль + бейджи */
 .gantt.mode-assignee .plabel, .gantt.mode-epicPeople .plabel { max-width: 300px; }
 /* Эпик, отмеченный галочкой на «Поиске», — светло-жёлтой заливкой. */
@@ -430,6 +430,7 @@ table.gantt { border-collapse: separate; border-spacing: 0; }
 }
 .due-line.edge-left { left: 2px; }
 .due-line.edge-right { left: auto; right: 2px; border-left: none; border-right: 2px dashed #8993a4; }
+/* Веха срока лежит ниже липкой колонки имён (z-index 4/6), иначе наезжает на неё при прокрутке. */
 .due-flag {
   position: absolute;
   top: 0;

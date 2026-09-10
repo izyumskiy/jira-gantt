@@ -488,6 +488,11 @@ check("EP-2: готов и просрочен — зелёная у левого
   `${df2?.className} / ${df2?.title}`);
 check("на «По людям» вех нет", document.querySelectorAll("#g2 .due-flag, #g2 .due-line").length === 0);
 check("легенда вехи на вкладке по эпикам", document.querySelector("#g1 .swatch-due") != null);
+check("веха срока лежит ниже липкой колонки имён (не наезжает при горизонтальной прокрутке)",
+  Number(getComputedStyle(document.querySelector("#g1 tbody .c-name")).zIndex) > Number(getComputedStyle(document.querySelector("#g1 .due-flag")).zIndex) &&
+    Number(getComputedStyle(document.querySelector("#g1 tbody .c-name")).zIndex) > Number(getComputedStyle(document.querySelector("#g1 .due-line")).zIndex),
+  `${getComputedStyle(document.querySelector("#g1 tbody .c-name")).zIndex} / ${getComputedStyle(document.querySelector("#g1 .due-flag")).zIndex}`);
+check("шапка таблицы выше строк тела", Number(getComputedStyle(document.querySelector("#g1 thead th.c-sprint")).zIndex) > Number(getComputedStyle(document.querySelector("#g1 tbody .c-name")).zIndex));
 check("полосы групп — жёлтые (.bar-group), у проектов их нет",
   document.querySelectorAll("#g1 .g-row.group .bar").length > 0 &&
   [...document.querySelectorAll("#g1 .g-row.group .bar")].every((b) => b.classList.contains("bar-group")) &&
