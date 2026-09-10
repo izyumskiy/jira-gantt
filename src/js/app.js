@@ -16,7 +16,8 @@ const state = {
   selected: new Set(),
   boards: [],
   filter: { label: "", assignee: "" },
-  personFilter: null // «Гант по эпикам и людям»: { key, name } человека, чьи эпики раскрыты
+  personFilter: null, // «По эпикам»: { key, name } человека, чьи эпики раскрыты
+  epicFilter: null // «По людям»: { key, name } эпика, чьи люди раскрыты
 };
 
 // ---------- статус-строка ----------
@@ -300,8 +301,9 @@ function listHead() {
   head.append(
     cell("inum", "#"), cell("", ""), cell("iplus", ""), cell("ikey", t("search.col.key")), cell("isum", t("search.col.name")), dates,
     cell("ilabels", t("search.col.labels")),
-    cell("iperson", t("search.assignee")), cell("iperson", t("search.reporter")),
-    cell("ispent", t("search.col.spent")), cell("ipct", t("search.col.pct")), cell("istatus", t("search.col.status"))
+    cell("iperson", t("search.assignee")),
+    cell("iest", t("search.col.express")), cell("iest", t("search.col.estimate")), cell("ispent", t("search.col.spent")),
+    cell("ipct", t("search.col.pct")), cell("istatus", t("search.col.status"))
   );
   // Активные фильтры и «Снять фильтры» — второй строкой шапки во всю ширину, чтобы не зависеть от ширины колонок.
   if (hasFilter()) head.append(filterControls());
@@ -423,6 +425,7 @@ function showEpicInfo(anchor, epic, spent, pct) {
   line(t("search.assignee"), epic.assigneeName || t("dash"));
   line(t("search.reporter"), epic.reporterName || t("dash"));
   line(t("search.col.labels"), (epic.labels || []).join(", ") || t("dash"));
+  line(t("search.col.express"), agg.estimateOf(epic) ? agg.fmtEstimate(agg.estimateOf(epic)) : t("dash"));
   if (spent) {
     line(t("search.col.spent"), `${fmtSpentDays(spent.epic + spent.issues)} · ${t("search.spentFull", { epic: fmtSpentDays(spent.epic), issues: fmtSpentDays(spent.issues), n: spent.withLogs, total: spent.total })}`);
   }
@@ -455,6 +458,29 @@ function showEpicInfo(anchor, epic, spent, pct) {
   const r = anchor.getBoundingClientRect();
   box.style.top = `${Math.max(8, Math.min(window.innerHeight - box.offsetHeight - 12, r.bottom + 6))}px`;
   box.style.left = `${Math.max(8, Math.min(window.innerWidth - box.offsetWidth - 12, r.left))}px`;
+}
+
+// Экспресс-оценка: оценка, внесённая в сам эпик (в сумму по задачам не входит).
+function epicExpress(epic) {
+  const cell = document.createElement("span");
+  const value = agg.estimateOf(epic);
+  cell.className = "iest" + (value ? "" : " iperson-empty");
+  cell.textContent = value ? agg.fmtEstimate(value) : t("dash");
+  cell.title = t("search.expressFull", { sum: value ? agg.fmtEstimate(value) : t("dash") });
+  return cell;
+}
+
+// Сумма оценок всех задач эпика (отменённые дают 0 — см. estimateOf). Оценка самого эпика не входит.
+function epicEstimate(pct) {
+  const cell = document.createElement("span");
+  cell.className = "iest" + (pct && pct.count ? "" : " iperson-empty");
+  if (!pct || !pct.count) {
+    cell.textContent = t("dash");
+    return cell;
+  }
+  cell.textContent = agg.fmtEstimate(pct.total);
+  cell.title = t("search.estimateFull", { sum: agg.fmtEstimate(pct.total), n: pct.count });
+  return cell;
 }
 
 function epicRow(epic, checked, index, spent = null, pct = null) {
@@ -511,7 +537,8 @@ function epicRow(epic, checked, index, spent = null, pct = null) {
     num, cb, plusCell, key, sum, epicDates(epic),
     epicLabels(epic),
     epicPerson("search.assignee", epic.assigneeName, true),
-    epicPerson("search.reporter", epic.reporterName, false),
+    epicExpress(epic),
+    epicEstimate(pct),
     epicSpent(spent),
     epicPct(pct),
     status
@@ -768,6 +795,33 @@ function renderPersonFilterNote() {
   box.append(clear);
 }
 
+// Фильтр по эпику на «По людям»: раскрыты только люди с задачами этого эпика.
+function renderPeopleFilterNote() {
+  const box = $("#peopleFilterNote");
+  box.textContent = "";
+  if (!state.epicFilter) return;
+  box.append(t("gantt.epicFilter", { name: state.epicFilter.name }));
+  const clear = document.createElement("button");
+  clear.type = "button";
+  clear.className = "link";
+  clear.textContent = t("gantt.clearPersonFilter");
+  clear.onclick = () => {
+    state.epicFilter = null;
+    gantt.setCollapsed("assignee", []);
+    drawGantt("assignee", $("#page-people"));
+  };
+  box.append(clear);
+}
+
+function applyEpicFilter(model) {
+  if (!state.epicFilter) return;
+  const key = state.epicFilter.key;
+  gantt.setCollapsed(
+    "assignee",
+    model.groups.filter((g) => !g.projects.some((p) => p.key === key)).map((g) => g.key)
+  );
+}
+
 function applyPersonFilter(model) {
   if (!state.personFilter) return;
   const key = state.personFilter.key;
@@ -781,6 +835,35 @@ function epicMatchesFilter(epic, filter) {
   if (!filter) return true;
   if (filter === NO_ASSIGNEE) return !epic.assigneeKey;
   return epic.assigneeKey === filter;
+}
+
+const LOAD_SECTIONS = 3;
+
+// Занятость людей по ближайшим секциям (текущая и две следующие) — для окна «кто может подменить».
+// Считаем по всей выгрузке, а не по видимым эпикам: фильтры не должны искажать нагрузку.
+function buildPersonLoad(model, issues, others) {
+  const sections = model.columns.filter((c) => c.start != null).slice(0, LOAD_SECTIONS);
+  const sectionOf = new Map();
+  for (const sec of sections) for (const sp of sec.sprints) sectionOf.set(sp.id, sec.id);
+  const byName = new Map();
+  for (const i of [...issues, ...others]) {
+    if (!i.assigneeName) continue;
+    const secId = sectionOf.get(i.sprintId);
+    if (!secId) continue;
+    const key = team.normName(i.assigneeName);
+    if (!byName.has(key)) byName.set(key, new Map());
+    const row = byName.get(key);
+    row.set(secId, (row.get(secId) || 0) + agg.estimateOf(i));
+  }
+  return {
+    capacity: agg.sprintCapacity(),
+    byName,
+    sections: sections.map((sec, i) => ({
+      id: sec.id,
+      caption: i === 0 ? t("cmp.loadCurrent") : `+${i}`,
+      title: sec.sprints.map((sp) => sp.name).join(", ") || agg.sectionLabel(sec)
+    }))
+  };
 }
 
 async function drawGantt(mode, container) {
@@ -807,9 +890,21 @@ async function drawGantt(mode, container) {
       const keep = new Set(epicsShown.map((e) => e.key));
       issuesShown = issues.filter((i) => keep.has(i.epicKey));
       target = $("#epicPeopleChart");
+    } else {
+      target = $("#peopleChart");
     }
-    const model = agg.buildModel({ issues: issuesShown, others, sprints, epics: epicsShown, boards, mode });
-    const opts = { mode, profiles }; // профили людей нужны на обеих вкладках
+    // Шкалу строим по всей выгрузке (включая задачи вне целевых эпиков), чтобы на всех вкладках
+    // и при любых фильтрах были одни и те же колонки спринтов.
+    const model = agg.buildModel({
+      issues: issuesShown,
+      others,
+      sprints,
+      epics: epicsShown,
+      boards,
+      mode,
+      timelineIssues: [...issues, ...others]
+    });
+    const opts = { mode, profiles, personLoad: buildPersonLoad(model, issues, others) };
     if (mode === "epicPeople") {
       applyPersonFilter(model);
       renderPersonFilterNote();
@@ -817,6 +912,14 @@ async function drawGantt(mode, container) {
       opts.onChildClick = (key, name) => {
         state.personFilter = { key, name };
         drawGantt("epicPeople", $("#page-epicPeople"));
+      };
+    } else {
+      applyEpicFilter(model);
+      renderPeopleFilterNote();
+      opts.highlightChild = state.epicFilter ? state.epicFilter.key : "";
+      opts.onChildClick = (key, name) => {
+        state.epicFilter = { key, name };
+        drawGantt("assignee", $("#page-people"));
       };
     }
     gantt.render(target, model, opts);
@@ -833,6 +936,7 @@ function fillSettingsForm() {
   $("#pat").value = s.pat;
   $("#estimateField").value = s.estimateField;
   $("#hoursPerDay").value = s.hoursPerDay;
+  $("#sprintDays").value = s.sprintDays;
   $("#doneStatuses").value = s.doneStatuses;
   $("#infoSystems").value = (s.infoSystems || []).join("\n");
   $("#lang").value = s.lang;
@@ -892,6 +996,7 @@ function renderDetected() {
   const f = settings.get().fields;
   $("#detected").textContent = t("set.detected", {
     e: f.epicLink || t("dash"),
+    en: f.epicName || t("dash"),
     s: f.sprint || t("dash"),
     p: f.storyPoints || t("dash"),
     ps: f.plannedStart || t("dash"),
@@ -930,6 +1035,7 @@ async function saveSettingsForm() {
     pat: $("#pat").value.trim(),
     estimateField: $("#estimateField").value,
     hoursPerDay: Number($("#hoursPerDay").value) || 8,
+    sprintDays: Number($("#sprintDays").value) || 10,
     doneStatuses: $("#doneStatuses").value.trim(),
     infoSystems: team.parseSystems($("#infoSystems").value),
     fields: {

@@ -11,7 +11,7 @@
   --danger: #de350b;
   --ok: #006644;
   --row-h: 34px;
-  --name-w: 380px;
+  --name-w: 456px; /* колонка дерева одинакова на обеих вкладках */
   --col-w: 264px;
 }
 
@@ -114,7 +114,7 @@ main { padding: 14px 16px 40px; }
 .list { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; overflow: clip; }
 .item {
   display: grid;
-  grid-template-columns: 34px 22px 24px 90px 1fr 160px 220px 140px 140px 70px 76px 130px;
+  grid-template-columns: 34px 22px 24px 90px 1fr 160px 200px 130px 84px 70px 70px 76px 130px;
   align-items: center;
   gap: 8px;
   padding: 6px 10px;
@@ -140,7 +140,7 @@ main { padding: 14px 16px 40px; }
 .iperson { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; min-width: 0; }
 .iperson-empty { color: var(--muted); }
 .list-head .iperson { font-size: 10px; }
-.ispent { font-variant-numeric: tabular-nums; white-space: nowrap; font-weight: 600; }
+.iest, .ispent { font-variant-numeric: tabular-nums; white-space: nowrap; font-weight: 600; }
 .iperson-link { cursor: pointer; color: var(--accent); }
 .iperson-link:hover { text-decoration: underline; }
 .iperson-link.on { font-weight: 700; background: var(--accent-soft); border-radius: 4px; padding: 0 5px; }
@@ -260,7 +260,7 @@ table.gantt { border-collapse: separate; border-spacing: 0; }
 .gantt thead th {
   position: sticky;
   top: 0;
-  z-index: 3;
+  z-index: 5;
   background: #fafbfc;
   padding: 6px 8px;
   text-align: left;
@@ -271,6 +271,8 @@ table.gantt { border-collapse: separate; border-spacing: 0; }
 .gantt th.c-sprint.current { background: var(--accent-soft); }
 .gantt th.c-sprint.backlog { background: #f4f5f7; border-left: 2px solid var(--line); }
 .gantt td.c-backlog { border-left: 2px solid var(--line); background: #fafbfc; }
+/* Перегрузка спринта у человека: жирная красная обводка секции. */
+.bar.overload { outline: 3px solid #de350b; outline-offset: -1px; border-radius: 3px; }
 .bar.clickable { cursor: pointer; }
 .bar.clickable:hover { outline: 1px solid var(--accent); outline-offset: -1px; }
 .sp-date { font-weight: 600; white-space: nowrap; }
@@ -281,15 +283,18 @@ table.gantt { border-collapse: separate; border-spacing: 0; }
 .gantt .c-name {
   position: sticky;
   left: 0;
-  z-index: 2;
+  z-index: 4;
   background: var(--panel);
   width: var(--name-w);
   min-width: var(--name-w);
   max-width: var(--name-w);
   padding: 3px 8px;
 }
-.gantt thead .c-name { z-index: 4; background: #fafbfc; }
-.gantt.mode-assignee { --name-w: 456px; } /* на 20% шире: имя + роль + бейджи */
+.gantt thead .c-name { z-index: 6; background: #fafbfc; }
+
+/* Эпик, отмеченный галочкой на «Поиске», — светло-жёлтой заливкой. */
+.g-row.proj.epic-target > .c-name { background: #fff7d6; }
+.g-row.proj.epic-target.hl > .c-name { background: var(--accent-soft); }
 .g-row { height: var(--row-h); }
 .g-row.group > .c-name { font-weight: 600; }
 .g-row.group { background: #fbfcfd; }
@@ -306,7 +311,7 @@ table.gantt { border-collapse: separate; border-spacing: 0; }
   font: inherit;
   font-weight: 600;
   cursor: pointer;
-  max-width: 170px;
+  max-width: 240px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -364,6 +369,21 @@ table.gantt { border-collapse: separate; border-spacing: 0; }
 .cmp-name { font-weight: 600; }
 .cmp-name.p-outstaff { color: #a16207; }
 .cmp-systems { display: flex; flex-wrap: wrap; gap: 4px; padding: 4px 0; }
+/* Занятость кандидата по ближайшим спринтам. */
+.cmp-load { vertical-align: top; padding-right: 10px; white-space: nowrap; }
+.load-cells { display: inline-flex; gap: 3px; }
+.load-chip {
+  min-width: 38px;
+  text-align: center;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: #ebecf0;
+  color: var(--text);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  cursor: default;
+}
+.load-chip.over { background: #ffebe6; color: #bf2600; font-weight: 700; }
 .cmp-uncovered { margin-top: 10px; display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
 .chip.static.uncovered { border-color: #ffbdad; background: #ffebe6; color: #bf2600; }
 .cmp-criteria { margin-top: 8px; }
@@ -372,7 +392,7 @@ table.gantt { border-collapse: separate; border-spacing: 0; }
 .g-row.proj.hl .plabel-link { font-weight: 700; }
 .plabel {
   display: inline-block;
-  max-width: 210px;
+  max-width: 300px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -424,6 +444,7 @@ table.gantt { border-collapse: separate; border-spacing: 0; }
 }
 .due-line.edge-left { left: 2px; }
 .due-line.edge-right { left: auto; right: 2px; border-left: none; border-right: 2px dashed #8993a4; }
+/* Веха срока лежит ниже липкой колонки имён (z-index 4/6), иначе наезжает на неё при прокрутке. */
 .due-flag {
   position: absolute;
   top: 0;
@@ -651,6 +672,7 @@ textarea { font: inherit; padding: 5px 8px; border: 1px solid var(--line); borde
   .chip { background: #2c333a; }
   .gantt thead th, .gantt thead .c-name { background: #262c31; }
   .g-row.group { background: #252b30; }
+  .g-row.proj.epic-target > .c-name { background: #3b3620; }
   .item:hover, .g-row:hover > td { background: #272e34; }
   .badge { background: #333a41; }
   .lozenge { background: #3c4147; color: #c7d1db; }
@@ -664,6 +686,8 @@ textarea { font: inherit; padding: 5px 8px; border: 1px solid var(--line); borde
   .glabel.p-outstaff, .tip-pstatus.p-outstaff, .plabel-link.p-outstaff { color: #f5d565; }
   .badge.b-left { background: #4a3b0b; color: #f5d565; }
   .badge.b-other { background: #3c4147; color: #c7d1db; }
+  .load-chip { background: #333a41; }
+  .load-chip.over { background: #4f1c14; color: #ffbdad; }
   .part-target { background: color-mix(in srgb, #ffab00 45%, var(--panel)); color: var(--text); }
   .part-other { background: color-mix(in srgb, #8993a4 40%, var(--panel)); }
   .status { background: #2b2f4a; }
