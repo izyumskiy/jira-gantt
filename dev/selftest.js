@@ -375,6 +375,7 @@ check("epicPeople: аутстаф Olga — жёлтым, Petr без профи�
 check("epicPeople: колонка «Бэклог» и нумерация как у эпиков", g3.querySelectorAll("thead .c-sprint.backlog").length === 1 && g3.querySelectorAll(".gnum").length === m3.groups.length);
 check("epicPeople: имена людей — кнопки", g3.querySelectorAll(".g-row.proj .plabel-link").length > 0);
 check("epicPeople: лейблов с цифрами нет ни у эпиков, ни у людей", g3.querySelectorAll(".badges").length === 0, String(g3.querySelectorAll(".badges").length));
+check("epicPeople: имена людей кликабельны", g3.querySelectorAll(".g-row.proj .plabel-link").length > 0);
 check("epicPeople: строка выбранного человека подсвечена", [...g3.querySelectorAll(".g-row.proj.hl")].every((r) => r.querySelector(".plabel").textContent === "Ivan") && g3.querySelectorAll(".g-row.proj.hl").length === 2, String(g3.querySelectorAll(".g-row.proj.hl").length));
 g3.querySelector(".g-row.proj .plabel-link").click();
 check("epicPeople: клик по имени отдаёт ключ и имя", /^[a-z]+:.+$/.test(clicked || ""), clicked);
@@ -441,8 +442,11 @@ check("в Ганте по людям лейблов статуса нет (то�
 const nums = [...document.querySelectorAll("#g1 .gnum")].map((n) => n.textContent);
 check("эпики пронумерованы подряд", nums.join(" ") === "1. 2. 3. 4. 5.", nums.join(" "));
 check("исполнители не нумеруются", document.querySelectorAll("#g2 .gnum").length === 0);
-check("на «По эпикам» лейблов с цифрами нет, на «По людям» остались",
-  document.querySelectorAll("#g1 .g-row.group .badges").length === 0 && document.querySelectorAll("#g2 .g-row.group .badges").length === m2.groups.length);
+check("цифр нет у фамилий на обеих вкладках, у эпиков внутри людей — есть",
+  document.querySelectorAll("#g1 .badges").length === 0 &&
+    document.querySelectorAll("#g2 .g-row.group .badges").length === 0 &&
+    document.querySelectorAll("#g2 .g-row.proj .badges").length > 0,
+  `${document.querySelectorAll("#g1 .badges").length} / ${document.querySelectorAll("#g2 .g-row.group .badges").length} / ${document.querySelectorAll("#g2 .g-row.proj .badges").length}`);
 
 // зелёная заливка — доля готовых задач по оценке
 const ep1Sec0Bar = [...document.querySelectorAll("#g1 .g-row.group")][0].querySelectorAll(".c-cell")[0].querySelector(".bar-group");
@@ -520,7 +524,7 @@ check("целевые эпики подсвечены жёлтым, прочий
   ivanChildren.map((r) => `${r.querySelector(".plabel").textContent}:${r.classList.contains("epic-target")}`).join(" | "));
 check("целевые эпики идут выше прочих", ivanChildren.findIndex((r) => r.querySelector(".plabel").textContent.startsWith("EP-9")) === ivanChildren.length - 1,
   ivanChildren.map((r) => r.querySelector(".plabel").textContent).join(" | "));
-check("серый бейдж прочих у человека (8ч = 1д)", ivanRow.querySelector(".badge.b-other")?.textContent === "+1 · 1д", ivanRow.querySelector(".badge.b-other")?.textContent);
+check("серого бейджа прочих у фамилии больше нет — прочие эпики отдельными строками", !ivanRow.querySelector(".badge.b-other"));
 check("у эпиков серого бейджа нет", document.querySelectorAll("#g1 .badge.b-other").length === 0);
 // профиль человека на вкладке по людям: цвет имени, лейбл роли, ширина колонки
 const labelOf = (name) => [...document.querySelectorAll("#g2 .glabel")].find((b) => b.textContent === name);

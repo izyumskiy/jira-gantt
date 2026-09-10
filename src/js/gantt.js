@@ -479,8 +479,8 @@ export function render(container, model, opts) {
       name.append(role);
     }
     if (mode === "assignee" && g.key) name.append(compareButton(g.label, profile, profiles));
-    // На «По эпикам и людям» цифры не показываем — только дерево и полосы (итоги есть в подсказке).
-    const showBadges = mode !== "epicPeople";
+    // У строк-групп цифры не показываем — только дерево и полосы (итоги есть в подсказке).
+    const showBadges = false;
     if (showBadges) {
       name.append(
         badges(g.count, g.sum, {
@@ -526,20 +526,24 @@ export function render(container, model, opts) {
       const ptr = el("tr", "g-row proj" + (highlightChild && p.key === highlightChild ? " hl" : "") + (p.target ? " epic-target" : ""));
       const pname = el("td", "c-name");
       let plabel;
-      if (model.childKind === "person" && onChildClick) {
-        // Имя человека — кнопка: раскрывает его эпики, остальные сворачивает.
-        // Статус из профиля «Команды»: уволенный — серым, аутстаф — жёлтым (как на «По людям»).
-        const prof = profileOf.get(normName(p.label));
+      const isPersonChild = model.childKind === "person";
+      if (onChildClick) {
+        // Клик по вложенной строке раскрывает связанные группы, остальные сворачивает.
+        // У человека дополнительно статус из профиля «Команды»: уволенный — серым, аутстаф — жёлтым.
+        const prof = isPersonChild ? profileOf.get(normName(p.label)) : null;
         plabel = el("button", "plabel plabel-link" + (prof && prof.status ? ` p-${prof.status}` : ""), p.label);
-        plabel.title = t("gantt.personClick", { name: p.label }) + (prof && prof.status ? ` · ${t(`pstatus.${prof.status}`)}` : "");
+        plabel.title = isPersonChild
+          ? t("gantt.personClick", { name: p.label }) + (prof && prof.status ? ` · ${t(`pstatus.${prof.status}`)}` : "")
+          : t("gantt.epicClick", { name: p.label }) + (p.target ? ` · ${t("gantt.targetEpic")}` : "");
         plabel.onclick = () => onChildClick(p.key, p.label);
       } else {
         plabel = el("span", "plabel", p.label);
         plabel.title = p.label + (p.target ? ` · ${t("gantt.targetEpic")}` : "");
       }
       pname.append(el("span", "indent"), plabel);
-      if (model.childKind === "person" && p.key) pname.append(compareButton(p.label, profileOf.get(normName(p.label)) || null, profiles));
-      if (showBadges) pname.append(badges(p.count, p.sum));
+      if (isPersonChild && p.key) pname.append(compareButton(p.label, profileOf.get(normName(p.label)) || null, profiles));
+      // Цифры показываем у эпиков и не показываем у фамилий.
+      if (model.childKind === "epic") pname.append(badges(p.count, p.sum));
       ptr.append(pname);
       for (const sec of model.columns) ptr.append(nestedCell(p.cells.get(sec.id), sec, model, `${g.label} · ${p.label}`));
       if (showBacklog) ptr.append(backlogNested(p.backlog, model, `${g.label} · ${p.label}`));

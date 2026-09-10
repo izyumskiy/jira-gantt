@@ -16,7 +16,8 @@ const state = {
   selected: new Set(),
   boards: [],
   filter: { label: "", assignee: "" },
-  personFilter: null // «Гант по эпикам и людям»: { key, name } человека, чьи эпики раскрыты
+  personFilter: null, // «По эпикам»: { key, name } человека, чьи эпики раскрыты
+  epicFilter: null // «По людям»: { key, name } эпика, чьи люди раскрыты
 };
 
 // ---------- статус-строка ----------
@@ -768,6 +769,33 @@ function renderPersonFilterNote() {
   box.append(clear);
 }
 
+// Фильтр по эпику на «По людям»: раскрыты только люди с задачами этого эпика.
+function renderPeopleFilterNote() {
+  const box = $("#peopleFilterNote");
+  box.textContent = "";
+  if (!state.epicFilter) return;
+  box.append(t("gantt.epicFilter", { name: state.epicFilter.name }));
+  const clear = document.createElement("button");
+  clear.type = "button";
+  clear.className = "link";
+  clear.textContent = t("gantt.clearPersonFilter");
+  clear.onclick = () => {
+    state.epicFilter = null;
+    gantt.setCollapsed("assignee", []);
+    drawGantt("assignee", $("#page-people"));
+  };
+  box.append(clear);
+}
+
+function applyEpicFilter(model) {
+  if (!state.epicFilter) return;
+  const key = state.epicFilter.key;
+  gantt.setCollapsed(
+    "assignee",
+    model.groups.filter((g) => !g.projects.some((p) => p.key === key)).map((g) => g.key)
+  );
+}
+
 function applyPersonFilter(model) {
   if (!state.personFilter) return;
   const key = state.personFilter.key;
@@ -807,6 +835,8 @@ async function drawGantt(mode, container) {
       const keep = new Set(epicsShown.map((e) => e.key));
       issuesShown = issues.filter((i) => keep.has(i.epicKey));
       target = $("#epicPeopleChart");
+    } else {
+      target = $("#peopleChart");
     }
     const model = agg.buildModel({ issues: issuesShown, others, sprints, epics: epicsShown, boards, mode });
     const opts = { mode, profiles }; // профили людей нужны на обеих вкладках
@@ -817,6 +847,14 @@ async function drawGantt(mode, container) {
       opts.onChildClick = (key, name) => {
         state.personFilter = { key, name };
         drawGantt("epicPeople", $("#page-epicPeople"));
+      };
+    } else {
+      applyEpicFilter(model);
+      renderPeopleFilterNote();
+      opts.highlightChild = state.epicFilter ? state.epicFilter.key : "";
+      opts.onChildClick = (key, name) => {
+        state.epicFilter = { key, name };
+        drawGantt("assignee", $("#page-people"));
       };
     }
     gantt.render(target, model, opts);
