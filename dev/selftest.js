@@ -154,19 +154,20 @@ check("подпись секции — диапазон дат", /^\d{2}\.\d{2} 
 }
 
 // 3. модель по эпикам
-const m1 = agg.buildModel({ issues, sprints, epics, boards, mode: "epic" });
+const m1 = agg.buildModel({ issues, sprints, epics, boards, mode: "epicPeople" });
 const ep1 = m1.groups.find((g) => g.key === "EP-1");
 check("EP-1 всего задач", ep1.count === 7, String(ep1.count));
 check("EP-1 без спринта — только невыполненные", ep1.noSprint === 1, String(ep1.noSprint));
 check("EP-1 сумма оценок = 81ч", ep1.sum === 81 * H, String(ep1.sum / H));
 check("EP-1 секция 0 = 3 задачи / 18ч (обе команды)", ep1.cells.get("sec:0")?.count === 3 && ep1.cells.get("sec:0")?.sum === 18 * H,
   JSON.stringify([ep1.cells.get("sec:0")?.count, ep1.cells.get("sec:0")?.sum / H]));
-const aaa = ep1.projects.find((p) => p.key === "AAA");
-check("AAA в секции 0 разложен по спринтам 2 и 5", [...(aaa.cells.get("sec:0")?.bySprint.keys() || [])].join(",") === "2,5",
-  [...(aaa.cells.get("sec:0")?.bySprint.keys() || [])].join(","));
+check("EP-1 в секции 0 разложен по спринтам 2 и 5 (две команды)", [...(ep1.cells.get("sec:0")?.bySprint.keys() || [])].join(",") === "2,5",
+  [...(ep1.cells.get("sec:0")?.bySprint.keys() || [])].join(","));
 check("EP-1 закрытый спринт не в ячейках", ![...ep1.cells.values()].some((c) => c.bySprint.has(1)));
-check("EP-1 проекты AAA+BBB", ep1.projects.map((p) => p.key).sort().join(",") === "AAA,BBB");
-check("EP-1 подпись с ключом и названием", ep1.label.includes("EP-1") && ep1.label.includes("Личный кабинет"), ep1.label);
+check("EP-1 вложенные строки — исполнители (A-4 без спринта и готова → «Без исполнителя» скрыт)", ep1.projects.map((p) => p.label).sort().join(",") === "Ivan,Olga,Petr", ep1.projects.map((p) => p.label).join(","));
+check("EP-1 подпись: ключ и название (меток нет)", ep1.label === "EP-1 · Личный кабинет", ep1.label);
+const mlab = agg.buildModel({ issues: [mk("L-1", "EP-1", "AAA", "Ivan", 2, 1)], sprints, epics: [{ ...epics[0], labels: ["q4", "mobile"] }], boards, mode: "epicPeople" });
+check("подпись эпика — из меток, если они есть", mlab.groups[0].label === "EP-1 · q4, mobile", mlab.groups[0].label);
 check("EP-1 готовых задач (включая On Prod)", ep1.done === 3, String(ep1.done));
 check("EP-1 задач в прочих статусах", ep1.other === 4, String(ep1.other));
 check("EP-1 разбивка сходится с общим", ep1.done + ep1.other === ep1.count);
@@ -181,7 +182,7 @@ check("команда спринта по доске", m1.teamOfSprint(5)?.name 
 {
   const mc = agg.buildModel({
     issues: [mk("K-1", "EP-1", "AAA", "Ivan", 2, 8, "prog"), { ...mk("K-2", "EP-1", "AAA", "Ivan", 2, 4, "done"), statusName: "Cancelled", statusCategory: "indeterminate" }, { ...mk("K-3", "EP-1", "AAA", "Ivan", null, 6, "new"), statusName: "Отменена" }],
-    sprints, epics, boards, mode: "epic"
+    sprints, epics, boards, mode: "epicPeople"
   });
   const kg = mc.groups[0];
   check("отмена: количество считает все задачи", kg.count === 3, String(kg.count));
@@ -305,16 +306,14 @@ const f1 = m3f.groups.find((g) => g.key === "EP-1");
 check("epicPeople: скрыты люди только с закрытыми спринтами или готовыми задачами без спринта",
   f1.projects.map((p) => p.label).sort().join(",") === "Ivan,Kim,Lee", f1.projects.map((p) => p.label).join(","));
 check("epicPeople: итоги эпика при этом по всем задачам", f1.count === 5 && f1.sum === 17 * H, `${f1.count} / ${f1.sum / H}`);
-const m1f = agg.buildModel({ issues: [mk("F-2", "EP-1", "AAA", "Zed", 1, 4, "prog")], sprints, epics, boards, mode: "epic" });
-check("на «По эпикам» проекты не отсеиваются", m1f.groups[0].projects.length === 1);
 
 // шапка секции: не больше 7 спринтов, остальные по клику
 const manySprints = [sprints[1], ...Array.from({ length: 12 }, (_, i) => ({ id: 100 + i, name: `Someday ${i + 1}`, state: "FUTURE", startDate: null, endDate: null, boardId: 7 }))];
 const manyIssues = Array.from({ length: 12 }, (_, i) => mk(`M-${i}`, "EP-1", "AAA", "Ivan", 100 + i, 1, "new"));
-const mh = agg.buildModel({ issues: manyIssues, sprints: manySprints, epics, boards, mode: "epic" });
+const mh = agg.buildModel({ issues: manyIssues, sprints: manySprints, epics, boards, mode: "epicPeople" });
 const gh = document.createElement("div");
 document.body.append(gh);
-gantt.render(gh, mh, { mode: "epic" });
+gantt.render(gh, mh, { mode: "epicPeople" });
 const noDateTh = () => [...gh.querySelectorAll("thead .c-sprint:not(.backlog)")].at(-1);
 check("в шапке секции «Без дат» показаны только 7 спринтов из 12", noDateTh().querySelectorAll(".sp-item").length === 7, String(noDateTh().querySelectorAll(".sp-item").length));
 check("под списком — «ещё 5»", noDateTh().querySelector(".sp-more")?.textContent === t("gantt.headerMore", { n: 5 }), noDateTh().querySelector(".sp-more")?.textContent);
@@ -387,7 +386,8 @@ check("i18n en", t("gantt.epic") === "Epic");
 setLang("ru");
 check("i18n ru", t("gantt.epic") === "Эпик");
 
-gantt.render(document.getElementById("g1"), m1, { mode: "epic" });
+gantt.render(document.getElementById("g1"), m1, { mode: "epicPeople", onChildClick: () => {} });
+const rowOf = (name) => [...document.querySelectorAll("#g1 .g-row.proj")].find((r) => r.querySelector(".plabel").textContent === name);
 gantt.render(document.getElementById("g2"), m2, { mode: "assignee", profiles: peopleProfiles });
 
 // 7. отрисовка
@@ -401,17 +401,17 @@ check("в Ганте по людям лейблов статуса нет (то�
 const nums = [...document.querySelectorAll("#g1 .gnum")].map((n) => n.textContent);
 check("эпики пронумерованы подряд", nums.join(" ") === "1. 2. 3. 4. 5.", nums.join(" "));
 check("исполнители не нумеруются", document.querySelectorAll("#g2 .gnum").length === 0);
-check("на «По эпикам» и «По людям» лейблы с цифрами остались",
-  document.querySelectorAll("#g1 .g-row.group .badges").length === m1.groups.length && document.querySelectorAll("#g2 .g-row.group .badges").length === m2.groups.length);
+check("на «По эпикам» лейблов с цифрами нет, на «По людям» остались",
+  document.querySelectorAll("#g1 .g-row.group .badges").length === 0 && document.querySelectorAll("#g2 .g-row.group .badges").length === m2.groups.length);
 
 // зелёная заливка — доля готовых задач по оценке
 const ep1Sec0Bar = [...document.querySelectorAll("#g1 .g-row.group")][0].querySelectorAll(".c-cell")[0].querySelector(".bar-group");
 check("заливка полосы EP-1 в секции 0 = доля готовых по оценке (8ч из 18ч → 44%)", ep1Sec0Bar.style.getPropertyValue("--fill") === "44%" && ep1Sec0Bar.dataset.done === "1/3",
   `${ep1Sec0Bar.style.getPropertyValue("--fill")} / ${ep1Sec0Bar.dataset.done}`);
 check("заливка полосы бэклога — 0% (там нет готовых)", [...document.querySelectorAll("#g1 .g-row.group")][0].querySelector("td.c-backlog .bar").style.getPropertyValue("--fill") === "0%");
-check("вложенный отрезок Sprint 2 у AAA: 8ч из 12ч готово → 67%",
-  [...document.querySelectorAll("#g1 .g-row.proj")][0].querySelectorAll(".c-cell")[0].querySelector(".bar").style.getPropertyValue("--fill") === "67%",
-  [...document.querySelectorAll("#g1 .g-row.proj")][0].querySelectorAll(".c-cell")[0].querySelector(".bar").style.getPropertyValue("--fill"));
+check("вложенный отрезок Sprint 2 у Ivan: 8ч из 12ч готово → 67%",
+  rowOf("Ivan").querySelectorAll(".c-cell")[0].querySelector(".bar").style.getPropertyValue("--fill") === "67%",
+  rowOf("Ivan").querySelectorAll(".c-cell")[0].querySelector(".bar").style.getPropertyValue("--fill"));
 check("легенда про зелёную заливку", document.querySelector("#g1 .legend-done")?.textContent.includes(t("gantt.legendDone")));
 // вехи срока исполнения
 const flags = [...document.querySelectorAll("#g1 .due-flag")];
@@ -435,12 +435,11 @@ check("полосы групп — жёлтые (.bar-group), у проекто�
   document.querySelectorAll("#g1 .g-row.group .bar").length > 0 &&
   [...document.querySelectorAll("#g1 .g-row.group .bar")].every((b) => b.classList.contains("bar-group")) &&
   document.querySelectorAll("#g1 .g-row.proj .bar-group").length === 0);
-const firstProjBars = [...[...document.querySelectorAll("#g1 .g-row.proj")][0].querySelectorAll(".c-cell")[0].querySelectorAll(".bar")];
-check("у проекта в секции 0 два вложенных голубых отрезка",
-  firstProjBars.length === 2 && firstProjBars.every((b) => b.classList.contains("nested") && !b.classList.contains("bar-group")),
+const firstProjBars = [...rowOf("Ivan").querySelectorAll(".c-cell")[0].querySelectorAll(".bar")];
+check("у Ivan в секции 0 один вложенный голубой отрезок (Sprint 2), у Petr — B-Sprint 1",
+  firstProjBars.length === 1 && firstProjBars[0].classList.contains("nested") && firstProjBars[0].querySelector(".bar-sprint").textContent === "Sprint 2" &&
+    rowOf("Petr").querySelectorAll(".c-cell")[0].querySelector(".bar .bar-sprint")?.textContent === "B-Sprint 1",
   firstProjBars.map((b) => b.className).join("|"));
-check("в отрезках подписаны спринты", firstProjBars.map((b) => b.querySelector(".bar-sprint").textContent).join("|") === "Sprint 2|B-Sprint 1",
-  firstProjBars.map((b) => b.querySelector(".bar-sprint").textContent).join("|"));
 check("вложенные отрезки ниже групповых",
   firstProjBars[0].getBoundingClientRect().height < document.querySelector("#g1 .g-row.group .bar").getBoundingClientRect().height,
   `${firstProjBars[0].getBoundingClientRect().height} < ${document.querySelector("#g1 .g-row.group .bar").getBoundingClientRect().height}`);
@@ -456,8 +455,7 @@ check("у второй секции подписи нет — только сп�
 check("секция без дат подписана «Без дат»", [...document.querySelectorAll("#g1 thead .c-sprint:not(.backlog)")].at(-1).querySelector(".sp-name")?.textContent === t("gantt.noDates"));
 check("легенда команд отрисована — в горизонтальной прокрутке", document.querySelectorAll("#g1 .legend-scroll .legend-item").length === 2 && getComputedStyle(document.querySelector("#g1 .legend-scroll")).overflowX === "auto");
 check("подписи легенды короткие", document.querySelector("#g1 .legend-done").textContent === t("gantt.legendDone") && t("gantt.legendDone") === "доля готовых задач" && t("gantt.legendDue") === "срок исполнения");
-const left = [...document.querySelectorAll("#g1 .g-row.group .badge.b-left")].map((b) => b.textContent);
-check("жёлтый баллон «осталось» у каждого эпика", left.length === 5 && left[0] === "4", left.join(" "));
+check("на «По эпикам» цифры скрыты — жёлтого баллона «осталось» нет", document.querySelectorAll("#g1 .badge.b-left").length === 0);
 check("у исполнителей жёлтого баллона нет", document.querySelectorAll("#g2 .badge.b-left").length === 0);
 const ivanRow = [...document.querySelectorAll("#g2 .g-row.group")].find((r) => r.querySelector(".glabel").textContent === "Ivan");
 const ivanSplit = ivanRow.querySelectorAll(".c-cell")[0].querySelector(".bar-split");
@@ -489,7 +487,7 @@ check("лейбл роли зелёный", getComputedStyle(roleOf("Ivan")).bac
 check("на вкладке по людям колонка имён на 20% шире (456px)",
   Math.round(document.querySelector("#g2 thead .c-name").getBoundingClientRect().width) === 456 && Math.round(document.querySelector("#g1 thead .c-name").getBoundingClientRect().width) === 380,
   `${document.querySelector("#g2 thead .c-name").getBoundingClientRect().width} / ${document.querySelector("#g1 thead .c-name").getBoundingClientRect().width}`);
-check("на вкладке по эпикам лейблов роли нет", document.querySelectorAll("#g1 .lz-role").length === 0);
+check("без профилей лейблов роли нет", document.querySelectorAll("#g1 .lz-role").length === 0);
 
 // бэклог: колонка справа, задачи без спринта и не готово
 check("EP-1 бэклог: 1 задача / 5ч (A-6; готовая A-4 не считается)", ep1.backlog.count === 1 && ep1.backlog.sum === 5 * H && ep1.backlog.issues[0].key === "A-6",
@@ -504,8 +502,7 @@ check("строки проектов и «Прочие» тоже с ячейк�
 const ep1Row = [...document.querySelectorAll("#g1 .g-row.group")][0];
 const backlogBar = ep1Row.querySelector("td.c-backlog .bar");
 check("у EP-1 в бэклоге жёлтая полоса 1 · 5ч", backlogBar?.classList.contains("bar-group") && backlogBar.textContent === "15ч", backlogBar?.textContent);
-const aaaRow = ep1Row.nextElementSibling;
-check("у проекта AAA в бэклоге голубой отрезок", aaaRow.querySelector("td.c-backlog .bar.nested")?.textContent.includes("5ч"));
+check("у Olga в бэклоге голубой отрезок (A-6)", rowOf("Olga").querySelector("td.c-backlog .bar.nested")?.textContent.includes("5ч"));
 check("число ячеек в строке = секции + бэклог", ep1Row.querySelectorAll("td").length === 1 + m1.columns.length + 1);
 
 // клик по жёлтой полосе — список задач со ссылками
@@ -541,7 +538,7 @@ check("ссылка «всего задач» — JQL по эпику", hrefs.so
 check("ссылка «Готово» — по реальным статусам", hrefs.some((h) => h.includes('AND status in ("Готово", "On Prod")')), hrefs.join(" | "));
 check("ссылка «прочие» — по открытым статусам", hrefs.some((h) => h.includes('AND status in ("В работе", "К выполнению")')), hrefs.join(" | "));
 check("ссылка «без спринта» — пустой спринт и открытые статусы", hrefs.some((h) => h.includes("cf[10101] is EMPTY AND status in (")), hrefs.join(" | "));
-check("строка проекта ведёт на JQL с проектом", hrefs.some((h) => h.includes('AND project = "AAA"')), hrefs.filter((h) => h.includes("project")).join(" | "));
+check("строка исполнителя в подсказке эпика ведёт на JQL с assignee", hrefs.some((h) => h.includes('AND assignee = "ivan"')), hrefs.filter((h) => h.includes("assignee")).join(" | "));
 check("суммарная оценка без ссылки", !document.querySelector(".tooltip .tip-row:nth-child(5) a"));
 
 document.querySelector(".tip-close").click();
@@ -620,7 +617,7 @@ g4.remove();
   const ep1Row3 = [...g3.querySelectorAll(".g-row.group")].find((r) => r.querySelector(".glabel").textContent.startsWith("EP-1"));
   const critBtn = ep1Row3.querySelector(".crit-btn");
   check("пиктограмма ⚡ рядом с 💬 у эпика, по умолчанию выключена", !!critBtn && critBtn.previousElementSibling?.classList.contains("cmt-btn") && !critBtn.classList.contains("on"));
-  check("на «По эпикам» и «По людям» пиктограммы ⚡ нет", document.querySelectorAll("#g1 .crit-btn, #g2 .crit-btn").length === 0);
+  check("на «По людям» пиктограммы ⚡ нет", document.querySelectorAll("#g2 .crit-btn").length === 0);
   check("без включения обводок нет", g3.querySelectorAll(".bar.crit").length === 0);
   critBtn.click();
   const rowsCrit = [...g3.querySelectorAll(".g-row.proj.crit-row")].map((r) => r.querySelector(".plabel").textContent);

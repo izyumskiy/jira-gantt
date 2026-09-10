@@ -11,9 +11,8 @@ export const DICT = {
     "search.overdue": "Срок прошёл {n} дн. назад",
 
     "tab.search": "Поиск",
-    "tab.epics": "По эпикам",
     "tab.people": "По людям",
-    "tab.epicPeople": "По эпикам и людям",
+    "tab.epicPeople": "По эпикам",
     "tab.team": "Команда",
     "gantt.personClick": "Раскрыть все эпики с участием {name}, остальные свернуть",
     "gantt.personFilter": "Раскрыты эпики с участием: {name}",
@@ -195,6 +194,7 @@ export const DICT = {
     "tip.noSprint": "Задач без спринта",
     "tip.sum": "Суммарная оценка",
     "tip.byProject": "По проектам",
+    "tip.byAssignee": "По исполнителям",
     "tip.close": "Закрыть",
 
     "set.connection": "Подключение",
@@ -280,9 +280,8 @@ export const DICT = {
     "search.overdue": "Overdue by {n} days",
 
     "tab.search": "Search",
-    "tab.epics": "By epics",
     "tab.people": "By people",
-    "tab.epicPeople": "By epics and people",
+    "tab.epicPeople": "By epics",
     "tab.team": "Team",
     "gantt.personClick": "Expand every epic with {name}, collapse the rest",
     "gantt.personFilter": "Expanded epics with: {name}",
@@ -464,6 +463,7 @@ export const DICT = {
     "tip.noSprint": "Issues without a sprint",
     "tip.sum": "Total estimate",
     "tip.byProject": "By project",
+    "tip.byAssignee": "By assignee",
     "tip.close": "Close",
 
     "set.connection": "Connection",

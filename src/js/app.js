@@ -44,7 +44,6 @@ function showTab(name) {
   document.querySelectorAll(".tab").forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
   document.querySelectorAll(".page").forEach((p) => p.classList.add("hidden"));
   $(`#page-${name}`).classList.remove("hidden");
-  if (name === "epics") drawGantt("epic", $("#page-epics"));
   if (name === "people") drawGantt("assignee", $("#page-people"));
   if (name === "epicPeople") drawGantt("epicPeople", $("#page-epicPeople"));
   if (name === "team") team.render($("#page-team"), { notify: (m) => status(m) }).catch(fail);
@@ -54,7 +53,6 @@ function showTab(name) {
 function redrawActive() {
   const active = document.querySelector(".tab.active")?.dataset.tab;
   if (active === "search") renderStored().then(renderResults).catch(fail);
-  if (active === "epics") drawGantt("epic", $("#page-epics"));
   if (active === "people") drawGantt("assignee", $("#page-people"));
   if (active === "epicPeople") drawGantt("epicPeople", $("#page-epicPeople"));
   if (active === "team") team.render($("#page-team"), { notify: (m) => status(m) }).catch(fail);
@@ -705,7 +703,7 @@ async function refreshHeader() {
 const NO_ASSIGNEE = "__none__";
 
 // Выпадающий список исполнителей эпиков: «все», затем люди по алфавиту, затем «без исполнителя».
-function renderEpicAssigneeFilter(epics, sel = $("#epicAssignee")) {
+function renderEpicAssigneeFilter(epics, sel = $("#epicAssignee2")) {
   const current = settings.get().epicAssigneeFilter || "";
   sel.textContent = "";
   const add = (value, label) => {
@@ -731,7 +729,7 @@ function renderEpicAssigneeFilter(epics, sel = $("#epicAssignee")) {
 }
 
 // Пояснение над Гантом: сколько эпиков скрыто галочками и какие фильтры пришли со страницы поиска.
-function renderGanttFilterNote(hiddenCount, box = $("#ganttFilterNote")) {
+function renderGanttFilterNote(hiddenCount, box = $("#ganttFilterNote2")) {
   box.textContent = "";
   const parts = [];
   if (hiddenCount) parts.push(t("gantt.hiddenUnchecked", { n: hiddenCount }));
@@ -798,21 +796,20 @@ async function drawGantt(mode, container) {
     let target = container;
     let epicsShown = epics;
     let issuesShown = issues;
-    if (mode !== "assignee") {
-      const byPeople = mode === "epicPeople";
+    if (mode === "epicPeople") {
       // Фильтр по исполнителю эпика: диаграмма строится только по подходящим эпикам и их задачам.
-      renderEpicAssigneeFilter(epics, byPeople ? $("#epicAssignee2") : $("#epicAssignee"));
+      renderEpicAssigneeFilter(epics);
       const filter = settings.get().epicAssigneeFilter || "";
-      // Снятые галочки и фильтры со страницы «Поиск эпиков» действуют и здесь.
+      // Снятые галочки и фильтры со страницы «Поиск» действуют и здесь.
       const visible = epics.filter((e) => !e.hidden);
       epicsShown = applyFilter(visible.filter((e) => epicMatchesFilter(e, filter)));
-      renderGanttFilterNote(epics.length - visible.length, byPeople ? $("#ganttFilterNote2") : $("#ganttFilterNote"));
+      renderGanttFilterNote(epics.length - visible.length);
       const keep = new Set(epicsShown.map((e) => e.key));
       issuesShown = issues.filter((i) => keep.has(i.epicKey));
-      target = byPeople ? $("#epicPeopleChart") : $("#epicsChart");
+      target = $("#epicPeopleChart");
     }
     const model = agg.buildModel({ issues: issuesShown, others, sprints, epics: epicsShown, boards, mode });
-    const opts = { mode, profiles: mode === "epic" ? [] : profiles }; // профили нужны там, где есть люди
+    const opts = { mode, profiles }; // профили людей нужны на обеих вкладках
     if (mode === "epicPeople") {
       applyPersonFilter(model);
       renderPersonFilterNote();
@@ -1080,10 +1077,6 @@ async function boot() {
     renderSelCount();
   };
   $("#btnSave").onclick = doSaveSelection;
-  $("#epicAssignee").onchange = async () => {
-    await settings.save({ epicAssigneeFilter: $("#epicAssignee").value });
-    drawGantt("epic", $("#page-epics"));
-  };
   $("#epicAssignee2").onchange = async () => {
     await settings.save({ epicAssigneeFilter: $("#epicAssignee2").value });
     drawGantt("epicPeople", $("#page-epicPeople"));
