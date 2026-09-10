@@ -236,12 +236,13 @@ export const BACKLOG_ID = "sec:backlog";
 
 // mode: "epicPeople" (эпики → исполнители, вкладка «По эпикам») | "assignee" (люди → проекты);
 // others — задачи людей вне целевых эпиков (учитываются только по людям).
-export function buildModel({ issues, others = [], sprints, epics, boards = [], mode }) {
+// timelineIssues — по каким задачам строить шкалу времени. Передаётся вся выгрузка, чтобы шкала
+// была одинаковой на всех вкладках и не менялась от фильтров.
+export function buildModel({ issues, others = [], sprints, epics, boards = [], mode, timelineIssues = null }) {
   const epicLike = mode !== "assignee"; // группы — эпики
   const teamsInfo = buildTeams(sprints, boards);
   const sprintById = new Map(sprints.map((s) => [s.id, s]));
-  // По людям в шкалу входят и задачи вне целевых эпиков — иначе их спринты не покажутся.
-  const columns = timeline(sprints, mode === "assignee" ? [...issues, ...others] : issues);
+  const columns = timeline(sprints, timelineIssues || [...issues, ...others]);
   // Внутри секции спринты идут по командам, чтобы цвета в колонке не перемешивались.
   for (const sec of columns) {
     sec.sprints.sort((a, b) => teamsInfo.of(a).name.localeCompare(teamsInfo.of(b).name) || a.id - b.id);

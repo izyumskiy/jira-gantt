@@ -838,7 +838,17 @@ async function drawGantt(mode, container) {
     } else {
       target = $("#peopleChart");
     }
-    const model = agg.buildModel({ issues: issuesShown, others, sprints, epics: epicsShown, boards, mode });
+    // Шкалу строим по всей выгрузке (включая задачи вне целевых эпиков), чтобы на всех вкладках
+    // и при любых фильтрах были одни и те же колонки спринтов.
+    const model = agg.buildModel({
+      issues: issuesShown,
+      others,
+      sprints,
+      epics: epicsShown,
+      boards,
+      mode,
+      timelineIssues: [...issues, ...others]
+    });
     const opts = { mode, profiles }; // профили людей нужны на обеих вкладках
     if (mode === "epicPeople") {
       applyPersonFilter(model);

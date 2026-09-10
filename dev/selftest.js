@@ -153,6 +153,19 @@ check("подпись секции — диапазон дат", /^\d{2}\.\d{2} 
   check("сдвиг команд: спринт, закончившийся до сегодня, на график не попадает", secOf(16) === "—", secOf(16));
 }
 
+// 2c. шкала одинакова на вкладках и не зависит от фильтров
+{
+  const all = [...issues, ...others];
+  const cols1 = agg.buildModel({ issues, others, sprints, epics, boards, mode: "epicPeople", timelineIssues: all }).columns.map((c) => c.id);
+  const cols2 = agg.buildModel({ issues, others, sprints, epics, boards, mode: "assignee", timelineIssues: all }).columns.map((c) => c.id);
+  check("колонки одинаковы на «По эпикам» и «По людям»", cols1.join(",") === cols2.join(","), `${cols1.join(",")} / ${cols2.join(",")}`);
+  const oneEpic = agg.buildModel({
+    issues: issues.filter((i) => i.epicKey === "EP-3"),
+    others, sprints, epics, boards, mode: "epicPeople", timelineIssues: all
+  }).columns.map((c) => c.id);
+  check("фильтр по одному эпику не укорачивает шкалу", oneEpic.join(",") === cols1.join(","), oneEpic.join(","));
+}
+
 // 3. модель по эпикам
 const m1 = agg.buildModel({ issues, sprints, epics, boards, mode: "epicPeople" });
 const ep1 = m1.groups.find((g) => g.key === "EP-1");
