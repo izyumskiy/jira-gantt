@@ -565,9 +565,10 @@ const roleOf = (name) => labelOf(name).parentElement.querySelector(".lozenge.lz-
 check("зелёный лейбл роли у Ivan и Olga", roleOf("Ivan")?.textContent === "Developer" && roleOf("Olga")?.textContent === "QA" && !roleOf("Petr"),
   `${roleOf("Ivan")?.textContent} / ${roleOf("Olga")?.textContent}`);
 check("лейбл роли зелёный", getComputedStyle(roleOf("Ivan")).backgroundColor === "rgb(227, 252, 239)", getComputedStyle(roleOf("Ivan")).backgroundColor);
-check("на вкладке по людям колонка имён на 20% шире (456px)",
-  Math.round(document.querySelector("#g2 thead .c-name").getBoundingClientRect().width) === 456 && Math.round(document.querySelector("#g1 thead .c-name").getBoundingClientRect().width) === 380,
-  `${document.querySelector("#g2 thead .c-name").getBoundingClientRect().width} / ${document.querySelector("#g1 thead .c-name").getBoundingClientRect().width}`);
+check("колонка дерева одинакова на «По эпикам» и «По людям» (456px)",
+  Math.round(document.querySelector("#g1 thead .c-name").getBoundingClientRect().width) === 456 &&
+    Math.round(document.querySelector("#g2 thead .c-name").getBoundingClientRect().width) === 456,
+  `${document.querySelector("#g1 thead .c-name").getBoundingClientRect().width} / ${document.querySelector("#g2 thead .c-name").getBoundingClientRect().width}`);
 check("без профилей лейблов роли нет", document.querySelectorAll("#g1 .lz-role").length === 0);
 
 // бэклог: колонка справа, задачи без спринта и не готово

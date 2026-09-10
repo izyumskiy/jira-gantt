@@ -11,7 +11,7 @@
   --danger: #de350b;
   --ok: #006644;
   --row-h: 34px;
-  --name-w: 380px;
+  --name-w: 456px; /* колонка дерева одинакова на обеих вкладках */
   --col-w: 264px;
 }
 
@@ -291,8 +291,7 @@ table.gantt { border-collapse: separate; border-spacing: 0; }
   padding: 3px 8px;
 }
 .gantt thead .c-name { z-index: 6; background: #fafbfc; }
-.gantt.mode-assignee { --name-w: 456px; } /* на 20% шире: имя + роль + бейджи */
-.gantt.mode-assignee .plabel, .gantt.mode-epicPeople .plabel { max-width: 300px; }
+
 /* Эпик, отмеченный галочкой на «Поиске», — светло-жёлтой заливкой. */
 .g-row.proj.epic-target > .c-name { background: #fff7d6; }
 .g-row.proj.epic-target.hl > .c-name { background: var(--accent-soft); }
@@ -393,7 +392,7 @@ table.gantt { border-collapse: separate; border-spacing: 0; }
 .g-row.proj.hl .plabel-link { font-weight: 700; }
 .plabel {
   display: inline-block;
-  max-width: 260px;
+  max-width: 300px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
