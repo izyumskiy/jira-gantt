@@ -114,7 +114,7 @@ main { padding: 14px 16px 40px; }
 .list { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; overflow: clip; }
 .item {
   display: grid;
-  grid-template-columns: 34px 22px 24px 90px 1fr 160px 220px 140px 70px 70px 76px 130px;
+  grid-template-columns: 34px 22px 24px 90px 1fr 160px 200px 130px 84px 70px 70px 76px 130px;
   align-items: center;
   gap: 8px;
   padding: 6px 10px;

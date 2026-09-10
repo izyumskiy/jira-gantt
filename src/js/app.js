@@ -302,7 +302,7 @@ function listHead() {
     cell("inum", "#"), cell("", ""), cell("iplus", ""), cell("ikey", t("search.col.key")), cell("isum", t("search.col.name")), dates,
     cell("ilabels", t("search.col.labels")),
     cell("iperson", t("search.assignee")),
-    cell("iest", t("search.col.estimate")), cell("ispent", t("search.col.spent")),
+    cell("iest", t("search.col.express")), cell("iest", t("search.col.estimate")), cell("ispent", t("search.col.spent")),
     cell("ipct", t("search.col.pct")), cell("istatus", t("search.col.status"))
   );
   // Активные фильтры и «Снять фильтры» — второй строкой шапки во всю ширину, чтобы не зависеть от ширины колонок.
@@ -425,6 +425,7 @@ function showEpicInfo(anchor, epic, spent, pct) {
   line(t("search.assignee"), epic.assigneeName || t("dash"));
   line(t("search.reporter"), epic.reporterName || t("dash"));
   line(t("search.col.labels"), (epic.labels || []).join(", ") || t("dash"));
+  line(t("search.col.express"), agg.estimateOf(epic) ? agg.fmtEstimate(agg.estimateOf(epic)) : t("dash"));
   if (spent) {
     line(t("search.col.spent"), `${fmtSpentDays(spent.epic + spent.issues)} · ${t("search.spentFull", { epic: fmtSpentDays(spent.epic), issues: fmtSpentDays(spent.issues), n: spent.withLogs, total: spent.total })}`);
   }
@@ -459,7 +460,17 @@ function showEpicInfo(anchor, epic, spent, pct) {
   box.style.left = `${Math.max(8, Math.min(window.innerWidth - box.offsetWidth - 12, r.left))}px`;
 }
 
-// Сумма оценок всех задач эпика (отменённые дают 0 — см. estimateOf).
+// Экспресс-оценка: оценка, внесённая в сам эпик (в сумму по задачам не входит).
+function epicExpress(epic) {
+  const cell = document.createElement("span");
+  const value = agg.estimateOf(epic);
+  cell.className = "iest" + (value ? "" : " iperson-empty");
+  cell.textContent = value ? agg.fmtEstimate(value) : t("dash");
+  cell.title = t("search.expressFull", { sum: value ? agg.fmtEstimate(value) : t("dash") });
+  return cell;
+}
+
+// Сумма оценок всех задач эпика (отменённые дают 0 — см. estimateOf). Оценка самого эпика не входит.
 function epicEstimate(pct) {
   const cell = document.createElement("span");
   cell.className = "iest" + (pct && pct.count ? "" : " iperson-empty");
@@ -526,6 +537,7 @@ function epicRow(epic, checked, index, spent = null, pct = null) {
     num, cb, plusCell, key, sum, epicDates(epic),
     epicLabels(epic),
     epicPerson("search.assignee", epic.assigneeName, true),
+    epicExpress(epic),
     epicEstimate(pct),
     epicSpent(spent),
     epicPct(pct),

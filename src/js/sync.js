@@ -57,8 +57,10 @@ function epicFieldList() {
   const f = settings.get().fields;
   return [
     "summary", "project", "status", "updated", "created", "duedate", "labels", "timespent",
+    // Оценка самого эпика («экспресс-оценка») — те же поля, что у задач.
+    "timeoriginalestimate", "timeestimate",
     f.epicAssignee || "assignee", f.epicReporter || "reporter",
-    f.plannedStart, f.plannedEnd, f.epicName
+    f.plannedStart, f.plannedEnd, f.epicName, f.storyPoints
   ].filter(Boolean);
 }
 
@@ -197,6 +199,10 @@ function mapEpic(i) {
     reporterName: userOf(i.fields[f.epicReporter || "reporter"]).name,
     labels: Array.isArray(i.fields.labels) ? i.fields.labels.filter(Boolean) : [],
     timeSpent: Number(i.fields.timespent) || 0, // списания на сам эпик, секунды
+    // Экспресс-оценка: оценка, внесённая в сам эпик (читается тем же estimateOf, что и задачи).
+    originalEstimate: i.fields.timeoriginalestimate ?? null,
+    remainingEstimate: i.fields.timeestimate ?? null,
+    storyPoints: f.storyPoints ? i.fields[f.storyPoints] ?? null : null,
     plannedStart: f.plannedStart ? dateOf(i.fields[f.plannedStart]) : "",
     plannedEnd: f.plannedEnd ? dateOf(i.fields[f.plannedEnd]) : ""
   };
