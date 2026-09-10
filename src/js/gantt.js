@@ -3,7 +3,7 @@
 // жёлтую (целевые эпики) и серую (прочие эпики) части пропорционально объёму. Вложенные строки
 // рисуются тонкими голубыми отрезками — по одному на каждый спринт секции.
 import { t } from "./i18n.js";
-import { fmtEstimate, NO_DATES_ID, BACKLOG_ID } from "./agg.js";
+import { fmtEstimate, NO_DATES_ID, BACKLOG_ID, sprintCapacity } from "./agg.js";
 import * as settings from "./settings.js";
 import { cfId, escapeJql, comments as jiraComments, addComment as jiraAddComment, userSearch as jiraUserSearch } from "./jira.js";
 
@@ -489,12 +489,22 @@ export function render(container, model, opts) {
       );
     }
     tr.append(name);
+    const capacity = mode === "assignee" ? sprintCapacity() : 0;
     for (const sec of model.columns) {
       const td = el("td", "c-cell");
       const cell = g.cells.get(sec.id);
       if (mode === "assignee") {
-        const split = splitBar(cell, g.otherCells.get(sec.id));
-        if (split) td.append(split);
+        const other = g.otherCells.get(sec.id);
+        const split = splitBar(cell, other);
+        if (split) {
+          // Перегрузка спринта: суммарные оценки человека за секцию больше ёмкости спринта.
+          const load = (cell ? cell.sum : 0) + (other ? other.sum : 0);
+          if (capacity > 0 && load > capacity) {
+            split.classList.add("overload");
+            split.title = t("gantt.overload", { sum: fmtEstimate(load), cap: fmtEstimate(capacity) });
+          }
+          td.append(split);
+        }
       } else if (cell && cell.count) {
         td.append(groupBar(cell, model.maxCell, `${g.label} · ${sectionTitle(sec)}`));
       }

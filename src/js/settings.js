@@ -7,6 +7,7 @@ export const DEFAULTS = {
   pat: "",
   estimateField: "original", // original | remaining | points
   hoursPerDay: 8,
+  sprintDays: 10, // длительность спринта в рабочих днях — ёмкость человека на спринт
   doneStatuses: "", // статусы своего потока, которые считаем завершёнными, через запятую
   infoSystems: [], // справочник информационных систем для вкладки «Команда»
   boardId: "",

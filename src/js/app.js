@@ -833,6 +833,7 @@ function fillSettingsForm() {
   $("#pat").value = s.pat;
   $("#estimateField").value = s.estimateField;
   $("#hoursPerDay").value = s.hoursPerDay;
+  $("#sprintDays").value = s.sprintDays;
   $("#doneStatuses").value = s.doneStatuses;
   $("#infoSystems").value = (s.infoSystems || []).join("\n");
   $("#lang").value = s.lang;
@@ -931,6 +932,7 @@ async function saveSettingsForm() {
     pat: $("#pat").value.trim(),
     estimateField: $("#estimateField").value,
     hoursPerDay: Number($("#hoursPerDay").value) || 8,
+    sprintDays: Number($("#sprintDays").value) || 10,
     doneStatuses: $("#doneStatuses").value.trim(),
     infoSystems: team.parseSystems($("#infoSystems").value),
     fields: {

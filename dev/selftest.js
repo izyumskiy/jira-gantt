@@ -230,6 +230,24 @@ check("Ivan готовых задач", ivan.done === 2, String(ivan.done));
 check("Ivan задач в прочих статусах", ivan.other === 2, String(ivan.other));
 check("у исполнителя нет лейбла статуса", ivan.status === null);
 check("Ivan в команде Alpha", ivan.team?.name === "Alpha", ivan.team?.name);
+// «По людям»: внутри человека — эпики (ключ + Epic Name), только с задачами в секциях таймлайна
+check("внутри Ivan — эпики, а не проекты", ivan.projects.map((p) => p.key).sort().join(",") === "EP-1,EP-2", ivan.projects.map((p) => p.label).join(" | "));
+check("подпись вложенного эпика — ключ и название", ivan.projects.find((p) => p.key === "EP-1")?.label === "EP-1 · Личный кабинет", ivan.projects.find((p) => p.key === "EP-1")?.label);
+check("childKind по людям = epic", m2.childKind === "epic");
+{
+  const only = agg.buildModel({
+    issues: [mk("Z-1", "EP-1", "AAA", "Ivan", 1, 8, "prog"), mk("Z-2", "EP-2", "BBB", "Ivan", 2, 4, "prog")],
+    sprints, epics, boards, mode: "assignee"
+  });
+  check("эпик только с задачами в закрытом спринте внутрь человека не попадает",
+    only.groups[0].projects.map((p) => p.key).join(",") === "EP-2", only.groups[0].projects.map((p) => p.key).join(","));
+}
+// перегрузка спринта: ёмкость = длительность спринта × часов в дне
+await settings.save({ sprintDays: 1, hoursPerDay: 8 });
+check("sprintCapacity = 1д × 8ч", agg.sprintCapacity() === 8 * H, String(agg.sprintCapacity() / H));
+await settings.save({ estimateField: "points" });
+check("для story points подсветка перегруза выключена", agg.sprintCapacity() === 0);
+await settings.save({ estimateField: "original" });
 check("Ivan: прочие эпики — 1 задача / 8ч", ivan.otherCount === 1 && ivan.otherSum === 8 * H, `${ivan.otherCount} / ${ivan.otherSum / H}`);
 check("Ivan: целевые итоги не смешаны с прочими", ivan.count === 4 && ivan.sum === 58 * H, `${ivan.count} / ${ivan.sum / H}`);
 check("Ivan: прочие в секции 0 по спринту 2", ivan.otherCells.get("sec:0")?.bySprint.get(2)?.count === 1);
@@ -521,6 +539,22 @@ document.querySelector(".tip-close").click();
 check("окно закрывается крестиком", !document.querySelector(".tooltip"));
 const teamRows = [...document.querySelectorAll("#g2 .g-row.team .tlabel")].map((n) => n.textContent);
 check("строки команд на вкладке по людям", teamRows.join(",") === "Alpha,Beta,Без команды", teamRows.join(","));
+{
+  // Ivan в секции 0: 12ч целевых + 4ч прочих = 16ч > ёмкости 8ч (1 день × 8ч) → красная обводка.
+  await settings.save({ sprintDays: 1 });
+  const gO = document.createElement("div");
+  document.body.append(gO);
+  gantt.render(gO, m2, { mode: "assignee" });
+  const rowIvan = [...gO.querySelectorAll(".g-row.group")].find((r) => r.querySelector(".glabel").textContent === "Ivan");
+  const cells = rowIvan.querySelectorAll(".c-cell");
+  check("перегруженная секция обведена красным", cells[0].querySelector(".bar-split")?.classList.contains("overload"), cells[0].querySelector(".bar-split")?.className);
+  check("в подсказке — нагрузка и ёмкость", (cells[0].querySelector(".bar-split")?.title || "").includes("2.5д") && cells[0].querySelector(".bar-split").title.includes("1д"), cells[0].querySelector(".bar-split")?.title);
+  check("секция в пределах ёмкости не обведена", !cells[1].querySelector(".bar-split")?.classList.contains("overload"));
+  await settings.save({ sprintDays: 10 });
+  gantt.render(gO, m2, { mode: "assignee" });
+  check("при ёмкости 10д перегрузки нет", gO.querySelectorAll(".bar.overload").length === 0);
+  gO.remove();
+}
 
 document.querySelector("#g1 .glabel").click();
 const tipRows = [...document.querySelectorAll(".tooltip .tip-row")].map((r) => r.textContent);

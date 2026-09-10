@@ -19,6 +19,16 @@ export function estimateOf(issue) {
   return Number(issue.originalEstimate) || 0;
 }
 
+// Ёмкость спринта в единицах оценки: длительность спринта (рабочих дней) × часов в дне.
+// Для story points сравнивать не с чем — возвращаем 0 (подсветка перегруза выключена).
+export function sprintCapacity() {
+  const s = settings.get();
+  if (s.estimateField === "points") return 0;
+  const days = Number(s.sprintDays) || 0;
+  const hpd = Number(s.hoursPerDay) || 8;
+  return days > 0 ? days * hpd * 3600 : 0;
+}
+
 export function isPoints() {
   return settings.get().estimateField === "points";
 }
@@ -242,17 +252,22 @@ export function buildModel({ issues, others = [], sprints, epics, boards = [], m
   const groups = new Map();
   const groupKeyOf = (i) => (epicLike ? i.epicKey || "" : i.assigneeKey || "");
   // Вложенная строка: проект (epic/assignee) или исполнитель (epicPeople).
+  // Подпись эпика: ключ + Epic Name (или название, если поле пустое).
+  const epicLabel = (key) => {
+    const e = epicById.get(key);
+    return key ? `${key} · ${e?.epicName || e?.summary || ""}`.trim() : t("dash");
+  };
+  // Вложенная строка: исполнитель (по эпикам) или эпик (по людям).
   const childOf = (i) =>
     mode === "epicPeople"
       ? { key: i.assigneeKey || "", label: i.assigneeName || t("gantt.noAssignee") }
-      : { key: i.projectKey || t("dash"), label: i.projectName || i.projectKey || t("dash") };
+      : { key: i.epicKey || "", label: epicLabel(i.epicKey || "") };
   // Подпись эпика — Epic Name; если поле пустое или не найдено в Jira — название эпика.
   const groupLabelOf = (i) => {
     if (epicLike) {
       const k = i.epicKey || "";
       if (!k) return t("dash");
-      const e = epicById.get(k);
-      return `${k} · ${e?.epicName || e?.summary || ""}`.trim();
+      return epicLabel(k);
     }
     return i.assigneeName || t("gantt.noAssignee");
   };
@@ -363,6 +378,12 @@ export function buildModel({ issues, others = [], sprints, epics, boards = [], m
       for (const [key, p] of g.projects) if (!p.cells.size && !p.backlog.count) g.projects.delete(key);
     }
   }
+  // «По людям»: внутри человека — только эпики, где у него есть задачи в текущем или будущих спринтах.
+  if (mode === "assignee") {
+    for (const g of groups.values()) {
+      for (const [key, p] of g.projects) if (!p.cells.size) g.projects.delete(key);
+    }
+  }
 
   const list = [...groups.values()].map((g) => {
     let team = teamsInfo.none;
@@ -416,7 +437,7 @@ export function buildModel({ issues, others = [], sprints, epics, boards = [], m
     teamOfSprint: (id) => teamsInfo.of(sprintById.get(id)),
     sprintById,
     targetKeys: epics.map((e) => e.key),
-    childKind: mode === "epicPeople" ? "person" : "project"
+    childKind: mode === "epicPeople" ? "person" : "epic"
   };
 }
 

@@ -271,6 +271,8 @@ table.gantt { border-collapse: separate; border-spacing: 0; }
 .gantt th.c-sprint.current { background: var(--accent-soft); }
 .gantt th.c-sprint.backlog { background: #f4f5f7; border-left: 2px solid var(--line); }
 .gantt td.c-backlog { border-left: 2px solid var(--line); background: #fafbfc; }
+/* Перегрузка спринта у человека: жирная красная обводка секции. */
+.bar.overload { outline: 3px solid #de350b; outline-offset: -1px; border-radius: 3px; }
 .bar.clickable { cursor: pointer; }
 .bar.clickable:hover { outline: 1px solid var(--accent); outline-offset: -1px; }
 .sp-date { font-weight: 600; white-space: nowrap; }
