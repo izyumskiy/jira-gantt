@@ -249,6 +249,39 @@ check("подпись секции — диапазон дат", /^\d{2}\.\d{2} 
   check("человек без команды — отдельная строка", flowlib.buildFlow({ rows, weeks: 4, now, teamOf: () => null }).teams.length === 1);
 }
 
+// 2g. прогноз срока по потоку (детерминированный генератор)
+{
+  const seq = (() => { let i = 0; const vals = [0.1, 0.5, 0.9, 0.3, 0.7]; return () => vals[i++ % vals.length]; })();
+  const teamA = { id: "t:1", name: "A" };
+  const teamB = { id: "t:2", name: "B" };
+  // A: поток 10/нед, на эпик идёт половина → 5 задач/нед, осталось 20 → 4 недели
+  // B: поток 2/нед, на эпик идёт половина → 1 задача/нед, осталось 10 → 10 недель (замыкающая)
+  const fc = flowlib.forecastDelivery({
+    teams: [
+      { team: teamA, perWeek: [10, 10, 10, 10, 10], share: 0.5, remaining: 20 },
+      { team: teamB, perWeek: [2, 2, 2, 2, 2], share: 0.5, remaining: 10 }
+    ],
+    runs: 500,
+    rnd: seq
+  });
+  check("срок прогона — максимум по командам, а не сумма", fc.weeks.p50 === 10 && fc.weeks.p85 === 10, JSON.stringify(fc.weeks));
+  check("замыкающей названа медленная команда", fc.last[0].team.id === "t:2" && fc.last[0].pct === 100, JSON.stringify(fc.last.map((x) => `${x.team.id}:${x.pct}`)));
+  check("даты считаются от недель", Math.round((fc.dates.p50 - Date.now()) / (7 * 86400000)) === 10);
+
+  // доля потока решает: при доле 20% тот же объём занимает вдвое больше недель
+  const slow = flowlib.forecastDelivery({ teams: [{ team: teamA, perWeek: [10, 10], share: 0.2, remaining: 20 }], runs: 200, rnd: seq });
+  const fast = flowlib.forecastDelivery({ teams: [{ team: teamA, perWeek: [10, 10], share: 0.4, remaining: 20 }], runs: 200, rnd: seq });
+  check("доля потока прямо влияет на срок", slow.weeks.p50 === 10 && fast.weeks.p50 === 5, `${slow.weeks.p50} / ${fast.weeks.p50}`);
+
+  check("разброс истории даёт разброс сроков", (() => {
+    const varied = flowlib.forecastDelivery({ teams: [{ team: teamA, perWeek: [0, 2, 10], share: 1, remaining: 10 }], runs: 2000 });
+    return varied.weeks.p95 > varied.weeks.p50;
+  })());
+  check("без остатка задач прогноза нет", flowlib.forecastDelivery({ teams: [{ team: teamA, perWeek: [5], share: 1, remaining: 0 }] }) === null);
+  check("при нулевом потоке прогноза нет", flowlib.forecastDelivery({ teams: [{ team: teamA, perWeek: [0, 0], share: 1, remaining: 5 }] }) === null);
+  check("порог истории: 5 недель минимум, 12 надёжно", flowlib.FORECAST_MIN_WEEKS === 5 && flowlib.FORECAST_OK_WEEKS === 12);
+}
+
 // 3. модель по эпикам
 const m1 = agg.buildModel({ issues, sprints, epics, boards, mode: "epicPeople" });
 const ep1 = m1.groups.find((g) => g.key === "EP-1");

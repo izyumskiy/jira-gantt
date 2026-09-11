@@ -564,6 +564,7 @@ async function renderEpicFlow(box, epic, onDone = () => {}) {
   const index = agg.buildTempoIndex(tempo);
   const model = flowlib.buildFlow({ rows, teamOf: (p) => index.of(p), weeks: Number(settings.get().flowWeeks) || 16 });
   const teams = model.teams.filter((x) => (x.byEpic.get(epic.key) || 0) > 0);
+  renderForecast(box, epic, model, teams).catch(() => {});
   if (!teams.length) {
     box.append(Object.assign(document.createElement("div"), { className: "muted", textContent: t("share.none") }));
   } else {
@@ -610,6 +611,66 @@ async function renderEpicFlow(box, epic, onDone = () => {}) {
     (model.weeksCount < 12 ? ` · ${t("flow.short", { n: model.weeksCount })}` : "");
   box.append(note);
   onDone();
+}
+
+// Прогноз срока эпика: остаток задач распределяется между командами по их вкладу в эпик,
+// каждая команда симулируется по своей истории, срок прогона — максимум по командам.
+async function renderForecast(parent, epic, model, teams) {
+  const issues = await db.all(db.STORES.issues);
+  const remaining = issues.filter((i) => i.epicKey === epic.key && !agg.isDone(i)).length;
+  const box = document.createElement("div");
+  box.className = "share-block forecast-block";
+  box.append(Object.assign(document.createElement("div"), { className: "tip-sub", textContent: t("fc.title") }));
+  parent.append(box);
+
+  const note = (text, error = false) =>
+    box.append(Object.assign(document.createElement("div"), { className: error ? "cmt-error small" : "muted small", textContent: text }));
+
+  if (model.weeksCount < flowlib.FORECAST_MIN_WEEKS) {
+    note(t("fc.short", { n: model.weeksCount, min: flowlib.FORECAST_MIN_WEEKS }), true);
+    return;
+  }
+  const epicDone = teams.reduce((n, x) => n + (x.byEpic.get(epic.key) || 0), 0);
+  if (!remaining || !epicDone) {
+    note(t("fc.none"));
+    return;
+  }
+  const input = teams.map((x) => {
+    const done = x.byEpic.get(epic.key) || 0;
+    return { team: x.team, perWeek: x.perWeek, share: done / x.total, remaining: (remaining * done) / epicDone };
+  });
+  const fc = flowlib.forecastDelivery({ teams: input });
+  if (!fc) {
+    note(t("fc.none"));
+    return;
+  }
+  box.append(Object.assign(document.createElement("div"), { className: "muted small", textContent: t("fc.remaining", { n: remaining }) }));
+  const tbl = document.createElement("table");
+  tbl.className = "tip-table";
+  for (const [p, key] of [[50, "p50"], [85, "p85"], [95, "p95"]]) {
+    const tr = document.createElement("tr");
+    const cell = document.createElement("td");
+    cell.className = "tp-name" + (p === 85 ? " fc-main" : "");
+    cell.textContent = t("fc.line", {
+      pct: p,
+      weeks: fc.weeks[key],
+      date: fmtDay(fc.dates[key].toISOString())
+    });
+    tr.append(cell);
+    tbl.append(tr);
+  }
+  box.append(tbl);
+  if (fc.last.length) {
+    const top = fc.last[0];
+    box.append(
+      Object.assign(document.createElement("div"), {
+        className: "muted small",
+        textContent: t("fc.last", { team: top.team.name || t("share.noTeam"), pct: top.pct })
+      })
+    );
+  }
+  if (model.weeksCount < flowlib.FORECAST_OK_WEEKS) note(t("fc.warn", { n: model.weeksCount, ok: flowlib.FORECAST_OK_WEEKS }), true);
+  note(t("fc.caveat"));
 }
 
 function renderTeamShares(box, epic, onDone = () => {}) {

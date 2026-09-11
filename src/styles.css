@@ -138,6 +138,8 @@ main { padding: 14px 16px 40px; }
 .share-table .tp-name { white-space: nowrap; }
 .share-table .share-pct { min-width: 90px; }
 .share-table .ipct-bar { width: 40px; margin-right: 6px; }
+.forecast-block .fc-main { font-weight: 700; }
+.forecast-block .tip-table td { border-top: none; padding: 1px 0; }
 .tooltip.epic-info .tip-v { text-align: right; max-width: 380px; white-space: normal; }
 .idate { font-variant-numeric: tabular-nums; }
 .idate-empty { color: var(--muted); }

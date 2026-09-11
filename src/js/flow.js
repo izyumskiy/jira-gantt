@@ -70,6 +70,56 @@ export function buildFlow({ rows, teamOf, weeks = 16, now = Date.now() }) {
   return { ...win, weeksCount: win.starts.length, teams: list };
 }
 
+// Прогноз срока по потоку. В каждом прогоне для каждой команды тянем недели её истории с
+// возвратом; неделя даёт flow × доля_потока задач эпика. Срок прогона — максимум по командам:
+// эпик готов, когда закончит последняя. Оценки не складываем (перцентили не складываются,
+// а циклы задач перекрываются).
+export const FORECAST_MIN_WEEKS = 5;
+export const FORECAST_OK_WEEKS = 12;
+
+export function forecastDelivery({ teams, runs = 10000, now = Date.now(), rnd = Math.random, maxWeeks = 260 }) {
+  const usable = teams.filter((x) => x.remaining > 0 && x.share > 0 && x.perWeek.some((n) => n > 0));
+  if (!usable.length) return null;
+
+  const durations = [];
+  const lastByTeam = new Map();
+  let overflow = 0;
+  for (let r = 0; r < runs; r++) {
+    let worst = 0;
+    let worstTeam = null;
+    for (const x of usable) {
+      let done = 0;
+      let w = 0;
+      while (done < x.remaining && w < maxWeeks) {
+        done += x.perWeek[Math.floor(rnd() * x.perWeek.length)] * x.share;
+        w += 1;
+      }
+      if (w >= maxWeeks) overflow += 1;
+      if (w > worst) {
+        worst = w;
+        worstTeam = x;
+      }
+    }
+    durations.push(worst);
+    if (worstTeam) lastByTeam.set(worstTeam.team.id, (lastByTeam.get(worstTeam.team.id) || 0) + 1);
+  }
+  durations.sort((a, b) => a - b);
+  const at = (p) => durations[Math.min(durations.length - 1, Math.floor((p / 100) * durations.length))];
+  const weeks = { p50: at(50), p85: at(85), p95: at(95) };
+  const date = (w) => new Date(now + w * 7 * DAY);
+  const last = [...lastByTeam.entries()]
+    .map(([id, n]) => ({ team: usable.find((x) => x.team.id === id).team, runs: n, pct: Math.round((n / runs) * 100) }))
+    .sort((a, b) => b.runs - a.runs);
+  return {
+    runs,
+    weeks,
+    dates: { p50: date(weeks.p50), p85: date(weeks.p85), p95: date(weeks.p95) },
+    last,
+    teams: usable,
+    overflow
+  };
+}
+
 // Доля потока команды, уходящая на эпик: завершённые задачи эпика к всем завершённым задачам.
 export function epicShare(teamFlow, epicKey) {
   const done = teamFlow.byEpic.get(epicKey) || 0;
