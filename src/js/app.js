@@ -817,6 +817,7 @@ async function doSync({ full = false } = {}) {
     const result = await sync.sync({ full, onProgress: (m) => status(m) });
     await refreshHeader();
     state.shareCache.clear(); // ворклоги могли измениться
+    renderFlowDiag().catch(() => {});
     // Статусы, даты, метки эпиков обновились в базе — перерисовать список «Сохранённые эпики».
     await renderStored();
     // Сводка по спринтам — чтобы было видно, почему у спринта нет дат, а не гадать.
@@ -833,6 +834,9 @@ async function doSync({ full = false } = {}) {
         })
       );
       if (st.boardsFailed.length) lines.push(t("st.boardsFailed", { list: st.boardsFailed.join("; ") }));
+    }
+    if (result.flowStats && !result.flowStats.skipped && !result.flowStats.error) {
+      lines.push(t("st.flowSummary", result.flowStats));
     }
     if (result.tempoStats && !result.tempoStats.skipped) {
       lines.push(t("st.tempoSummary", { teams: result.tempoStats.teams, members: result.tempoStats.members }).replace(/^ · /, ""));
@@ -1079,6 +1083,8 @@ function fillSettingsForm() {
   $("#hoursPerDay").value = s.hoursPerDay;
   $("#sprintDays").value = s.sprintDays;
   $("#useTempoTeams").checked = !!s.useTempoTeams;
+  $("#flowWeeks").value = s.flowWeeks;
+  renderFlowDiag().catch(() => {});
   $("#doneStatuses").value = s.doneStatuses;
   $("#infoSystems").value = (s.infoSystems || []).join("\n");
   $("#lang").value = s.lang;
@@ -1089,6 +1095,41 @@ function fillSettingsForm() {
 }
 
 // Селекты плановых полей: все поля типа «дата» из Jira + текущее значение, если его нет в списке.
+// Диагностика истории потока: сколько завершений выгружено и сколько готовых задач без даты.
+async function renderFlowDiag() {
+  const box = $("#flowDiag");
+  const [flow, issues] = await Promise.all([db.all(db.STORES.flow), db.all(db.STORES.issues)]);
+  if (!flow.length) {
+    box.textContent = t("set.flowDiagEmpty");
+    return;
+  }
+  const weeks = new Set();
+  const people = new Set();
+  for (const f of flow) {
+    if (f.resolved) weeks.add(isoWeek(new Date(f.resolved)));
+    if (f.assigneeLogin || f.assigneeName) people.add(f.assigneeLogin || f.assigneeName);
+  }
+  const done = issues.filter((i) => agg.isDone(i));
+  const gap = done.filter((i) => !i.resolved).length;
+  const parts = [t("set.flowDiagText", { n: flow.length, weeks: weeks.size, people: people.size })];
+  parts.push(
+    done.length && gap
+      ? t("set.flowDiagGap", { n: gap, total: done.length, pct: Math.round((gap / done.length) * 100) })
+      : t("set.flowDiagOk")
+  );
+  box.textContent = parts.join(" ");
+  box.className = gap ? "cmt-error" : "muted";
+}
+
+// Номер недели по ISO — ключ недельной корзины потока.
+function isoWeek(d) {
+  const x = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  const day = x.getUTCDay() || 7;
+  x.setUTCDate(x.getUTCDate() + 4 - day);
+  const start = new Date(Date.UTC(x.getUTCFullYear(), 0, 1));
+  return `${x.getUTCFullYear()}-${String(Math.ceil(((x - start) / 86400000 + 1) / 7)).padStart(2, "0")}`;
+}
+
 function renderDateFieldSelects() {
   const s = settings.get();
   for (const [sel, key] of [[$("#plannedStartField"), "plannedStart"], [$("#plannedEndField"), "plannedEnd"]]) {
@@ -1179,6 +1220,7 @@ async function saveSettingsForm() {
     hoursPerDay: Number($("#hoursPerDay").value) || 8,
     sprintDays: Number($("#sprintDays").value) || 10,
     useTempoTeams: $("#useTempoTeams").checked,
+    flowWeeks: Number($("#flowWeeks").value) || 16,
     doneStatuses: $("#doneStatuses").value.trim(),
     infoSystems: team.parseSystems($("#infoSystems").value),
     fields: {
