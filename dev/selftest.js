@@ -9,10 +9,11 @@ import { setLang, applyI18n, t } from "../src/js/i18n.js";
 import * as settings from "../src/js/settings.js";
 import * as agg from "../src/js/agg.js";
 import * as gantt from "../src/js/gantt.js";
-import { parseSprint, datesFromName } from "../src/js/sync.js";
+import { parseSprint, datesFromName, checkApis } from "../src/js/sync.js";
 import { classify, isDoneStatus } from "../src/js/status.js";
-import { collectPeople, mergeProfiles, parseSystems, systemsList, normName, roleSummary } from "../src/js/team.js";
+import { collectPeople, mergeProfiles, parseSystems, systemsList, teamsList, normName, roleSummary } from "../src/js/team.js";
 import { parseConfig, exportConfig, applyConfig } from "../src/js/configio.js";
+import * as flowlib from "../src/js/flow.js";
 import * as dbm from "../src/js/db.js";
 
 const log = document.getElementById("log");
@@ -166,6 +167,138 @@ check("подпись секции — диапазон дат", /^\d{2}\.\d{2} 
   check("фильтр по одному эпику не укорачивает шкалу", oneEpic.join(",") === cols1.join(","), oneEpic.join(","));
 }
 
+// 2d. имя доски из названий спринтов, когда доска недоступна
+{
+  check("имя доски выводится из общего слова в названиях спринтов",
+    agg.nameFromSprints(["20.2026 WEB[08.10 - 21.10]", "21.2026 WEB[22.10 - 04.11]", "19.2026 WEB[24.09 - 07.10]"]) === "WEB",
+    agg.nameFromSprints(["20.2026 WEB[08.10 - 21.10]", "21.2026 WEB[22.10 - 04.11]"]));
+  check("числа, даты и слово «спринт» именем не становятся",
+    agg.nameFromSprints(["17 BI [07.09.26 - 13.09.26]", "18 BI [14.09.26 - 27.09.26]"]) === "BI" &&
+      agg.nameFromSprints(["Sprint1 Disc [14.06 - 28.06]", "Sprint2 Disc [29.06 - 12.07]"]) === "Disc",
+    agg.nameFromSprints(["Sprint1 Disc [14.06 - 28.06]", "Sprint2 Disc [29.06 - 12.07]"]));
+  check("имя из скобок, если больше ничего нет", agg.nameFromSprints(["Служебный спринт (МДЛП)"]) === "МДЛП", agg.nameFromSprints(["Служебный спринт (МДЛП)"]));
+  check("без подходящих слов — пусто", agg.nameFromSprints(["12.2026 [01.01 - 14.01]", "13.2026"]) === "");
+
+  const mixed = agg.buildModel({
+    issues: [mk("Q-1", "EP-1", "AAA", "Ivan", 71, 2, "prog"), mk("Q-2", "EP-1", "AAA", "Olga", 72, 2, "prog")],
+    sprints: [
+      { id: 71, name: "20.2026 WEB[08.10 - 21.10]", state: "ACTIVE", startDate: iso(-1), endDate: iso(12), boardId: 36 },
+      { id: 72, name: "21.2026 WEB[22.10 - 04.11]", state: "FUTURE", startDate: iso(13), endDate: iso(26), boardId: 36 },
+      { id: 73, name: "Sprint X", state: "ACTIVE", startDate: iso(-1), endDate: iso(12), boardId: 3 }
+    ],
+    epics, boards: [{ id: 3, name: "Alpha" }], mode: "assignee"
+  });
+  const derived = mixed.teams.find((x) => x.id === "36");
+  check("недоступная доска подписана именем из спринтов, а не «#36»", derived?.name === "WEB" && derived?.derived === true, JSON.stringify(derived));
+  check("у выведенного имени есть пояснение с номером доски", (derived?.hint || "").includes("36"), derived?.hint);
+  check("известная доска сохраняет своё имя", mixed.teams.every((x) => x.id !== "3" || (x.name === "Alpha" && !x.derived)));
+}
+
+// 2e. команды из Tempo
+{
+  const tempo = [
+    { id: 1, name: "Команда Tempo по умолчанию", members: [{ key: "", login: "ivan", name: "Ivan" }, { key: "", login: "olga", name: "Olga" }, { key: "", login: "petr", name: "Petr" }] },
+    { id: 2, name: "1C", members: [{ key: "JIRAUSER1", login: "ivan", name: "Ivan" }] },
+    { id: 3, name: "AlphaOne", members: [{ key: "", login: "", name: "Olga" }] }
+  ];
+  const mt = agg.buildModel({ issues, others, sprints, epics, boards, tempo, mode: "assignee" });
+  const teamOf = (key) => mt.groups.find((g) => g.key === key)?.team;
+  check("команда человека берётся из Tempo, а не из доски", teamOf("ivan")?.name === "1C" && teamOf("ivan")?.tempo === true, JSON.stringify(teamOf("ivan")));
+  check("при нескольких командах выбирается самая малочисленная (не «по умолчанию»)", teamOf("olga")?.name === "AlphaOne", teamOf("olga")?.name);
+  check("сопоставление по отображаемому имени работает", teamOf("olga")?.tempo === true);
+  check("кого нет в Tempo — команда по доске", teamOf("petr")?.name === "Команда Tempo по умолчанию" || teamOf("petr")?.tempo === true, teamOf("petr")?.name);
+  const noTempo = agg.buildModel({ issues, others, sprints, epics, boards, tempo: [], mode: "assignee" });
+  check("без Tempo команда по-прежнему по доске", noTempo.groups.find((g) => g.key === "ivan")?.team?.name === "Alpha",
+    noTempo.groups.find((g) => g.key === "ivan")?.team?.name);
+}
+
+// 2f. недельный поток и доля эпика
+{
+  const now = new Date(2026, 8, 11, 12, 0, 0).getTime(); // пятница
+  const win = flowlib.fullWeeks(4, now);
+  // из 4 недель запроса остаётся 3 полных: текущая неполная и первая (запрос начался в середине) отброшены
+  check("окно из полных недель: текущая и первая неполная отброшены", new Date(win.to).getDay() === 0 && win.starts.length === 3,
+    `${new Date(win.from).toDateString()} .. ${new Date(win.to).toDateString()} = ${win.starts.length}`);
+  check("границы недель — понедельники", win.starts.every((ms) => new Date(ms).getDay() === 1));
+  check("median", flowlib.median([1, 5, 3]) === 3 && flowlib.median([2, 4]) === 3 && flowlib.median([]) === 0);
+
+  const day = (ms, n) => new Date(ms - n * 86400000).toISOString();
+  const rows = [
+    // команда A: 3 задачи на прошлой неделе (2 из них — эпик), 1 двумя неделями раньше
+    { key: "F-1", resolved: day(now, 5), assigneeLogin: "ivan", epicKey: "EP-1" },
+    { key: "F-2", resolved: day(now, 6), assigneeLogin: "ivan", epicKey: "EP-1" },
+    { key: "F-3", resolved: day(now, 7), assigneeLogin: "ivan", epicKey: "EP-9" },
+    { key: "F-4", resolved: day(now, 14), assigneeLogin: "ivan", epicKey: "EP-9" },
+    // команда B: одна задача эпика
+    { key: "F-5", resolved: day(now, 8), assigneeLogin: "olga", epicKey: "EP-1" },
+    // вне окна: текущая неделя и слишком старое
+    { key: "F-6", resolved: day(now, 1), assigneeLogin: "ivan", epicKey: "EP-1" },
+    { key: "F-7", resolved: day(now, 120), assigneeLogin: "ivan", epicKey: "EP-1" }
+  ];
+  const teamA = { id: "t:1", name: "A", color: 0 };
+  const teamB = { id: "t:2", name: "B", color: 1 };
+  const model = flowlib.buildFlow({ rows, weeks: 4, now, teamOf: (p) => (p.login === "ivan" ? teamA : p.login === "olga" ? teamB : null) });
+  const a = model.teams.find((x) => x.team.id === "t:1");
+  check("завершения текущей и слишком старой недели в поток не попали", a.total === 4, String(a.total));
+  check("недели без завершений остаются нулями", a.perWeek.join(",") === "0,1,3", a.perWeek.join(","));
+  const share = flowlib.epicShare(a, "EP-1");
+  check("доля потока команды на эпик — в задачах", share.done === 2 && share.total === 4 && Math.round(share.share * 100) === 50,
+    JSON.stringify(share));
+  check("медиана и пик потока", a.median === 1 && a.max === 3, `${a.median} / ${a.max}`);
+  check("вторая команда считается отдельно", flowlib.epicShare(model.teams.find((x) => x.team.id === "t:2"), "EP-1").done === 1);
+  check("человек без команды — отдельная строка", flowlib.buildFlow({ rows, weeks: 4, now, teamOf: () => null }).teams.length === 1);
+  // ряд задач эпика по неделям — для гистограммы
+  const withEpic = flowlib.buildFlow({ rows, weeks: 4, now, epicKey: "EP-1", teamOf: (p) => (p.login === "ivan" ? teamA : teamB) });
+  const ae = withEpic.teams.find((x) => x.team.id === "t:1");
+  check("ряд эпика по неделям не больше общего потока", ae.epicPerWeek.join(",") === "0,0,2" && ae.perWeek.join(",") === "0,1,3",
+    `${ae.epicPerWeek.join(",")} / ${ae.perWeek.join(",")}`);
+  check("без epicKey ряд эпика пустой", flowlib.buildFlow({ rows, weeks: 4, now, teamOf: () => teamA }).teams[0].epicPerWeek.every((n) => n === 0));
+  // доля за период активности: эпик жил только последнюю неделю (2 из 3), а за всё окно — 2 из 4
+  const se = flowlib.epicShare(ae, "EP-1");
+  check("доля за период активности не размывается пустыми неделями",
+    se.active.weeks === 1 && se.active.done === 2 && se.active.total === 3 && Math.round(se.active.share * 100) === 67,
+    JSON.stringify(se.active));
+  check("доля за всё окно осталась прежней", se.done === 2 && se.total === 4 && Math.round(se.share * 100) === 50);
+  const seOpen = flowlib.epicShare(ae, "EP-1", { open: true });
+  check("у незакрытого эпика период тянется до конца окна", seOpen.active.to === ae.perWeek.length - 1);
+  check("для прогноза берётся свежая доля", Math.round(flowlib.forecastShare(se) * 100) === 67);
+  const noEpic = flowlib.epicShare(ae, "EP-404");
+  check("у чужого эпика периода активности нет", noEpic.active === null && noEpic.share === 0);
+}
+
+// 2g. прогноз срока по потоку (детерминированный генератор)
+{
+  const seq = (() => { let i = 0; const vals = [0.1, 0.5, 0.9, 0.3, 0.7]; return () => vals[i++ % vals.length]; })();
+  const teamA = { id: "t:1", name: "A" };
+  const teamB = { id: "t:2", name: "B" };
+  // A: поток 10/нед, на эпик идёт половина → 5 задач/нед, осталось 20 → 4 недели
+  // B: поток 2/нед, на эпик идёт половина → 1 задача/нед, осталось 10 → 10 недель (замыкающая)
+  const fc = flowlib.forecastDelivery({
+    teams: [
+      { team: teamA, perWeek: [10, 10, 10, 10, 10], share: 0.5, remaining: 20 },
+      { team: teamB, perWeek: [2, 2, 2, 2, 2], share: 0.5, remaining: 10 }
+    ],
+    runs: 500,
+    rnd: seq
+  });
+  check("срок прогона — максимум по командам, а не сумма", fc.weeks.p50 === 10 && fc.weeks.p85 === 10, JSON.stringify(fc.weeks));
+  check("замыкающей названа медленная команда", fc.last[0].team.id === "t:2" && fc.last[0].pct === 100, JSON.stringify(fc.last.map((x) => `${x.team.id}:${x.pct}`)));
+  check("даты считаются от недель", Math.round((fc.dates.p50 - Date.now()) / (7 * 86400000)) === 10);
+
+  // доля потока решает: при доле 20% тот же объём занимает вдвое больше недель
+  const slow = flowlib.forecastDelivery({ teams: [{ team: teamA, perWeek: [10, 10], share: 0.2, remaining: 20 }], runs: 200, rnd: seq });
+  const fast = flowlib.forecastDelivery({ teams: [{ team: teamA, perWeek: [10, 10], share: 0.4, remaining: 20 }], runs: 200, rnd: seq });
+  check("доля потока прямо влияет на срок", slow.weeks.p50 === 10 && fast.weeks.p50 === 5, `${slow.weeks.p50} / ${fast.weeks.p50}`);
+
+  check("разброс истории даёт разброс сроков", (() => {
+    const varied = flowlib.forecastDelivery({ teams: [{ team: teamA, perWeek: [0, 2, 10], share: 1, remaining: 10 }], runs: 2000 });
+    return varied.weeks.p95 > varied.weeks.p50;
+  })());
+  check("без остатка задач прогноза нет", flowlib.forecastDelivery({ teams: [{ team: teamA, perWeek: [5], share: 1, remaining: 0 }] }) === null);
+  check("при нулевом потоке прогноза нет", flowlib.forecastDelivery({ teams: [{ team: teamA, perWeek: [0, 0], share: 1, remaining: 5 }] }) === null);
+  check("порог истории: 5 недель минимум, 12 надёжно", flowlib.FORECAST_MIN_WEEKS === 5 && flowlib.FORECAST_OK_WEEKS === 12);
+}
+
 // 3. модель по эпикам
 const m1 = agg.buildModel({ issues, sprints, epics, boards, mode: "epicPeople" });
 const ep1 = m1.groups.find((g) => g.key === "EP-1");
@@ -270,6 +403,22 @@ check("sprintCapacity = 1д × 8ч", agg.sprintCapacity() === 8 * H, String(agg.
 await settings.save({ estimateField: "points" });
 check("для story points подсветка перегруза выключена", agg.sprintCapacity() === 0);
 await settings.save({ estimateField: "original" });
+// «По людям» — про загрузку: считаем остаток, если поле заполнено, иначе исходную оценку
+{
+  const half = { ...mk("R-1", "EP-1", "AAA", "Zoe", 2, 8, "prog"), remainingEstimate: 2 * H };
+  const empty = { ...mk("R-2", "EP-1", "AAA", "Zoe", 2, 8, "prog"), remainingEstimate: null };
+  const finished = { ...mk("R-3", "EP-1", "AAA", "Zoe", 2, 8, "done"), remainingEstimate: 0 };
+  check("оценка остатка: заполненный remaining побеждает original", agg.workEstimateOf(half) === 2 * H, String(agg.workEstimateOf(half) / H));
+  check("оценка остатка: пустой remaining откатывается на original", agg.workEstimateOf(empty) === 8 * H, String(agg.workEstimateOf(empty) / H));
+  check("оценка остатка: нулевой remaining — это ноль, а не откат", agg.workEstimateOf(finished) === 0, String(agg.workEstimateOf(finished)));
+  const set = [half, empty, finished];
+  const load = agg.buildModel({ issues: set, others: [], sprints, epics, boards, mode: "assignee" });
+  const zoe = load.groups.find((g) => g.key === "zoe");
+  check("«По людям»: секция считается по остатку", zoe.cells.get("sec:0").sum === 10 * H, String(zoe.cells.get("sec:0").sum / H));
+  check("«По людям»: итог человека тоже по остатку", zoe.sum === 10 * H, String(zoe.sum / H));
+  const plan = agg.buildModel({ issues: set, others: [], sprints, epics, boards, mode: "epicPeople" });
+  check("«По эпикам»: оценка осталась прежней", plan.groups[0].cells.get("sec:0").sum === 24 * H, String(plan.groups[0].cells.get("sec:0").sum / H));
+}
 check("Ivan: прочие эпики — 1 задача / 8ч", ivan.otherCount === 1 && ivan.otherSum === 8 * H, `${ivan.otherCount} / ${ivan.otherSum / H}`);
 check("Ivan: целевые итоги не смешаны с прочими", ivan.count === 4 && ivan.sum === 58 * H, `${ivan.count} / ${ivan.sum / H}`);
 check("Ivan: прочие в секции 0 по спринту 2", ivan.otherCells.get("sec:0")?.bySprint.get(2)?.count === 1);
@@ -420,7 +569,8 @@ try { parseConfig("{oops"); } catch (e) { badJson = e.message; }
 check("parseConfig: битый JSON — понятная ошибка", badJson.startsWith(t("cfg.badJson", { msg: "" }).slice(0, 12)), badJson);
 await settings.save({ infoSystems: ["1С CRM"], fields: { plannedStart: "customfield_10407", plannedEnd: "customfield_10408", epicAssignee: "assignee", epicReporter: "reporter" } });
 const ec = await exportConfig();
-check("exportConfig: версия, адрес Jira, поля, системы, эпики, люди", ec.version === 1 && ec.baseUrl === settings.get().baseUrl && ec.fields.plannedStart === "customfield_10407" && ec.infoSystems.join() === "1С CRM" && Array.isArray(ec.epics) && Array.isArray(ec.people), JSON.stringify(ec).slice(0, 200));
+check("exportConfig: версия, адрес Jira, поля, системы, эпики, люди", ec.version === 2 && ec.baseUrl === settings.get().baseUrl && ec.fields.plannedStart === "customfield_10407" && ec.infoSystems.join() === "1С CRM" && Array.isArray(ec.epics) && Array.isArray(ec.people), JSON.stringify(ec).slice(0, 200));
+check("exportConfig: справочник команд и команда человека попадают в файл", Array.isArray(ec.teams) && ec.people.every((x) => "team" in x), JSON.stringify(ec.teams));
 await settings.save({ infoSystems: [], fields: { plannedStart: "", plannedEnd: "", epicAssignee: "assignee", epicReporter: "reporter" } });
 
 // применение без Jira (поля по id, эпиков нет): база очищается, справочник заменяется, профили создаются
@@ -434,8 +584,69 @@ check("applyConfig: справочник систем заменён конфи�
 const newProf = (await dbm.all(dbm.STORES.people)).find((p) => p.name === "новый");
 check("applyConfig: профиль создан, роль и статус по подписям", newProf?.role === "onec" && newProf?.status === "outstaff" && newProf.systems.join() === "A,C", JSON.stringify(newProf));
 check("applyConfig: поле по id записано", settings.get().fields.plannedStart === "customfield_1");
+// команды: справочник из конфига + команда, названная только у человека
+await applyConfig(parseConfig(JSON.stringify({ teams: "1C, Платформы данных", people: [{ name: "Зоя", team: "QA" }] })), { onLog: () => {} });
+check("applyConfig: справочник команд заменён конфигом + команда человека", settings.get().teams.join(",") === "1C,Платформы данных,QA", settings.get().teams.join(","));
+const zoeProf = (await dbm.all(dbm.STORES.people)).find((p) => p.name === "зоя");
+check("applyConfig: команда записана в профиль", zoeProf?.team === "QA", JSON.stringify(zoeProf));
 await dbm.clearEverything();
 await settings.save({ infoSystems: [], fields: { plannedStart: "", plannedEnd: "", epicAssignee: "assignee", epicReporter: "reporter" } });
+
+// 4e. ручное распределение по командам (вкладка «Команда») — когда Tempo API закрыт
+{
+  const profiles = [
+    { name: "ivan", displayName: "Ivan", login: "ivan", key: "ivan", team: "Платформа" },
+    { name: "olga", displayName: "Olga", login: "olga", key: "olga", team: "Биллинг" },
+    { name: "petr", displayName: "Petr", login: "petr", key: "petr", team: "" }
+  ];
+  const manual = agg.buildManualTeams(profiles);
+  check("ручные команды: только непустые, по алфавиту", [...manual.teams.values()].map((x) => x.name).join(",") === "Биллинг,Платформа",
+    [...manual.teams.values()].map((x) => x.name).join(","));
+  check("человек без команды остаётся без неё", manual.of({ login: "petr", name: "Petr" }) === null);
+  check("сопоставление по логину и по имени", manual.of({ login: "ivan" }).name === "Платформа" && manual.of({ name: "Olga" }).name === "Биллинг");
+
+  const byManual = agg.buildModel({ issues, others, sprints, epics, boards, tempo: [], profiles, mode: "assignee" });
+  const ivanM = byManual.groups.find((g) => g.key === "ivan");
+  check("«По людям»: без Tempo команда берётся из вкладки «Команда»", ivanM.team?.name === "Платформа", ivanM.team?.name);
+  const tempoTeams = [{ id: 2, name: "1C", members: [{ key: "", login: "ivan", name: "Ivan" }] }];
+  const withTempo = agg.buildModel({ issues, others, sprints, epics, boards, tempo: tempoTeams, profiles, mode: "assignee" });
+  check("ручная команда важнее Tempo", withTempo.groups.find((g) => g.key === "ivan").team?.name === "Платформа",
+    withTempo.groups.find((g) => g.key === "ivan").team?.name);
+  const noProfiles = agg.buildModel({ issues, others, sprints, epics, boards, tempo: [], mode: "assignee" });
+  check("без профилей команда по-прежнему по доске", noProfiles.groups.find((g) => g.key === "ivan").team?.name === "Alpha",
+    noProfiles.groups.find((g) => g.key === "ivan").team?.name);
+  await settings.save({ teams: ["QA"] });
+  check("список команд = справочник + проставленные людям", teamsList(profiles).join(",") === "QA,Платформа,Биллинг", teamsList(profiles).join(","));
+  await settings.save({ teams: [] });
+}
+
+// 4f. проверка доступности API перед выгрузкой
+{
+  const orig = window.fetch;
+  const json = (obj, status = 200) => new Response(JSON.stringify(obj), { status, headers: { "Content-Type": "application/json" } });
+  window.fetch = async (url) => {
+    const u = String(url);
+    if (u.includes("/rest/api/2/myself")) return json({ name: "ivan" });
+    if (u.includes("/rest/api/2/search")) return json({ issues: [], total: 0 });
+    if (u.includes("/rest/agile/1.0/board")) return json({ errorMessages: ["no permission"] }, 403);
+    if (u.includes("/rest/tempo-teams")) return json({ errorMessages: ["not installed"] }, 404);
+    return json({}, 404);
+  };
+  await settings.save({ useTempoTeams: true });
+  const st = await checkApis();
+  check("проверка API: ядро и поиск доступны", st.core.ok && st.search.ok && st.ok, JSON.stringify({ core: st.core.ok, search: st.search.ok }));
+  check("проверка API: закрытые Agile и Tempo помечены", !st.agile.ok && !st.tempo.ok && st.limited === true, JSON.stringify({ agile: st.agile.code, tempo: st.tempo.code }));
+  await settings.save({ useTempoTeams: false });
+  check("выключённый Tempo проверкой не считается ошибкой", (await checkApis()).tempo.skipped === true);
+  await settings.save({ useTempoTeams: true });
+  window.fetch = async () => json({ errorMessages: ["denied"] }, 403);
+  const denied = await checkApis();
+  check("недоступное ядро валит проверку целиком", !denied.core.ok && !denied.ok && !denied.search.ok, JSON.stringify(denied.core));
+  window.fetch = orig;
+}
+
+// 4g. умолчания настроек
+check("окно истории потока по умолчанию — 52 недели", settings.DEFAULTS.flowWeeks === 52, String(settings.DEFAULTS.flowWeeks));
 
 // 5. форматирование оценок
 check("fmtEstimate 4ч", agg.fmtEstimate(4 * H) === "4ч", agg.fmtEstimate(4 * H));
@@ -748,6 +959,38 @@ g4.remove();
   check("пиктограмма включена, подсказка с причинами", critBtn2.classList.contains("on") && critBtn2.title.includes("B-Sprint 1"));
   critBtn2.click();
   check("повторный клик снимает подсветку", g3.querySelectorAll(".bar.crit, .crit-row").length === 0);
+}
+
+// 9c. позиционирование всплывающих окон (размеры окна подменяем: панель может быть скрыта)
+{
+  const realW = window.innerWidth;
+  const realH = window.innerHeight;
+  Object.defineProperty(window, "innerWidth", { value: 1200, configurable: true });
+  Object.defineProperty(window, "innerHeight", { value: 800, configurable: true });
+  const anchor = document.createElement("button");
+  Object.assign(anchor.style, { position: "fixed", left: "40px", top: "760px", width: "20px", height: "20px" });
+  document.body.append(anchor);
+  const box = document.createElement("div");
+  box.className = "tooltip";
+  Object.assign(box.style, { width: "300px", height: "260px", maxHeight: "none" });
+  document.body.append(box);
+
+  gantt.placePopover(box, anchor);
+  let top = parseFloat(box.style.top);
+  check("окно у нижнего края экрана не уезжает за границу", top >= 8 && top + 260 <= 800, `${top} + 260`);
+  box.style.height = "420px";
+  gantt.placePopover(box, anchor);
+  top = parseFloat(box.style.top);
+  check("после роста содержимого окно всё ещё в экране", top >= 8 && top + 420 <= 800, `${top} + 420`);
+  anchor.style.top = "10px";
+  gantt.placePopover(box, anchor);
+  check("у верхнего края окно открывается вниз", parseFloat(box.style.top) >= 30, box.style.top);
+  check("окно не выходит за правый край", parseFloat(box.style.left) + 300 <= 1200);
+
+  box.remove();
+  anchor.remove();
+  Object.defineProperty(window, "innerWidth", { value: realW, configurable: true });
+  Object.defineProperty(window, "innerHeight", { value: realH, configurable: true });
 }
 
 // 10. комментарии эпика (Jira подменена заглушкой)

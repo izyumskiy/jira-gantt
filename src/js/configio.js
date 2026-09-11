@@ -8,8 +8,10 @@
 //   "fields":      { "plannedStart": "customfield_10407", "plannedEnd": "Planned End",
 //                    "epicAssignee": "assignee", "epicReporter": "reporter" },
 //   "infoSystems": ["1С CRM", "..."],
+//   "teams":       ["1C", "Платформы данных"],
 //   "epics":       ["PRJ-1", "PRJ-2"],
-//   "people":      [{ "name": "Иван Ёлкин", "role": "developer", "status": "staff", "systems": ["1С CRM"] }]
+//   "people":      [{ "name": "Иван Ёлкин", "role": "developer", "status": "staff",
+//                     "systems": ["1С CRM"], "team": "1C" }]
 // }
 // Поле можно задать id (customfield_NNN / assignee / reporter / creator) или названием — тогда id
 // ищется в Jira по имени и JQL-имени. Роль — id (developer, frontend, backend, onec, qa, analytic,
@@ -22,7 +24,7 @@ import * as jira from "./jira.js";
 import * as sync from "./sync.js";
 import { ROLES, STATUSES, normName, parseSystems, mergeProfiles, collectPeople } from "./team.js";
 
-export const CONFIG_VERSION = 1;
+export const CONFIG_VERSION = 2;
 const FIELD_KEYS = ["plannedStart", "plannedEnd", "epicAssignee", "epicReporter"];
 const STANDARD_FIELDS = new Set(["assignee", "reporter", "creator", "duedate", "created"]);
 
@@ -38,6 +40,7 @@ export function parseConfig(text) {
     baseUrl: String(cfg.baseUrl || cfg.jiraUrl || "").trim().replace(/\/+$/, ""),
     fields: cfg.fields && typeof cfg.fields === "object" ? cfg.fields : {},
     infoSystems: Array.isArray(cfg.infoSystems) ? cfg.infoSystems : typeof cfg.infoSystems === "string" ? parseSystems(cfg.infoSystems) : [],
+    teams: Array.isArray(cfg.teams) ? cfg.teams : typeof cfg.teams === "string" ? parseSystems(cfg.teams) : [],
     epics: Array.isArray(cfg.epics) ? cfg.epics.map((k) => String(k).trim()).filter(Boolean) : [],
     people: Array.isArray(cfg.people) ? cfg.people.filter((p) => p && typeof p === "object" && p.name) : []
   };
@@ -89,10 +92,12 @@ export async function applyConfig(cfg, { onLog = () => {} } = {}) {
       log(t("cfg.error", { msg: e.message }));
     }
   }
-  // Конфиг — источник истины: справочник систем берём из него целиком (старый не смешиваем).
+  // Конфиг — источник истины: справочники систем и команд берём из него целиком (старые не смешиваем).
   const systems = [...new Set(cfg.infoSystems.map((x) => String(x).trim()).filter(Boolean))];
-  await settings.save({ fields, infoSystems: systems });
+  const teams = [...new Set(cfg.teams.map((x) => String(x).trim()).filter(Boolean))];
+  await settings.save({ fields, infoSystems: systems, teams });
   log(t("cfg.systemsSet", { n: systems.length }));
+  if (teams.length) log(t("cfg.teamsSet", { n: teams.length }));
 
   // 2. Эпики: находим в Jira и добавляем к сохранённым.
   let addedEpics = [];
@@ -118,23 +123,28 @@ export async function applyConfig(cfg, { onLog = () => {} } = {}) {
     const profiles = await db.all(db.STORES.people);
     const byName = new Map(profiles.map((p) => [p.name, p]));
     const extraSystems = new Set(systems);
+    const extraTeams = new Set(teams);
     let applied = 0;
     for (const p of cfg.people) {
       const name = normName(p.name);
-      const cur = byName.get(name) || { name, displayName: String(p.name).trim(), login: "", key: "", role: "", systems: [], status: "" };
+      const cur = byName.get(name) || { name, displayName: String(p.name).trim(), login: "", key: "", role: "", systems: [], status: "", team: "" };
       const role = p.role !== undefined ? roleId(p.role) : cur.role;
       const status = p.status !== undefined ? statusId(p.status) : cur.status;
       if (role === null) log(t("cfg.badRole", { name: p.name, role: p.role }));
       if (status === null) log(t("cfg.badStatus", { name: p.name, status: p.status }));
       const sys = Array.isArray(p.systems) ? p.systems.map((x) => String(x).trim()).filter(Boolean) : typeof p.systems === "string" ? parseSystems(p.systems) : cur.systems;
       sys.forEach((x) => extraSystems.add(x));
-      const rec = { ...cur, role: role || "", status: status || "", systems: sys, updatedAt: Date.now() };
+      // Команда человека: имя как есть; незнакомая попадает в справочник, чтобы её было видно в списке.
+      const teamName = p.team !== undefined ? String(p.team || "").trim() : cur.team || "";
+      if (teamName) extraTeams.add(teamName);
+      const rec = { ...cur, role: role || "", status: status || "", systems: sys, team: teamName, updatedAt: Date.now() };
       if (p.login) rec.login = String(p.login);
       byName.set(name, rec);
       applied += 1;
     }
     await db.putAll(db.STORES.people, [...byName.values()]);
     if (extraSystems.size !== systems.length) await settings.save({ infoSystems: [...extraSystems] });
+    if (extraTeams.size !== teams.length) await settings.save({ teams: [...extraTeams] });
     log(t("cfg.peopleSaved", { n: applied }));
   }
   return { addedEpics };
@@ -160,7 +170,15 @@ export async function exportConfig() {
       epicReporter: s.fields.epicReporter || "reporter"
     },
     infoSystems: s.infoSystems || [],
+    teams: s.teams || [],
     epics: epics.map((e) => e.key),
-    people: rows.map((r) => ({ name: r.displayName, login: r.login || "", role: r.role || "", status: r.status || "", systems: r.systems || [] }))
+    people: rows.map((r) => ({
+      name: r.displayName,
+      login: r.login || "",
+      role: r.role || "",
+      status: r.status || "",
+      systems: r.systems || [],
+      team: r.team || ""
+    }))
   };
 }

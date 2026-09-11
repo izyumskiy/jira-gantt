@@ -152,6 +152,7 @@ function mapIssue(issue, fields, epicKeyFallback) {
     statusCategory: f.status?.statusCategory?.key || "",
     typeName: f.issuetype?.name || "",
     updated: f.updated || "",
+    resolved: f.resolutiondate || "", // дата завершения — для потока и диагностики
     // Списания: с подзадачами (aggregatetimespent), если Jira отдала, иначе по самой задаче.
     timeSpent: Number(f.aggregatetimespent ?? f.timespent) || 0,
     originalEstimate: f.timeoriginalestimate ?? null,
@@ -318,6 +319,118 @@ async function loadOthers({ collected, full, fields, fieldList, epicKeys, onProg
   return out;
 }
 
+// ---------- история потока (завершённые задачи) ----------
+
+// Логины, по которым собираем историю: участники команд Tempo, иначе исполнители из выгрузки.
+function flowLogins(tempo, issues, others) {
+  const set = new Set();
+  for (const team of tempo) for (const m of team.members || []) if (m.login) set.add(m.login);
+  if (!set.size) for (const i of [...issues, ...others]) if (i.assigneeLogin) set.add(i.assigneeLogin);
+  return [...set];
+}
+
+// История завершений за окно: задачи с датой резолюции. Это основа недельного потока команд.
+export async function refreshFlow({ tempo, issues, others, onProgress = () => {} }) {
+  const weeks = Number(settings.get().flowWeeks) || 52;
+  const logins = flowLogins(tempo, issues, others);
+  if (!logins.length) return { weeks, logins: 0, issues: 0, skipped: true };
+
+  const fields = settings.get().fields;
+  const fieldList = ["summary", "project", "status", "resolutiondate", "assignee", fields.epicLink].filter(Boolean);
+  const out = [];
+  for (let i = 0; i < logins.length; i += 25) {
+    const chunk = logins.slice(i, i + 25).map((l) => `"${jira.escapeJql(l)}"`).join(",");
+    const jql = `assignee in (${chunk}) AND resolutiondate >= -${weeks}w ORDER BY resolutiondate DESC`;
+    const rows = await jira.search(jql, fieldList, (n) => onProgress(t("st.flowLoading", { n: out.length + n })));
+    for (const it of rows) {
+      const f = it.fields || {};
+      const a = f.assignee || {};
+      out.push({
+        key: it.key,
+        resolved: f.resolutiondate || "",
+        assigneeKey: a.key || a.name || "",
+        assigneeLogin: a.name || "",
+        assigneeName: a.displayName || a.name || "",
+        epicKey: (fields.epicLink && f[fields.epicLink]) || "",
+        projectKey: f.project?.key || "",
+        statusName: f.status?.name || ""
+      });
+    }
+  }
+  await db.clear(db.STORES.flow);
+  await db.putAll(db.STORES.flow, out);
+  return { weeks, logins: logins.length, issues: out.length };
+}
+
+// ---------- команды Tempo ----------
+
+// Состав команды: форма ответа у версий Tempo различается, поэтому читаем терпимо —
+// участник может лежать в поле member или прямо в строке, даты членства — в membership.
+function mapTempoMember(row) {
+  const m = (row && row.member) || row || {};
+  const period = (row && row.membership) || row || {};
+  const key = m.key || m.accountId || "";
+  const login = m.name || m.username || "";
+  const name = m.displayName || m.name || "";
+  if (!key && !login && !name) return null;
+  return { key, login, name, dateFrom: period.dateFrom || "", dateTo: period.dateTo || "" };
+}
+
+// Действующее членство: без дат — считаем действующим.
+function isActiveMember(m, today = new Date().toISOString().slice(0, 10)) {
+  if (m.dateFrom && m.dateFrom > today) return false;
+  if (m.dateTo && m.dateTo < today) return false;
+  return true;
+}
+
+// Проверка доступности API перед выгрузкой: что именно из нужного закрыто. Ничего не качает —
+// только лёгкие пробы. core/search обязательны, agile и tempo — опциональные источники.
+export async function checkApis(onProgress = () => {}) {
+  onProgress(t("st.apiCheck"));
+  const probe = async (fn) => {
+    try {
+      await fn();
+      return { ok: true, code: 0, msg: "" };
+    } catch (e) {
+      return { ok: false, code: e && e.code ? e.code : 0, msg: e && e.message ? e.message : String(e) };
+    }
+  };
+  const core = await probe(() => jira.myself());
+  const search = core.ok ? await probe(() => jira.searchProbe()) : { ...core };
+  const agile = core.ok ? await probe(() => jira.boardsProbe()) : { ...core };
+  const tempo = !settings.get().useTempoTeams
+    ? { ok: false, skipped: true, code: 0, msg: "" }
+    : core.ok
+      ? await probe(() => jira.tempoTeams())
+      : { ...core };
+  return { core, search, agile, tempo, ok: core.ok && search.ok, limited: !agile.ok || !tempo.ok };
+}
+
+export async function refreshTempoTeams(onProgress = () => {}) {
+  if (!settings.get().useTempoTeams) return { teams: 0, members: 0, skipped: true };
+  onProgress(t("st.tempoLoading"));
+  const teams = await jira.tempoTeams();
+  const list = Array.isArray(teams) ? teams : [];
+  const out = [];
+  for (let i = 0; i < list.length; i += 5) {
+    await Promise.all(
+      list.slice(i, i + 5).map(async (team) => {
+        let members = [];
+        try {
+          const rows = await jira.tempoTeamMembers(team.id);
+          members = (Array.isArray(rows) ? rows : []).map(mapTempoMember).filter(Boolean).filter(isActiveMember);
+        } catch (e) {
+          console.warn("[OhMyGant] tempo members failed", team.id, e && e.message ? e.message : e);
+        }
+        out.push({ id: Number(team.id), name: team.name || `#${team.id}`, members });
+      })
+    );
+  }
+  await db.clear(db.STORES.tempo);
+  await db.putAll(db.STORES.tempo, out);
+  return { teams: out.length, members: out.reduce((n, x) => n + x.members.length, 0) };
+}
+
 // ---------- обновление спринтов ----------
 
 // Смена дат спринта в Jira не меняет `updated` у задач, поэтому спринты перечитываем всегда:
@@ -429,10 +542,15 @@ function jqlDate(ms) {
 
 // Версия набора полей задачи в базе. Растёт, когда mapIssue начинает сохранять новые поля:
 // инкрементальное обновление их у старых задач не добавит, поэтому один раз делаем полную выгрузку.
-const ISSUE_SCHEMA = 2;
+const ISSUE_SCHEMA = 3;
 
 // full = true — скачиваем задачи целиком, иначе только изменённые с прошлой синхронизации.
 export async function sync({ full = false, onProgress = () => {} } = {}) {
+  // Сначала проверяем, что нужные API вообще отвечают: иначе пользователь получит неполные данные
+  // и не поймёт почему.
+  const apiStats = await checkApis(onProgress);
+  if (!apiStats.core.ok) throw new jira.JiraError(t("err.apiCore", { msg: apiStats.core.msg }), apiStats.core.code);
+  if (!apiStats.search.ok) throw new jira.JiraError(t("err.apiSearch", { msg: apiStats.search.msg }), apiStats.search.code);
   const fields = await ensureFields();
   if (!fields.epicLink) throw new jira.JiraError(t("err.noEpicField"), 0);
   if (!full && (await db.metaGet("issueSchema", 0)) < ISSUE_SCHEMA) {
@@ -441,7 +559,7 @@ export async function sync({ full = false, onProgress = () => {} } = {}) {
   }
 
   const epics = await db.all(db.STORES.epics);
-  if (!epics.length) return { issues: 0, sprints: 0 };
+  if (!epics.length) return { issues: 0, sprints: 0, apiStats };
 
   const since = full ? 0 : settings.get().lastSync || 0;
   const fieldList = [
@@ -455,6 +573,7 @@ export async function sync({ full = false, onProgress = () => {} } = {}) {
     "timeestimate",
     "timespent",
     "aggregatetimespent",
+    "resolutiondate",
     fields.epicLink,
     fields.sprint
   ];
@@ -519,6 +638,26 @@ export async function sync({ full = false, onProgress = () => {} } = {}) {
     // Статус эпика — украшение: если запрос не прошёл, оставляем сохранённые данные.
   }
 
+  // Команды Tempo — необязательный источник: если дополнения нет или нет прав, просто пропускаем.
+  let tempoStats = null;
+  let tempoError = "";
+  try {
+    tempoStats = await refreshTempoTeams(onProgress);
+  } catch (e) {
+    tempoError = e && e.message ? e.message : String(e);
+    console.warn("[OhMyGant] tempo teams unavailable", tempoError);
+  }
+
+  // История потока — основа прогноза сроков; сбой здесь не должен ронять синхронизацию.
+  let flowStats = null;
+  try {
+    const tempoRows = await db.all(db.STORES.tempo);
+    flowStats = await refreshFlow({ tempo: tempoRows, issues: collected, others, onProgress });
+  } catch (e) {
+    console.warn("[OhMyGant] flow history unavailable", e && e.message ? e.message : e);
+    flowStats = { error: e && e.message ? e.message : String(e) };
+  }
+
   onProgress(t("st.sprintsLoading"));
   const sprintStats = await refreshSprints(sprintMap);
 
@@ -542,5 +681,5 @@ export async function sync({ full = false, onProgress = () => {} } = {}) {
   await db.metaSet("issueSchema", ISSUE_SCHEMA);
   await settings.save({ lastSync: Date.now() });
   onProgress(t("st.done"));
-  return { issues: collected.length, sprints: sprintMap.size, others: others.length, othersError, sprintStats };
+  return { issues: collected.length, sprints: sprintMap.size, others: others.length, othersError, sprintStats, tempoStats, tempoError, flowStats, apiStats };
 }

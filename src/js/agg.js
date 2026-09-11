@@ -19,6 +19,18 @@ export function estimateOf(issue) {
   return Number(issue.originalEstimate) || 0;
 }
 
+// Оценка оставшейся работы: «По людям» показывает загрузку, а не план, поэтому там берётся
+// remaining estimate, если поле заполнено, и только при пустом — original estimate. Нулевой
+// остаток — это заполненное поле: у доделанной задачи работы действительно не осталось.
+// Для story points остатка в Jira нет — работает обычная оценка.
+export function workEstimateOf(issue) {
+  if (isCancelledStatus(issue.statusName)) return 0;
+  if (settings.get().estimateField === "points") return Number(issue.storyPoints) || 0;
+  const rem = issue.remainingEstimate;
+  if (rem !== null && rem !== undefined && rem !== "") return Number(rem) || 0;
+  return Number(issue.originalEstimate) || 0;
+}
+
 // Ёмкость спринта в единицах оценки: длительность спринта (рабочих дней) × часов в дне.
 // Для story points сравнивать не с чем — возвращаем 0 (подсветка перегруза выключена).
 export function sprintCapacity() {
@@ -186,12 +198,128 @@ export function timeline(sprints, issues, now = Date.now()) {
 const TEAM_COLORS = 8;
 
 // Команды = доски: у каждой свой цвет (индекс палитры), безкомандные спринты — серые.
+// Слова, которые не могут быть именем команды: служебные и любые числа/даты.
+const SPRINT_STOP = /^(sprint\d*|спринт[а-яё]*|служебн[а-яё]*|доска|board|the)$/i;
+const isNumberish = (w) => /^[\d.,/-]+$/.test(w);
+
+// Имя доски из названий её спринтов: у команд оно обычно зашито в название
+// («20.2026 WEB[08.10 - 21.10]» → WEB). Берём слово, которое встречается чаще других.
+export function nameFromSprints(names) {
+  const freq = new Map();
+  for (const raw of names) {
+    const clean = String(raw || "")
+      .replace(/\[[^\]]*\]/g, " ") // диапазоны дат в скобках
+      .replace(/[()«»"'|]/g, " ")
+      .trim();
+    const seen = new Set();
+    for (const word of clean.split(/[\s,;:_—–-]+/)) {
+      const w = word.trim();
+      if (w.length < 2 || isNumberish(w) || SPRINT_STOP.test(w) || !/[\p{L}]/u.test(w)) continue;
+      const key = w.toLowerCase();
+      if (seen.has(key)) continue; // одно слово — один голос от спринта
+      seen.add(key);
+      if (!freq.has(key)) freq.set(key, { word: w, count: 0 });
+      freq.get(key).count += 1;
+    }
+  }
+  const best = [...freq.values()].sort(
+    (a, b) => b.count - a.count || b.word.length - a.word.length || a.word.localeCompare(b.word)
+  )[0];
+  return best ? best.word : "";
+}
+
+// Команды Tempo: соответствие человек → команда. Ключ, логин и имя — три способа найти,
+// потому что в задачах Jira отдаёт то одно, то другое.
+// Ключ сопоставления человека: имя без регистра, лишних пробелов и «ё».
+const normPerson = (v) => String(v || "").trim().replace(/\s+/g, " ").toLowerCase().replace(/ё/g, "е");
+
+// Ручное распределение по командам из вкладки «Команда». Нужно, когда Tempo API закрыт: без него
+// люди разошлись бы по доскам или остались без команды. Профили хранят уже нормализованное имя.
+export function buildManualTeams(profiles = []) {
+  const names = [...new Set(profiles.map((p) => String(p.team || "").trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+  const teams = new Map();
+  names.forEach((name, i) => teams.set(`m:${name}`, { id: `m:${name}`, name, color: i % TEAM_COLORS, manual: true }));
+  const byName = new Map();
+  const byLogin = new Map();
+  const byKey = new Map();
+  for (const p of profiles) {
+    const team = teams.get(`m:${String(p.team || "").trim()}`);
+    if (!team) continue;
+    if (p.name) byName.set(normPerson(p.name), team);
+    if (p.login) byLogin.set(String(p.login).toLowerCase(), team);
+    if (p.key) byKey.set(String(p.key).toLowerCase(), team);
+  }
+  const of = (person) => {
+    if (!person) return null;
+    return (
+      byKey.get(String(person.key || "").toLowerCase()) ||
+      byLogin.get(String(person.login || "").toLowerCase()) ||
+      byName.get(normPerson(person.name)) ||
+      null
+    );
+  };
+  return { teams, of, size: teams.size };
+}
+
+export function buildTempoIndex(tempo) {
+  const byKey = new Map();
+  const byLogin = new Map();
+  const byName = new Map();
+  const teams = new Map();
+  const size = new Map();
+  const norm = (v) => String(v || "").trim().toLowerCase().replace(/ё/g, "е");
+  const add = (map, id, team) => {
+    if (!id) return;
+    if (!map.has(id)) map.set(id, []);
+    if (!map.get(id).includes(team)) map.get(id).push(team);
+  };
+  [...tempo]
+    .sort((a, b) => String(a.name).localeCompare(String(b.name)))
+    .forEach((tm, i) => {
+      const team = { id: `t:${tm.id}`, name: tm.name, color: i % TEAM_COLORS, tempo: true, members: (tm.members || []).length };
+      teams.set(team.id, team);
+      size.set(team.id, (tm.members || []).length);
+      for (const m of tm.members || []) {
+        add(byKey, m.key, team);
+        add(byLogin, m.login, team);
+        add(byName, norm(m.name), team);
+      }
+    });
+  // Человек может числиться в нескольких командах: берём самую малочисленную — она конкретнее,
+  // а команда «по умолчанию» обычно самая большая.
+  const of = (person) => {
+    if (!person) return null;
+    const found = [
+      ...(byKey.get(person.key) || []),
+      ...(byLogin.get(person.login) || []),
+      ...(byName.get(norm(person.name)) || [])
+    ];
+    if (!found.length) return null;
+    return [...new Set(found)].sort((a, b) => size.get(a.id) - size.get(b.id) || a.name.localeCompare(b.name))[0];
+  };
+  return { teams, of, size: teams.size };
+}
+
 function buildTeams(sprints, boards) {
   const boardName = new Map(boards.map((b) => [String(b.id), b.name]));
-  const ids = [...new Set(sprints.map((s) => s.boardId).filter(Boolean).map(String))];
+  const byBoard = new Map();
+  for (const s of sprints) {
+    if (!s.boardId) continue;
+    const id = String(s.boardId);
+    if (!byBoard.has(id)) byBoard.set(id, []);
+    byBoard.get(id).push(s.name);
+  }
   const teams = new Map();
-  ids
-    .map((id) => ({ id, name: boardName.get(id) || `#${id}` }))
+  [...byBoard.keys()]
+    .map((id) => {
+      const known = boardName.get(id);
+      if (known) return { id, name: known, derived: false };
+      // Доска недоступна или удалена — выводим имя из названий её спринтов.
+      const guess = nameFromSprints(byBoard.get(id));
+      return guess
+        ? { id, name: guess, derived: true, hint: t("gantt.teamFromSprints", { id }) }
+        : { id, name: `#${id}`, derived: false };
+    })
     .sort((a, b) => a.name.localeCompare(b.name))
     .forEach((tm, i) => teams.set(tm.id, { ...tm, color: i % TEAM_COLORS }));
   const none = { id: "", name: t("gantt.noTeam"), color: -1 };
@@ -238,9 +366,13 @@ export const BACKLOG_ID = "sec:backlog";
 // others — задачи людей вне целевых эпиков (учитываются только по людям).
 // timelineIssues — по каким задачам строить шкалу времени. Передаётся вся выгрузка, чтобы шкала
 // была одинаковой на всех вкладках и не менялась от фильтров.
-export function buildModel({ issues, others = [], sprints, epics, boards = [], mode, timelineIssues = null }) {
+export function buildModel({ issues, others = [], sprints, epics, boards = [], tempo = [], profiles = [], mode, timelineIssues = null }) {
   const epicLike = mode !== "assignee"; // группы — эпики
+  // «По людям» — про загрузку: берём остаток, если он проставлен, иначе исходную оценку.
+  const estOf = mode === "assignee" ? workEstimateOf : estimateOf;
   const teamsInfo = buildTeams(sprints, boards);
+  const tempoInfo = buildTempoIndex(tempo);
+  const manualInfo = buildManualTeams(profiles);
   const sprintById = new Map(sprints.map((s) => [s.id, s]));
   const columns = timeline(sprints, timelineIssues || [...issues, ...others]);
   // Внутри секции спринты идут по командам, чтобы цвета в колонке не перемешивались.
@@ -308,7 +440,7 @@ export function buildModel({ issues, others = [], sprints, epics, boards = [], m
       });
     }
     const g = groups.get(gk);
-    const est = estimateOf(issue);
+    const est = estOf(issue);
     const done = isDone(issue);
     g.count += 1;
     g.sum += est;
@@ -366,7 +498,7 @@ export function buildModel({ issues, others = [], sprints, epics, boards = [], m
     for (const issue of others) {
       const g = groups.get(issue.assigneeKey || "");
       if (!g) continue; // людей берём только из целевых эпиков
-      const est = estimateOf(issue);
+      const est = estOf(issue);
       g.otherCount += 1;
       g.otherSum += est;
       const ek = issue.epicKey || "";
@@ -422,12 +554,17 @@ export function buildModel({ issues, others = [], sprints, epics, boards = [], m
   }
 
   const list = [...groups.values()].map((g) => {
-    let team = teamsInfo.none;
+    // Команда человека: сначала ручное распределение с вкладки «Команда» (оно же спасает, когда
+    // Tempo API закрыт), затем Tempo, затем доска, где больше его задач.
+    const person = { key: g.key, login: g.login, name: g.label };
+    let team = manualInfo.of(person) || tempoInfo.of(person) || teamsInfo.none;
     let best = 0;
-    for (const [id, n] of g.teamVotes) {
-      if (n > best) {
-        best = n;
-        team = teamsInfo.teams.get(id) || teamsInfo.none;
+    if (team === teamsInfo.none) {
+      for (const [id, n] of g.teamVotes) {
+        if (n > best) {
+          best = n;
+          team = teamsInfo.teams.get(id) || teamsInfo.none;
+        }
       }
     }
     return {

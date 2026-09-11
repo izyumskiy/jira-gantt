@@ -31,7 +31,7 @@ export function collectPeople(issues, others = []) {
 }
 
 function emptyProfile(p) {
-  return { name: p.name, displayName: p.displayName, login: p.login || "", key: p.key || "", role: "", systems: [], status: "" };
+  return { name: p.name, displayName: p.displayName, login: p.login || "", key: p.key || "", role: "", systems: [], status: "", team: "" };
 }
 
 // Люди из выгрузки + их профили; профили тех, кого в выгрузке больше нет, идут в хвост с пометкой.
@@ -68,6 +68,7 @@ export async function saveProfile(row) {
       role: row.role || "",
       systems: [...(row.systems || [])],
       status: row.status || "",
+      team: row.team || "",
       updatedAt: Date.now()
     }
   ]);
@@ -81,6 +82,14 @@ export async function deleteProfile(name) {
 export function systemsList(rows) {
   const set = new Set(settings.get().infoSystems || []);
   for (const r of rows) for (const sName of r.systems || []) set.add(sName);
+  return [...set];
+}
+
+// Справочник команд из настроек + команды, уже проставленные людям (удалённая из справочника
+// не должна пропасть из профиля).
+export function teamsList(rows) {
+  const set = new Set((settings.get().teams || []).filter(Boolean));
+  for (const r of rows) if (r.team) set.add(r.team);
   return [...set];
 }
 
@@ -174,17 +183,19 @@ export async function render(container, { notify = () => {} } = {}) {
   container.append(sum);
 
   // Команда (доска) и объёмы — из той же модели, что и «Гант по людям».
-  const model = agg.buildModel({ issues, others, sprints, epics, boards, mode: "assignee" });
+  const model = agg.buildModel({ issues, others, sprints, epics, boards, profiles, mode: "assignee" });
   const stats = new Map(model.groups.map((g) => [normName(g.label), g]));
 
   const allSystems = systemsList(rows);
+  const allTeams = teamsList(rows);
+  const teamOptions = allTeams.map((x) => [x, x]);
   const roleOptions = ROLES.map((r) => [r, t(`role.${r}`)]);
   const statusOptions = STATUSES.map((st) => [st, t(`pstatus.${st}`)]);
 
   const table = el("table", "team-table");
   const thead = el("thead");
   const hr = el("tr");
-  for (const key of ["#", "team.name", "team.board", "team.issues", "team.role", "team.systems", "team.status", ""]) {
+  for (const key of ["#", "team.name", "team.team", "team.board", "team.issues", "team.role", "team.systems", "team.status", ""]) {
     hr.append(el("th", null, key === "#" || key === "" ? key : t(key)));
   }
   thead.append(hr);
@@ -201,6 +212,21 @@ export async function render(container, { notify = () => {} } = {}) {
     if (sub) nameCell.append(el("div", "muted small", sub));
     tr.append(nameCell);
 
+    const save = async (patch) => {
+      Object.assign(row, patch);
+      await saveProfile(row);
+      notify(t("team.saved"));
+    };
+
+    // Ручная команда: ею распределяются люди на вкладке «По людям», когда Tempo API закрыт.
+    const teamCell = el("td");
+    if (teamOptions.length) {
+      teamCell.append(select(teamOptions, row.team, (v) => save({ team: v })));
+    } else {
+      teamCell.append(el("span", "muted small", t("team.noTeams")));
+    }
+    tr.append(teamCell);
+
     const g = stats.get(row.name);
     tr.append(el("td", null, g && g.team ? g.team.name : t("team.none")));
     const issuesCell = el("td", "tissues");
@@ -212,11 +238,6 @@ export async function render(container, { notify = () => {} } = {}) {
     }
     tr.append(issuesCell);
 
-    const save = async (patch) => {
-      Object.assign(row, patch);
-      await saveProfile(row);
-      notify(t("team.saved"));
-    };
     const roleCell = el("td");
     roleCell.append(select(roleOptions, row.role, (v) => save({ role: v })));
     tr.append(roleCell);

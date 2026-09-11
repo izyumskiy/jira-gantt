@@ -62,6 +62,7 @@
       <section class="page hidden" id="page-people">
         <div class="filter-bar">
           <span id="peopleFilterNote" class="filter-note"></span>
+          <span id="peopleEstNote" class="muted small"></span>
         </div>
         <div id="peopleChart"></div>
       </section>
@@ -116,6 +117,20 @@
             <span data-i18n="set.hoursPerDay"></span>
             <input id="hoursPerDay" type="number" min="1" max="24" step="1" />
           </label>
+          <label class="field check">
+            <input id="useTempoTeams" type="checkbox" />
+            <span data-i18n="set.tempo"></span>
+          </label>
+          <small class="muted" data-i18n="set.tempoHint"></small>
+          <label class="field narrow">
+            <span data-i18n="set.flowWeeks"></span>
+            <input id="flowWeeks" type="number" min="4" max="52" step="1" />
+            <small class="muted" data-i18n="set.flowWeeksHint"></small>
+          </label>
+          <div class="row">
+            <span class="muted" data-i18n="set.flowDiag"></span>
+            <span id="flowDiag" class="muted"></span>
+          </div>
           <label class="field narrow">
             <span data-i18n="set.sprintDays"></span>
             <input id="sprintDays" type="number" min="1" max="60" step="1" />
@@ -130,6 +145,11 @@
             <span data-i18n="set.infoSystems"></span>
             <textarea id="infoSystems" rows="4" placeholder="CRM&#10;Billing&#10;Mobile app"></textarea>
             <small class="muted" data-i18n="set.infoSystemsHint"></small>
+          </label>
+          <label class="field">
+            <span data-i18n="set.teams"></span>
+            <textarea id="teamsList" rows="4" placeholder="1C&#10;Платформы данных&#10;QA"></textarea>
+            <small class="muted" data-i18n="set.teamsHint"></small>
           </label>
           <div class="row">
             <button id="btnDetect" data-i18n="set.detect"></button>
