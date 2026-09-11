@@ -13,6 +13,7 @@ import { parseSprint, datesFromName } from "../src/js/sync.js";
 import { classify, isDoneStatus } from "../src/js/status.js";
 import { collectPeople, mergeProfiles, parseSystems, systemsList, normName, roleSummary } from "../src/js/team.js";
 import { parseConfig, exportConfig, applyConfig } from "../src/js/configio.js";
+import * as flowlib from "../src/js/flow.js";
 import * as dbm from "../src/js/db.js";
 
 const log = document.getElementById("log");
@@ -209,6 +210,43 @@ check("подпись секции — диапазон дат", /^\d{2}\.\d{2} 
   const noTempo = agg.buildModel({ issues, others, sprints, epics, boards, tempo: [], mode: "assignee" });
   check("без Tempo команда по-прежнему по доске", noTempo.groups.find((g) => g.key === "ivan")?.team?.name === "Alpha",
     noTempo.groups.find((g) => g.key === "ivan")?.team?.name);
+}
+
+// 2f. недельный поток и доля эпика
+{
+  const now = new Date(2026, 8, 11, 12, 0, 0).getTime(); // пятница
+  const win = flowlib.fullWeeks(4, now);
+  // из 4 недель запроса остаётся 3 полных: текущая неполная и первая (запрос начался в середине) отброшены
+  check("окно из полных недель: текущая и первая неполная отброшены", new Date(win.to).getDay() === 0 && win.starts.length === 3,
+    `${new Date(win.from).toDateString()} .. ${new Date(win.to).toDateString()} = ${win.starts.length}`);
+  check("границы недель — понедельники", win.starts.every((ms) => new Date(ms).getDay() === 1));
+  check("median", flowlib.median([1, 5, 3]) === 3 && flowlib.median([2, 4]) === 3 && flowlib.median([]) === 0);
+
+  const day = (ms, n) => new Date(ms - n * 86400000).toISOString();
+  const rows = [
+    // команда A: 3 задачи на прошлой неделе (2 из них — эпик), 1 двумя неделями раньше
+    { key: "F-1", resolved: day(now, 5), assigneeLogin: "ivan", epicKey: "EP-1" },
+    { key: "F-2", resolved: day(now, 6), assigneeLogin: "ivan", epicKey: "EP-1" },
+    { key: "F-3", resolved: day(now, 7), assigneeLogin: "ivan", epicKey: "EP-9" },
+    { key: "F-4", resolved: day(now, 14), assigneeLogin: "ivan", epicKey: "EP-9" },
+    // команда B: одна задача эпика
+    { key: "F-5", resolved: day(now, 8), assigneeLogin: "olga", epicKey: "EP-1" },
+    // вне окна: текущая неделя и слишком старое
+    { key: "F-6", resolved: day(now, 1), assigneeLogin: "ivan", epicKey: "EP-1" },
+    { key: "F-7", resolved: day(now, 120), assigneeLogin: "ivan", epicKey: "EP-1" }
+  ];
+  const teamA = { id: "t:1", name: "A", color: 0 };
+  const teamB = { id: "t:2", name: "B", color: 1 };
+  const model = flowlib.buildFlow({ rows, weeks: 4, now, teamOf: (p) => (p.login === "ivan" ? teamA : p.login === "olga" ? teamB : null) });
+  const a = model.teams.find((x) => x.team.id === "t:1");
+  check("завершения текущей и слишком старой недели в поток не попали", a.total === 4, String(a.total));
+  check("недели без завершений остаются нулями", a.perWeek.join(",") === "0,1,3", a.perWeek.join(","));
+  const share = flowlib.epicShare(a, "EP-1");
+  check("доля потока команды на эпик — в задачах", share.done === 2 && share.total === 4 && Math.round(share.share * 100) === 50,
+    JSON.stringify(share));
+  check("медиана и пик потока", a.median === 1 && a.max === 3, `${a.median} / ${a.max}`);
+  check("вторая команда считается отдельно", flowlib.epicShare(model.teams.find((x) => x.team.id === "t:2"), "EP-1").done === 1);
+  check("человек без команды — отдельная строка", flowlib.buildFlow({ rows, weeks: 4, now, teamOf: () => null }).teams.length === 1);
 }
 
 // 3. модель по эпикам

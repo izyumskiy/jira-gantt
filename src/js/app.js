@@ -9,6 +9,7 @@ import * as gantt from "./gantt.js";
 import * as team from "./team.js";
 import { classify, isDoneStatus } from "./status.js";
 import * as configio from "./configio.js";
+import * as flowlib from "./flow.js";
 
 const $ = (sel) => document.querySelector(sel);
 const state = {
@@ -456,6 +457,9 @@ function showEpicInfo(anchor, epic, spent, pct) {
     box.append(tbl);
   }
 
+  const flowBox = document.createElement("div");
+  flowBox.className = "share-block";
+  box.append(flowBox);
   const shares = document.createElement("div");
   shares.className = "share-block";
   box.append(shares);
@@ -463,8 +467,10 @@ function showEpicInfo(anchor, epic, spent, pct) {
   document.body.append(box);
   epicInfoBox = box;
   gantt.placePopover(box, anchor);
-  // Доли команд считаются асинхронно: когда блок вырастет, положение уточняем.
-  renderTeamShares(shares, epic, () => gantt.placePopover(box, anchor));
+  // Блоки наполняются асинхронно: когда карточка вырастет, положение уточняем.
+  const reposition = () => gantt.placePopover(box, anchor);
+  renderEpicFlow(flowBox, epic, reposition).catch(() => {});
+  renderTeamShares(shares, epic, reposition);
 }
 
 // Экспресс-оценка: оценка, внесённая в сам эпик (в сумму по задачам не входит).
@@ -543,6 +549,67 @@ async function computeTeamShares(epic) {
   const result = { rows, sprintsInPeriod, sprintDays, hpd, from };
   state.shareCache.set(epic.key, result);
   return result;
+}
+
+// Поток команд и доля эпика в нём: считается из локальной истории завершений, без запросов.
+async function renderEpicFlow(box, epic, onDone = () => {}) {
+  box.textContent = "";
+  box.append(Object.assign(document.createElement("div"), { className: "tip-sub", textContent: t("flow.title") }));
+  const [rows, tempo] = await Promise.all([db.all(db.STORES.flow), db.all(db.STORES.tempo)]);
+  if (!rows.length) {
+    box.append(Object.assign(document.createElement("div"), { className: "muted", textContent: t("flow.none") }));
+    onDone();
+    return;
+  }
+  const index = agg.buildTempoIndex(tempo);
+  const model = flowlib.buildFlow({ rows, teamOf: (p) => index.of(p), weeks: Number(settings.get().flowWeeks) || 16 });
+  const teams = model.teams.filter((x) => (x.byEpic.get(epic.key) || 0) > 0);
+  if (!teams.length) {
+    box.append(Object.assign(document.createElement("div"), { className: "muted", textContent: t("share.none") }));
+  } else {
+    const tbl = document.createElement("table");
+    tbl.className = "tip-table share-table";
+    for (const x of teams) {
+      const s = flowlib.epicShare(x, epic.key);
+      const pct = Math.round(s.share * 100);
+      const tr = document.createElement("tr");
+      const name = document.createElement("td");
+      name.className = "tp-name";
+      const dot = document.createElement("i");
+      dot.className = `dot ${x.team.color >= 0 ? `tc-${x.team.color}` : "tc-none"}`;
+      name.append(dot, document.createTextNode(x.team.name || t("share.noTeam")));
+      const flowCell = document.createElement("td");
+      flowCell.className = "tp-num";
+      flowCell.textContent = `${x.median} / нед.`;
+      const pctCell = document.createElement("td");
+      pctCell.className = "tp-num share-pct";
+      const bar = document.createElement("span");
+      bar.className = "ipct-bar";
+      bar.style.setProperty("--pct", `${Math.min(100, pct)}%`);
+      const num = document.createElement("span");
+      num.className = "ipct-num";
+      num.textContent = `${pct}%`;
+      pctCell.append(bar, num);
+      tr.title = t("flow.rowHint", {
+        team: x.team.name || t("share.noTeam"),
+        median: x.median,
+        max: x.max,
+        done: s.done,
+        total: s.total,
+        pct
+      });
+      tr.append(name, flowCell, pctCell);
+      tbl.append(tr);
+    }
+    box.append(tbl);
+  }
+  const note = document.createElement("div");
+  note.className = model.weeksCount < 5 ? "cmt-error small" : "muted small";
+  note.textContent =
+    t("flow.window", { from: fmtDay(new Date(model.from).toISOString()), to: fmtDay(new Date(model.to).toISOString()), n: model.weeksCount }) +
+    (model.weeksCount < 12 ? ` · ${t("flow.short", { n: model.weeksCount })}` : "");
+  box.append(note);
+  onDone();
 }
 
 function renderTeamShares(box, epic, onDone = () => {}) {
