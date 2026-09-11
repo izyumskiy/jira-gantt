@@ -38,7 +38,8 @@ export function fullWeeks(weeks, now = Date.now()) {
 }
 
 // rows — записи хранилища flow (завершённые задачи с датой), teamOf — функция «человек → команда».
-export function buildFlow({ rows, teamOf, weeks = 16, now = Date.now() }) {
+// epicKey — если задан, у каждой команды дополнительно считается ряд «задачи эпика по неделям».
+export function buildFlow({ rows, teamOf, weeks = 16, now = Date.now(), epicKey = "" }) {
   const win = fullWeeks(weeks, now);
   const index = new Map(win.starts.map((ms, i) => [ms, i]));
   const teams = new Map();
@@ -51,12 +52,19 @@ export function buildFlow({ rows, teamOf, weeks = 16, now = Date.now() }) {
     if (slot === undefined) continue; // вне окна полных недель
     const team = teamOf({ key: r.assigneeKey, login: r.assigneeLogin, name: r.assigneeName }) || noTeam;
     if (!teams.has(team.id)) {
-      teams.set(team.id, { team, perWeek: new Array(win.starts.length).fill(0), total: 0, byEpic: new Map() });
+      teams.set(team.id, {
+        team,
+        perWeek: new Array(win.starts.length).fill(0),
+        epicPerWeek: new Array(win.starts.length).fill(0),
+        total: 0,
+        byEpic: new Map()
+      });
     }
     const acc = teams.get(team.id);
     acc.perWeek[slot] += 1;
     acc.total += 1;
     if (r.epicKey) acc.byEpic.set(r.epicKey, (acc.byEpic.get(r.epicKey) || 0) + 1);
+    if (epicKey && r.epicKey === epicKey) acc.epicPerWeek[slot] += 1;
   }
 
   const list = [...teams.values()]

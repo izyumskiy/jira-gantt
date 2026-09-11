@@ -247,6 +247,12 @@ check("подпись секции — диапазон дат", /^\d{2}\.\d{2} 
   check("медиана и пик потока", a.median === 1 && a.max === 3, `${a.median} / ${a.max}`);
   check("вторая команда считается отдельно", flowlib.epicShare(model.teams.find((x) => x.team.id === "t:2"), "EP-1").done === 1);
   check("человек без команды — отдельная строка", flowlib.buildFlow({ rows, weeks: 4, now, teamOf: () => null }).teams.length === 1);
+  // ряд задач эпика по неделям — для гистограммы
+  const withEpic = flowlib.buildFlow({ rows, weeks: 4, now, epicKey: "EP-1", teamOf: (p) => (p.login === "ivan" ? teamA : teamB) });
+  const ae = withEpic.teams.find((x) => x.team.id === "t:1");
+  check("ряд эпика по неделям не больше общего потока", ae.epicPerWeek.join(",") === "0,0,2" && ae.perWeek.join(",") === "0,1,3",
+    `${ae.epicPerWeek.join(",")} / ${ae.perWeek.join(",")}`);
+  check("без epicKey ряд эпика пустой", flowlib.buildFlow({ rows, weeks: 4, now, teamOf: () => teamA }).teams[0].epicPerWeek.every((n) => n === 0));
 }
 
 // 2g. прогноз срока по потоку (детерминированный генератор)

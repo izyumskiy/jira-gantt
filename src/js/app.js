@@ -562,7 +562,12 @@ async function renderEpicFlow(box, epic, onDone = () => {}) {
     return;
   }
   const index = agg.buildTempoIndex(tempo);
-  const model = flowlib.buildFlow({ rows, teamOf: (p) => index.of(p), weeks: Number(settings.get().flowWeeks) || 16 });
+  const model = flowlib.buildFlow({
+    rows,
+    teamOf: (p) => index.of(p),
+    weeks: Number(settings.get().flowWeeks) || 16,
+    epicKey: epic.key
+  });
   const teams = model.teams.filter((x) => (x.byEpic.get(epic.key) || 0) > 0);
   renderForecast(box, epic, model, teams).catch(() => {});
   if (!teams.length) {
@@ -604,6 +609,7 @@ async function renderEpicFlow(box, epic, onDone = () => {}) {
     }
     box.append(tbl);
   }
+  if (teams.length) renderFlowChart(box, model, teams, onDone);
   const note = document.createElement("div");
   note.className = model.weeksCount < 5 ? "cmt-error small" : "muted small";
   note.textContent =
@@ -611,6 +617,78 @@ async function renderEpicFlow(box, epic, onDone = () => {}) {
     (model.weeksCount < 12 ? ` · ${t("flow.short", { n: model.weeksCount })}` : "");
   box.append(note);
   onDone();
+}
+
+// Гистограмма завершённых задач по неделям: столбец — неделя, тёмная часть — задачи эпика.
+// Переключатель выбирает команду или сумму по всем.
+function renderFlowChart(parent, model, teams, onDone = () => {}) {
+  const wrap = document.createElement("div");
+  wrap.className = "flow-chart";
+  parent.append(wrap);
+  wrap.append(Object.assign(document.createElement("div"), { className: "tip-sub", textContent: t("flow.chart") }));
+
+  const tabs = document.createElement("div");
+  tabs.className = "chips";
+  wrap.append(tabs);
+  const bars = document.createElement("div");
+  bars.className = "bars";
+  wrap.append(bars);
+  const axis = document.createElement("div");
+  axis.className = "bars-axis";
+  wrap.append(axis);
+
+  const options = [{ id: "", name: t("flow.all") }, ...teams.map((x) => ({ id: x.team.id, name: x.team.name || t("share.noTeam") }))];
+  let current = "";
+
+  const draw = () => {
+    const picked = current ? teams.filter((x) => x.team.id === current) : teams;
+    const total = model.starts.map((_, i) => picked.reduce((n, x) => n + x.perWeek[i], 0));
+    const epicOnly = model.starts.map((_, i) => picked.reduce((n, x) => n + x.epicPerWeek[i], 0));
+    const max = Math.max(1, ...total);
+    bars.textContent = "";
+    axis.textContent = "";
+    model.starts.forEach((ms, i) => {
+      const col = document.createElement("div");
+      col.className = "bar-col";
+      const stack = document.createElement("div");
+      stack.className = "bar-stack";
+      stack.style.height = `${Math.round((total[i] / max) * 100)}%`;
+      const epicPart = document.createElement("div");
+      epicPart.className = "bar-epic";
+      epicPart.style.height = total[i] ? `${Math.round((epicOnly[i] / total[i]) * 100)}%` : "0";
+      stack.append(epicPart);
+      col.append(stack);
+      col.title = t("flow.barHint", {
+        from: fmtDay(new Date(ms).toISOString()),
+        to: fmtDay(new Date(ms + 6 * 86400000).toISOString()),
+        total: total[i],
+        epic: epicOnly[i]
+      });
+      bars.append(col);
+      const tick = document.createElement("div");
+      tick.className = "bar-tick";
+      // подписываем каждую четвёртую неделю, чтобы подписи не слипались
+      tick.textContent = i % 4 === 0 ? fmtDay(new Date(ms).toISOString()).slice(0, 5) : "";
+      axis.append(tick);
+    });
+    [...tabs.children].forEach((c) => c.classList.toggle("on", c.dataset.id === current));
+    onDone();
+  };
+
+  for (const o of options) {
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "chip";
+    chip.dataset.id = o.id;
+    chip.textContent = o.name;
+    chip.onclick = (e) => {
+      e.stopPropagation();
+      current = o.id;
+      draw();
+    };
+    tabs.append(chip);
+  }
+  draw();
 }
 
 // Прогноз срока эпика: остаток задач распределяется между командами по их вкладу в эпик,

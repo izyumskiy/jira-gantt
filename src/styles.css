@@ -138,6 +138,15 @@ main { padding: 14px 16px 40px; }
 .share-table .tp-name { white-space: nowrap; }
 .share-table .share-pct { min-width: 90px; }
 .share-table .ipct-bar { width: 40px; margin-right: 6px; }
+/* Гистограмма завершённых задач по неделям. */
+.flow-chart { margin-top: 8px; }
+.flow-chart .chips { margin-bottom: 6px; }
+.bars { display: flex; align-items: flex-end; gap: 3px; height: 90px; border-bottom: 1px solid var(--line); }
+.bar-col { flex: 1; height: 100%; display: flex; align-items: flex-end; cursor: default; }
+.bar-stack { width: 100%; min-height: 1px; background: #c1c7d0; border-radius: 2px 2px 0 0; display: flex; align-items: flex-end; }
+.bar-epic { width: 100%; background: #ffc400; border-radius: 2px 2px 0 0; }
+.bars-axis { display: flex; gap: 3px; margin-top: 2px; }
+.bar-tick { flex: 1; font-size: 9px; color: var(--muted); text-align: left; white-space: nowrap; }
 .forecast-block .fc-main { font-weight: 700; }
 .forecast-block .tip-table td { border-top: none; padding: 1px 0; }
 .tooltip.epic-info .tip-v { text-align: right; max-width: 380px; white-space: normal; }
@@ -697,6 +706,7 @@ textarea { font: inherit; padding: 5px 8px; border: 1px solid var(--line); borde
   .badge.b-left { background: #4a3b0b; color: #f5d565; }
   .badge.b-other { background: #3c4147; color: #c7d1db; }
   .load-chip { background: #333a41; }
+  .bar-stack { background: #4a5158; }
   .load-chip.over { background: #4f1c14; color: #ffbdad; }
   .part-target { background: color-mix(in srgb, #ffab00 45%, var(--panel)); color: var(--text); }
   .part-other { background: color-mix(in srgb, #8993a4 40%, var(--panel)); }
