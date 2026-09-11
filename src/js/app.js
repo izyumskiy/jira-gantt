@@ -1307,6 +1307,8 @@ async function drawGantt(mode, container) {
     } else {
       applyEpicFilter(model);
       renderPeopleFilterNote();
+      // у story points остатка нет — тогда пояснение не нужно
+      $("#peopleEstNote").textContent = agg.isPoints() ? "" : t("people.estHint");
       opts.highlightChild = state.epicFilter ? state.epicFilter.key : "";
       opts.onChildClick = (key, name) => {
         state.epicFilter = { key, name };

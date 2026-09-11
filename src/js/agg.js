@@ -19,6 +19,18 @@ export function estimateOf(issue) {
   return Number(issue.originalEstimate) || 0;
 }
 
+// Оценка оставшейся работы: «По людям» показывает загрузку, а не план, поэтому там берётся
+// remaining estimate, если поле заполнено, и только при пустом — original estimate. Нулевой
+// остаток — это заполненное поле: у доделанной задачи работы действительно не осталось.
+// Для story points остатка в Jira нет — работает обычная оценка.
+export function workEstimateOf(issue) {
+  if (isCancelledStatus(issue.statusName)) return 0;
+  if (settings.get().estimateField === "points") return Number(issue.storyPoints) || 0;
+  const rem = issue.remainingEstimate;
+  if (rem !== null && rem !== undefined && rem !== "") return Number(rem) || 0;
+  return Number(issue.originalEstimate) || 0;
+}
+
 // Ёмкость спринта в единицах оценки: длительность спринта (рабочих дней) × часов в дне.
 // Для story points сравнивать не с чем — возвращаем 0 (подсветка перегруза выключена).
 export function sprintCapacity() {
@@ -325,6 +337,8 @@ export const BACKLOG_ID = "sec:backlog";
 // была одинаковой на всех вкладках и не менялась от фильтров.
 export function buildModel({ issues, others = [], sprints, epics, boards = [], tempo = [], mode, timelineIssues = null }) {
   const epicLike = mode !== "assignee"; // группы — эпики
+  // «По людям» — про загрузку: берём остаток, если он проставлен, иначе исходную оценку.
+  const estOf = mode === "assignee" ? workEstimateOf : estimateOf;
   const teamsInfo = buildTeams(sprints, boards);
   const tempoInfo = buildTempoIndex(tempo);
   const sprintById = new Map(sprints.map((s) => [s.id, s]));
@@ -394,7 +408,7 @@ export function buildModel({ issues, others = [], sprints, epics, boards = [], t
       });
     }
     const g = groups.get(gk);
-    const est = estimateOf(issue);
+    const est = estOf(issue);
     const done = isDone(issue);
     g.count += 1;
     g.sum += est;
@@ -452,7 +466,7 @@ export function buildModel({ issues, others = [], sprints, epics, boards = [], t
     for (const issue of others) {
       const g = groups.get(issue.assigneeKey || "");
       if (!g) continue; // людей берём только из целевых эпиков
-      const est = estimateOf(issue);
+      const est = estOf(issue);
       g.otherCount += 1;
       g.otherSum += est;
       const ek = issue.epicKey || "";

@@ -403,6 +403,22 @@ check("sprintCapacity = 1д × 8ч", agg.sprintCapacity() === 8 * H, String(agg.
 await settings.save({ estimateField: "points" });
 check("для story points подсветка перегруза выключена", agg.sprintCapacity() === 0);
 await settings.save({ estimateField: "original" });
+// «По людям» — про загрузку: считаем остаток, если поле заполнено, иначе исходную оценку
+{
+  const half = { ...mk("R-1", "EP-1", "AAA", "Zoe", 2, 8, "prog"), remainingEstimate: 2 * H };
+  const empty = { ...mk("R-2", "EP-1", "AAA", "Zoe", 2, 8, "prog"), remainingEstimate: null };
+  const finished = { ...mk("R-3", "EP-1", "AAA", "Zoe", 2, 8, "done"), remainingEstimate: 0 };
+  check("оценка остатка: заполненный remaining побеждает original", agg.workEstimateOf(half) === 2 * H, String(agg.workEstimateOf(half) / H));
+  check("оценка остатка: пустой remaining откатывается на original", agg.workEstimateOf(empty) === 8 * H, String(agg.workEstimateOf(empty) / H));
+  check("оценка остатка: нулевой remaining — это ноль, а не откат", agg.workEstimateOf(finished) === 0, String(agg.workEstimateOf(finished)));
+  const set = [half, empty, finished];
+  const load = agg.buildModel({ issues: set, others: [], sprints, epics, boards, mode: "assignee" });
+  const zoe = load.groups.find((g) => g.key === "zoe");
+  check("«По людям»: секция считается по остатку", zoe.cells.get("sec:0").sum === 10 * H, String(zoe.cells.get("sec:0").sum / H));
+  check("«По людям»: итог человека тоже по остатку", zoe.sum === 10 * H, String(zoe.sum / H));
+  const plan = agg.buildModel({ issues: set, others: [], sprints, epics, boards, mode: "epicPeople" });
+  check("«По эпикам»: оценка осталась прежней", plan.groups[0].cells.get("sec:0").sum === 24 * H, String(plan.groups[0].cells.get("sec:0").sum / H));
+}
 check("Ivan: прочие эпики — 1 задача / 8ч", ivan.otherCount === 1 && ivan.otherSum === 8 * H, `${ivan.otherCount} / ${ivan.otherSum / H}`);
 check("Ivan: целевые итоги не смешаны с прочими", ivan.count === 4 && ivan.sum === 58 * H, `${ivan.count} / ${ivan.sum / H}`);
 check("Ivan: прочие в секции 0 по спринту 2", ivan.otherCells.get("sec:0")?.bySprint.get(2)?.count === 1);
