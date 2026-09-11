@@ -253,6 +253,17 @@ check("подпись секции — диапазон дат", /^\d{2}\.\d{2} 
   check("ряд эпика по неделям не больше общего потока", ae.epicPerWeek.join(",") === "0,0,2" && ae.perWeek.join(",") === "0,1,3",
     `${ae.epicPerWeek.join(",")} / ${ae.perWeek.join(",")}`);
   check("без epicKey ряд эпика пустой", flowlib.buildFlow({ rows, weeks: 4, now, teamOf: () => teamA }).teams[0].epicPerWeek.every((n) => n === 0));
+  // доля за период активности: эпик жил только последнюю неделю (2 из 3), а за всё окно — 2 из 4
+  const se = flowlib.epicShare(ae, "EP-1");
+  check("доля за период активности не размывается пустыми неделями",
+    se.active.weeks === 1 && se.active.done === 2 && se.active.total === 3 && Math.round(se.active.share * 100) === 67,
+    JSON.stringify(se.active));
+  check("доля за всё окно осталась прежней", se.done === 2 && se.total === 4 && Math.round(se.share * 100) === 50);
+  const seOpen = flowlib.epicShare(ae, "EP-1", { open: true });
+  check("у незакрытого эпика период тянется до конца окна", seOpen.active.to === ae.perWeek.length - 1);
+  check("для прогноза берётся свежая доля", Math.round(flowlib.forecastShare(se) * 100) === 67);
+  const noEpic = flowlib.epicShare(ae, "EP-404");
+  check("у чужого эпика периода активности нет", noEpic.active === null && noEpic.share === 0);
 }
 
 // 2g. прогноз срока по потоку (детерминированный генератор)

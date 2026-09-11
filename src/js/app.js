@@ -555,7 +555,7 @@ async function computeTeamShares(epic) {
 async function renderEpicFlow(box, epic, onDone = () => {}) {
   box.textContent = "";
   box.append(Object.assign(document.createElement("div"), { className: "tip-sub", textContent: t("flow.title") }));
-  const [rows, tempo] = await Promise.all([db.all(db.STORES.flow), db.all(db.STORES.tempo)]);
+  const [rows, tempo, issues] = await Promise.all([db.all(db.STORES.flow), db.all(db.STORES.tempo), db.all(db.STORES.issues)]);
   if (!rows.length) {
     box.append(Object.assign(document.createElement("div"), { className: "muted", textContent: t("flow.none") }));
     onDone();
@@ -569,15 +569,20 @@ async function renderEpicFlow(box, epic, onDone = () => {}) {
     epicKey: epic.key
   });
   const teams = model.teams.filter((x) => (x.byEpic.get(epic.key) || 0) > 0);
-  renderForecast(box, epic, model, teams).catch(() => {});
+  // незакрытый эпик всё ещё в работе — его период активности тянется до конца окна
+  const remaining = issues.filter((i) => i.epicKey === epic.key && !agg.isDone(i)).length;
+  const open = remaining > 0;
+  const shares = new Map(teams.map((x) => [x.team.id, flowlib.epicShare(x, epic.key, { open })]));
+  renderForecast(box, epic, model, teams, remaining, shares).catch(() => {});
   if (!teams.length) {
     box.append(Object.assign(document.createElement("div"), { className: "muted", textContent: t("share.none") }));
   } else {
     const tbl = document.createElement("table");
     tbl.className = "tip-table share-table";
     for (const x of teams) {
-      const s = flowlib.epicShare(x, epic.key);
-      const pct = Math.round(s.share * 100);
+      const s = shares.get(x.team.id);
+      const act = s.active || s;
+      const pct = Math.round(act.share * 100);
       const tr = document.createElement("tr");
       const name = document.createElement("td");
       name.className = "tp-name";
@@ -600,16 +605,48 @@ async function renderEpicFlow(box, epic, onDone = () => {}) {
         team: x.team.name || t("share.noTeam"),
         median: x.median,
         max: x.max,
-        done: s.done,
-        total: s.total,
-        pct
+        done: act.done,
+        total: act.total,
+        weeks: act.weeks,
+        pct,
+        rw: s.recent ? s.recent.weeks : 0,
+        rpct: s.recent ? Math.round(s.recent.share * 100) : 0,
+        apct: Math.round(s.share * 100),
+        adone: s.done,
+        atotal: s.total
       });
       tr.append(name, flowCell, pctCell);
       tbl.append(tr);
     }
     box.append(tbl);
   }
-  if (teams.length) renderFlowChart(box, model, teams, onDone);
+  const spans = teams.map((x) => shares.get(x.team.id).active).filter(Boolean);
+  const span = spans.length
+    ? { from: Math.min(...spans.map((a) => a.from)), to: Math.max(...spans.map((a) => a.to)) }
+    : null;
+  if (teams.length) {
+    renderFlowChart(box, model, teams, span, onDone);
+    if (span) {
+      const sum = teams.reduce(
+        (acc, x) => {
+          const a = shares.get(x.team.id).active;
+          return a ? { done: acc.done + a.done, total: acc.total + a.total } : acc;
+        },
+        { done: 0, total: 0 }
+      );
+      box.append(
+        Object.assign(document.createElement("div"), {
+          className: "muted small",
+          textContent: t("flow.spanNote", {
+            from: fmtDay(new Date(model.starts[span.from]).toISOString()),
+            to: fmtDay(new Date(model.starts[span.to] + 6 * 86400000).toISOString()),
+            n: span.to - span.from + 1,
+            pct: sum.total ? Math.round((sum.done / sum.total) * 100) : 0
+          })
+        })
+      );
+    }
+  }
   const note = document.createElement("div");
   note.className = model.weeksCount < 5 ? "cmt-error small" : "muted small";
   note.textContent =
@@ -621,7 +658,7 @@ async function renderEpicFlow(box, epic, onDone = () => {}) {
 
 // Гистограмма завершённых задач по неделям: столбец — неделя, тёмная часть — задачи эпика.
 // Переключатель выбирает команду или сумму по всем.
-function renderFlowChart(parent, model, teams, onDone = () => {}) {
+function renderFlowChart(parent, model, teams, span = null, onDone = () => {}) {
   const wrap = document.createElement("div");
   wrap.className = "flow-chart";
   parent.append(wrap);
@@ -649,7 +686,7 @@ function renderFlowChart(parent, model, teams, onDone = () => {}) {
     axis.textContent = "";
     model.starts.forEach((ms, i) => {
       const col = document.createElement("div");
-      col.className = "bar-col";
+      col.className = "bar-col" + (span && (i < span.from || i > span.to) ? " off" : "");
       const stack = document.createElement("div");
       stack.className = "bar-stack";
       stack.style.height = `${Math.round((total[i] / max) * 100)}%`;
@@ -693,9 +730,7 @@ function renderFlowChart(parent, model, teams, onDone = () => {}) {
 
 // Прогноз срока эпика: остаток задач распределяется между командами по их вкладу в эпик,
 // каждая команда симулируется по своей истории, срок прогона — максимум по командам.
-async function renderForecast(parent, epic, model, teams) {
-  const issues = await db.all(db.STORES.issues);
-  const remaining = issues.filter((i) => i.epicKey === epic.key && !agg.isDone(i)).length;
+async function renderForecast(parent, epic, model, teams, remaining, shares) {
   const box = document.createElement("div");
   box.className = "share-block forecast-block";
   box.append(Object.assign(document.createElement("div"), { className: "tip-sub", textContent: t("fc.title") }));
@@ -715,7 +750,12 @@ async function renderForecast(parent, epic, model, teams) {
   }
   const input = teams.map((x) => {
     const done = x.byEpic.get(epic.key) || 0;
-    return { team: x.team, perWeek: x.perWeek, share: done / x.total, remaining: (remaining * done) / epicDone };
+    return {
+      team: x.team,
+      perWeek: x.perWeek,
+      share: flowlib.forecastShare(shares.get(x.team.id)),
+      remaining: (remaining * done) / epicDone
+    };
   });
   const fc = flowlib.forecastDelivery({ teams: input });
   if (!fc) {

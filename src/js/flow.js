@@ -128,8 +128,51 @@ export function forecastDelivery({ teams, runs = 10000, now = Date.now(), rnd = 
   };
 }
 
-// Доля потока команды, уходящая на эпик: завершённые задачи эпика к всем завершённым задачам.
-export function epicShare(teamFlow, epicKey) {
+// Доля потока команды, уходящая на эпик. Считается в трёх окнах, потому что «за всё окно истории»
+// размывает долю: эпик живёт лишь часть года, а знаменатель берёт весь год целиком.
+//   share  — за всё окно истории: след эпика в годовом потоке команды;
+//   active — за период активности эпика: от первой недели с его завершениями до последней
+//            (у незакрытого эпика — до конца окна, он всё ещё в работе). Нули внутри периода
+//            остаются: паузы — часть темпа;
+//   recent — последние RECENT_WEEKS недель периода активности: текущий темп.
+export const RECENT_WEEKS = 8;
+
+function sliceShare(teamFlow, from, to) {
+  let done = 0;
+  let total = 0;
+  for (let i = from; i <= to; i++) {
+    done += teamFlow.epicPerWeek[i] || 0;
+    total += teamFlow.perWeek[i] || 0;
+  }
+  return { from, to, weeks: to - from + 1, done, total, share: total ? done / total : 0 };
+}
+
+export function epicShare(teamFlow, epicKey, { open = false, recent = RECENT_WEEKS } = {}) {
   const done = teamFlow.byEpic.get(epicKey) || 0;
-  return { done, total: teamFlow.total, share: teamFlow.total ? done / teamFlow.total : 0 };
+  const total = teamFlow.total;
+  const out = { done, total, share: total ? done / total : 0, active: null, recent: null };
+  // ряд epicPerWeek заполняется для эпика, переданного в buildFlow; для любого другого ключа
+  // (и когда завершений нет) периода активности не существует
+  const ep = done ? teamFlow.epicPerWeek || [] : [];
+  const from = ep.findIndex((n) => n > 0);
+  if (from < 0) return out;
+  let to = from;
+  for (let i = ep.length - 1; i > from; i--) {
+    if (ep[i] > 0) {
+      to = i;
+      break;
+    }
+  }
+  if (open) to = ep.length - 1;
+  out.active = sliceShare(teamFlow, from, to);
+  out.recent = sliceShare(teamFlow, Math.max(from, to - recent + 1), to);
+  return out;
+}
+
+// Для прогноза берём самую свежую оценку темпа: последние недели → период активности → всё окно.
+// Ноль в узком окне (команда пока не бралась за эпик) откатывает на более широкое.
+export function forecastShare(s) {
+  if (s.recent && s.recent.share) return s.recent.share;
+  if (s.active && s.active.share) return s.active.share;
+  return s.share;
 }
