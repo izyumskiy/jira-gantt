@@ -230,6 +230,37 @@ export function nameFromSprints(names) {
 
 // Команды Tempo: соответствие человек → команда. Ключ, логин и имя — три способа найти,
 // потому что в задачах Jira отдаёт то одно, то другое.
+// Ключ сопоставления человека: имя без регистра, лишних пробелов и «ё».
+const normPerson = (v) => String(v || "").trim().replace(/\s+/g, " ").toLowerCase().replace(/ё/g, "е");
+
+// Ручное распределение по командам из вкладки «Команда». Нужно, когда Tempo API закрыт: без него
+// люди разошлись бы по доскам или остались без команды. Профили хранят уже нормализованное имя.
+export function buildManualTeams(profiles = []) {
+  const names = [...new Set(profiles.map((p) => String(p.team || "").trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+  const teams = new Map();
+  names.forEach((name, i) => teams.set(`m:${name}`, { id: `m:${name}`, name, color: i % TEAM_COLORS, manual: true }));
+  const byName = new Map();
+  const byLogin = new Map();
+  const byKey = new Map();
+  for (const p of profiles) {
+    const team = teams.get(`m:${String(p.team || "").trim()}`);
+    if (!team) continue;
+    if (p.name) byName.set(normPerson(p.name), team);
+    if (p.login) byLogin.set(String(p.login).toLowerCase(), team);
+    if (p.key) byKey.set(String(p.key).toLowerCase(), team);
+  }
+  const of = (person) => {
+    if (!person) return null;
+    return (
+      byKey.get(String(person.key || "").toLowerCase()) ||
+      byLogin.get(String(person.login || "").toLowerCase()) ||
+      byName.get(normPerson(person.name)) ||
+      null
+    );
+  };
+  return { teams, of, size: teams.size };
+}
+
 export function buildTempoIndex(tempo) {
   const byKey = new Map();
   const byLogin = new Map();
@@ -335,12 +366,13 @@ export const BACKLOG_ID = "sec:backlog";
 // others — задачи людей вне целевых эпиков (учитываются только по людям).
 // timelineIssues — по каким задачам строить шкалу времени. Передаётся вся выгрузка, чтобы шкала
 // была одинаковой на всех вкладках и не менялась от фильтров.
-export function buildModel({ issues, others = [], sprints, epics, boards = [], tempo = [], mode, timelineIssues = null }) {
+export function buildModel({ issues, others = [], sprints, epics, boards = [], tempo = [], profiles = [], mode, timelineIssues = null }) {
   const epicLike = mode !== "assignee"; // группы — эпики
   // «По людям» — про загрузку: берём остаток, если он проставлен, иначе исходную оценку.
   const estOf = mode === "assignee" ? workEstimateOf : estimateOf;
   const teamsInfo = buildTeams(sprints, boards);
   const tempoInfo = buildTempoIndex(tempo);
+  const manualInfo = buildManualTeams(profiles);
   const sprintById = new Map(sprints.map((s) => [s.id, s]));
   const columns = timeline(sprints, timelineIssues || [...issues, ...others]);
   // Внутри секции спринты идут по командам, чтобы цвета в колонке не перемешивались.
@@ -522,8 +554,10 @@ export function buildModel({ issues, others = [], sprints, epics, boards = [], t
   }
 
   const list = [...groups.values()].map((g) => {
-    // Команда человека: из Tempo, если он там числится; иначе по доске, где больше его задач.
-    let team = tempoInfo.of({ key: g.key, login: g.login, name: g.label }) || teamsInfo.none;
+    // Команда человека: сначала ручное распределение с вкладки «Команда» (оно же спасает, когда
+    // Tempo API закрыт), затем Tempo, затем доска, где больше его задач.
+    const person = { key: g.key, login: g.login, name: g.label };
+    let team = manualInfo.of(person) || tempoInfo.of(person) || teamsInfo.none;
     let best = 0;
     if (team === teamsInfo.none) {
       for (const [id, n] of g.teamVotes) {

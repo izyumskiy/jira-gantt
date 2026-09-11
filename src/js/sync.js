@@ -331,7 +331,7 @@ function flowLogins(tempo, issues, others) {
 
 // История завершений за окно: задачи с датой резолюции. Это основа недельного потока команд.
 export async function refreshFlow({ tempo, issues, others, onProgress = () => {} }) {
-  const weeks = Number(settings.get().flowWeeks) || 16;
+  const weeks = Number(settings.get().flowWeeks) || 52;
   const logins = flowLogins(tempo, issues, others);
   if (!logins.length) return { weeks, logins: 0, issues: 0, skipped: true };
 
@@ -381,6 +381,29 @@ function isActiveMember(m, today = new Date().toISOString().slice(0, 10)) {
   if (m.dateFrom && m.dateFrom > today) return false;
   if (m.dateTo && m.dateTo < today) return false;
   return true;
+}
+
+// Проверка доступности API перед выгрузкой: что именно из нужного закрыто. Ничего не качает —
+// только лёгкие пробы. core/search обязательны, agile и tempo — опциональные источники.
+export async function checkApis(onProgress = () => {}) {
+  onProgress(t("st.apiCheck"));
+  const probe = async (fn) => {
+    try {
+      await fn();
+      return { ok: true, code: 0, msg: "" };
+    } catch (e) {
+      return { ok: false, code: e && e.code ? e.code : 0, msg: e && e.message ? e.message : String(e) };
+    }
+  };
+  const core = await probe(() => jira.myself());
+  const search = core.ok ? await probe(() => jira.searchProbe()) : { ...core };
+  const agile = core.ok ? await probe(() => jira.boardsProbe()) : { ...core };
+  const tempo = !settings.get().useTempoTeams
+    ? { ok: false, skipped: true, code: 0, msg: "" }
+    : core.ok
+      ? await probe(() => jira.tempoTeams())
+      : { ...core };
+  return { core, search, agile, tempo, ok: core.ok && search.ok, limited: !agile.ok || !tempo.ok };
 }
 
 export async function refreshTempoTeams(onProgress = () => {}) {
@@ -523,6 +546,11 @@ const ISSUE_SCHEMA = 3;
 
 // full = true — скачиваем задачи целиком, иначе только изменённые с прошлой синхронизации.
 export async function sync({ full = false, onProgress = () => {} } = {}) {
+  // Сначала проверяем, что нужные API вообще отвечают: иначе пользователь получит неполные данные
+  // и не поймёт почему.
+  const apiStats = await checkApis(onProgress);
+  if (!apiStats.core.ok) throw new jira.JiraError(t("err.apiCore", { msg: apiStats.core.msg }), apiStats.core.code);
+  if (!apiStats.search.ok) throw new jira.JiraError(t("err.apiSearch", { msg: apiStats.search.msg }), apiStats.search.code);
   const fields = await ensureFields();
   if (!fields.epicLink) throw new jira.JiraError(t("err.noEpicField"), 0);
   if (!full && (await db.metaGet("issueSchema", 0)) < ISSUE_SCHEMA) {
@@ -531,7 +559,7 @@ export async function sync({ full = false, onProgress = () => {} } = {}) {
   }
 
   const epics = await db.all(db.STORES.epics);
-  if (!epics.length) return { issues: 0, sprints: 0 };
+  if (!epics.length) return { issues: 0, sprints: 0, apiStats };
 
   const since = full ? 0 : settings.get().lastSync || 0;
   const fieldList = [
@@ -653,5 +681,5 @@ export async function sync({ full = false, onProgress = () => {} } = {}) {
   await db.metaSet("issueSchema", ISSUE_SCHEMA);
   await settings.save({ lastSync: Date.now() });
   onProgress(t("st.done"));
-  return { issues: collected.length, sprints: sprintMap.size, others: others.length, othersError, sprintStats, tempoStats, tempoError, flowStats };
+  return { issues: collected.length, sprints: sprintMap.size, others: others.length, othersError, sprintStats, tempoStats, tempoError, flowStats, apiStats };
 }

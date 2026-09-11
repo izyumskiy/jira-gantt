@@ -9,9 +9,9 @@ import { setLang, applyI18n, t } from "../src/js/i18n.js";
 import * as settings from "../src/js/settings.js";
 import * as agg from "../src/js/agg.js";
 import * as gantt from "../src/js/gantt.js";
-import { parseSprint, datesFromName } from "../src/js/sync.js";
+import { parseSprint, datesFromName, checkApis } from "../src/js/sync.js";
 import { classify, isDoneStatus } from "../src/js/status.js";
-import { collectPeople, mergeProfiles, parseSystems, systemsList, normName, roleSummary } from "../src/js/team.js";
+import { collectPeople, mergeProfiles, parseSystems, systemsList, teamsList, normName, roleSummary } from "../src/js/team.js";
 import { parseConfig, exportConfig, applyConfig } from "../src/js/configio.js";
 import * as flowlib from "../src/js/flow.js";
 import * as dbm from "../src/js/db.js";
@@ -569,7 +569,8 @@ try { parseConfig("{oops"); } catch (e) { badJson = e.message; }
 check("parseConfig: битый JSON — понятная ошибка", badJson.startsWith(t("cfg.badJson", { msg: "" }).slice(0, 12)), badJson);
 await settings.save({ infoSystems: ["1С CRM"], fields: { plannedStart: "customfield_10407", plannedEnd: "customfield_10408", epicAssignee: "assignee", epicReporter: "reporter" } });
 const ec = await exportConfig();
-check("exportConfig: версия, адрес Jira, поля, системы, эпики, люди", ec.version === 1 && ec.baseUrl === settings.get().baseUrl && ec.fields.plannedStart === "customfield_10407" && ec.infoSystems.join() === "1С CRM" && Array.isArray(ec.epics) && Array.isArray(ec.people), JSON.stringify(ec).slice(0, 200));
+check("exportConfig: версия, адрес Jira, поля, системы, эпики, люди", ec.version === 2 && ec.baseUrl === settings.get().baseUrl && ec.fields.plannedStart === "customfield_10407" && ec.infoSystems.join() === "1С CRM" && Array.isArray(ec.epics) && Array.isArray(ec.people), JSON.stringify(ec).slice(0, 200));
+check("exportConfig: справочник команд и команда человека попадают в файл", Array.isArray(ec.teams) && ec.people.every((x) => "team" in x), JSON.stringify(ec.teams));
 await settings.save({ infoSystems: [], fields: { plannedStart: "", plannedEnd: "", epicAssignee: "assignee", epicReporter: "reporter" } });
 
 // применение без Jira (поля по id, эпиков нет): база очищается, справочник заменяется, профили создаются
@@ -583,8 +584,69 @@ check("applyConfig: справочник систем заменён конфи�
 const newProf = (await dbm.all(dbm.STORES.people)).find((p) => p.name === "новый");
 check("applyConfig: профиль создан, роль и статус по подписям", newProf?.role === "onec" && newProf?.status === "outstaff" && newProf.systems.join() === "A,C", JSON.stringify(newProf));
 check("applyConfig: поле по id записано", settings.get().fields.plannedStart === "customfield_1");
+// команды: справочник из конфига + команда, названная только у человека
+await applyConfig(parseConfig(JSON.stringify({ teams: "1C, Платформы данных", people: [{ name: "Зоя", team: "QA" }] })), { onLog: () => {} });
+check("applyConfig: справочник команд заменён конфигом + команда человека", settings.get().teams.join(",") === "1C,Платформы данных,QA", settings.get().teams.join(","));
+const zoeProf = (await dbm.all(dbm.STORES.people)).find((p) => p.name === "зоя");
+check("applyConfig: команда записана в профиль", zoeProf?.team === "QA", JSON.stringify(zoeProf));
 await dbm.clearEverything();
 await settings.save({ infoSystems: [], fields: { plannedStart: "", plannedEnd: "", epicAssignee: "assignee", epicReporter: "reporter" } });
+
+// 4e. ручное распределение по командам (вкладка «Команда») — когда Tempo API закрыт
+{
+  const profiles = [
+    { name: "ivan", displayName: "Ivan", login: "ivan", key: "ivan", team: "Платформа" },
+    { name: "olga", displayName: "Olga", login: "olga", key: "olga", team: "Биллинг" },
+    { name: "petr", displayName: "Petr", login: "petr", key: "petr", team: "" }
+  ];
+  const manual = agg.buildManualTeams(profiles);
+  check("ручные команды: только непустые, по алфавиту", [...manual.teams.values()].map((x) => x.name).join(",") === "Биллинг,Платформа",
+    [...manual.teams.values()].map((x) => x.name).join(","));
+  check("человек без команды остаётся без неё", manual.of({ login: "petr", name: "Petr" }) === null);
+  check("сопоставление по логину и по имени", manual.of({ login: "ivan" }).name === "Платформа" && manual.of({ name: "Olga" }).name === "Биллинг");
+
+  const byManual = agg.buildModel({ issues, others, sprints, epics, boards, tempo: [], profiles, mode: "assignee" });
+  const ivanM = byManual.groups.find((g) => g.key === "ivan");
+  check("«По людям»: без Tempo команда берётся из вкладки «Команда»", ivanM.team?.name === "Платформа", ivanM.team?.name);
+  const tempoTeams = [{ id: 2, name: "1C", members: [{ key: "", login: "ivan", name: "Ivan" }] }];
+  const withTempo = agg.buildModel({ issues, others, sprints, epics, boards, tempo: tempoTeams, profiles, mode: "assignee" });
+  check("ручная команда важнее Tempo", withTempo.groups.find((g) => g.key === "ivan").team?.name === "Платформа",
+    withTempo.groups.find((g) => g.key === "ivan").team?.name);
+  const noProfiles = agg.buildModel({ issues, others, sprints, epics, boards, tempo: [], mode: "assignee" });
+  check("без профилей команда по-прежнему по доске", noProfiles.groups.find((g) => g.key === "ivan").team?.name === "Alpha",
+    noProfiles.groups.find((g) => g.key === "ivan").team?.name);
+  await settings.save({ teams: ["QA"] });
+  check("список команд = справочник + проставленные людям", teamsList(profiles).join(",") === "QA,Платформа,Биллинг", teamsList(profiles).join(","));
+  await settings.save({ teams: [] });
+}
+
+// 4f. проверка доступности API перед выгрузкой
+{
+  const orig = window.fetch;
+  const json = (obj, status = 200) => new Response(JSON.stringify(obj), { status, headers: { "Content-Type": "application/json" } });
+  window.fetch = async (url) => {
+    const u = String(url);
+    if (u.includes("/rest/api/2/myself")) return json({ name: "ivan" });
+    if (u.includes("/rest/api/2/search")) return json({ issues: [], total: 0 });
+    if (u.includes("/rest/agile/1.0/board")) return json({ errorMessages: ["no permission"] }, 403);
+    if (u.includes("/rest/tempo-teams")) return json({ errorMessages: ["not installed"] }, 404);
+    return json({}, 404);
+  };
+  await settings.save({ useTempoTeams: true });
+  const st = await checkApis();
+  check("проверка API: ядро и поиск доступны", st.core.ok && st.search.ok && st.ok, JSON.stringify({ core: st.core.ok, search: st.search.ok }));
+  check("проверка API: закрытые Agile и Tempo помечены", !st.agile.ok && !st.tempo.ok && st.limited === true, JSON.stringify({ agile: st.agile.code, tempo: st.tempo.code }));
+  await settings.save({ useTempoTeams: false });
+  check("выключённый Tempo проверкой не считается ошибкой", (await checkApis()).tempo.skipped === true);
+  await settings.save({ useTempoTeams: true });
+  window.fetch = async () => json({ errorMessages: ["denied"] }, 403);
+  const denied = await checkApis();
+  check("недоступное ядро валит проверку целиком", !denied.core.ok && !denied.ok && !denied.search.ok, JSON.stringify(denied.core));
+  window.fetch = orig;
+}
+
+// 4g. умолчания настроек
+check("окно истории потока по умолчанию — 52 недели", settings.DEFAULTS.flowWeeks === 52, String(settings.DEFAULTS.flowWeeks));
 
 // 5. форматирование оценок
 check("fmtEstimate 4ч", agg.fmtEstimate(4 * H) === "4ч", agg.fmtEstimate(4 * H));

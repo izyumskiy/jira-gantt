@@ -565,7 +565,7 @@ async function renderEpicFlow(box, epic, onDone = () => {}) {
   const model = flowlib.buildFlow({
     rows,
     teamOf: (p) => index.of(p),
-    weeks: Number(settings.get().flowWeeks) || 16,
+    weeks: Number(settings.get().flowWeeks) || 52,
     epicKey: epic.key
   });
   const teams = model.teams.filter((x) => (x.byEpic.get(epic.key) || 0) > 0);
@@ -1088,8 +1088,13 @@ async function doSync({ full = false } = {}) {
       lines.push(t("st.tempoSummary", { teams: result.tempoStats.teams, members: result.tempoStats.members }).replace(/^ · /, ""));
     }
     if (result.othersError) lines.push(result.othersError);
+    // Ограничения API: выгрузка прошла, но часть источников закрыта — об этом надо сказать прямо.
+    const api = result.apiStats;
+    const apiLimited = api && (!api.agile.ok || (!api.tempo.ok && !api.tempo.skipped));
+    if (api && !api.agile.ok) lines.push(t("st.apiAgileLimited", { msg: api.agile.msg }));
+    if (api && !api.tempo.ok && !api.tempo.skipped) lines.push(t("st.apiTempoLimited", { msg: api.tempo.msg }));
     // Одной строкой, чтобы сводка не перекрывалась ошибкой; ошибка красит всю строку.
-    const isError = (st && st.boardsFailed.length) || result.othersError;
+    const isError = (st && st.boardsFailed.length) || result.othersError || apiLimited;
     if (lines.length) status(lines.join(" — "), isError ? "error" : "info");
     gantt.resetCollapse();
     redrawActive();
@@ -1292,6 +1297,7 @@ async function drawGantt(mode, container) {
       epics: epicsShown,
       boards,
       tempo,
+      profiles,
       mode,
       timelineIssues: [...issues, ...others]
     });
@@ -1335,6 +1341,7 @@ function fillSettingsForm() {
   renderFlowDiag().catch(() => {});
   $("#doneStatuses").value = s.doneStatuses;
   $("#infoSystems").value = (s.infoSystems || []).join("\n");
+  $("#teamsList").value = (s.teams || []).join("\n");
   $("#lang").value = s.lang;
   renderBoards();
   renderDetected();
@@ -1468,9 +1475,10 @@ async function saveSettingsForm() {
     hoursPerDay: Number($("#hoursPerDay").value) || 8,
     sprintDays: Number($("#sprintDays").value) || 10,
     useTempoTeams: $("#useTempoTeams").checked,
-    flowWeeks: Number($("#flowWeeks").value) || 16,
+    flowWeeks: Number($("#flowWeeks").value) || 52,
     doneStatuses: $("#doneStatuses").value.trim(),
     infoSystems: team.parseSystems($("#infoSystems").value),
+    teams: team.parseSystems($("#teamsList").value),
     fields: {
       plannedStart: $("#plannedStartField").value,
       plannedEnd: $("#plannedEndField").value,

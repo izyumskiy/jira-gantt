@@ -94,6 +94,15 @@ export async function search(jql, fieldList, onPage) {
   return out;
 }
 
+// Лёгкие пробы доступности API: ничего не выгружают, нужны только чтобы увидеть отказ.
+export function searchProbe() {
+  return request("/rest/api/2/search", { method: "POST", body: { jql: "order by created DESC", startAt: 0, maxResults: 0, fields: ["summary"] } });
+}
+
+export function boardsProbe() {
+  return request("/rest/agile/1.0/board?startAt=0&maxResults=1");
+}
+
 export async function boards() {
   const out = [];
   let startAt = 0;
