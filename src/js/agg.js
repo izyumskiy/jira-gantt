@@ -104,24 +104,51 @@ export function currentSprint(sprints) {
 }
 
 // Типичная длина спринта в днях — самая частая среди спринтов с датами (по умолчанию 14).
+// Шаг секции — РИТМ спринтов: сколько дней проходит между началами соседних спринтов одной доски.
+// Длительность для этого не годится: Jira обычно ставит конец спринта днём раньше начала
+// следующего (05.11–18.11, затем 19.11–02.12), то есть длительность 13 при ритме 14. Шаг на день
+// короче ритма накапливает сдвиг, и примерно каждые 13 колонок появлялась лишняя пустая секция.
+// Если стартов слишком мало (одна доска с одним спринтом), считаем по длительности, как раньше.
 export function sprintStepDays(sprints) {
-  const freq = new Map();
+  const pick = (freq) => {
+    let best = 14;
+    let bestN = 0;
+    for (const [d, n] of freq) {
+      if (n > bestN || (n === bestN && d < best)) {
+        best = d;
+        bestN = n;
+      }
+    }
+    return best;
+  };
+
+  const byBoard = new Map();
+  for (const s of sprints) {
+    const a = ts(s.startDate);
+    if (a == null) continue;
+    const key = s.boardId != null ? String(s.boardId) : "";
+    if (!byBoard.has(key)) byBoard.set(key, []);
+    byBoard.get(key).push(startOfDay(a));
+  }
+  const cadence = new Map();
+  for (const starts of byBoard.values()) {
+    starts.sort((x, y) => x - y);
+    for (let i = 1; i < starts.length; i++) {
+      const d = Math.round((starts[i] - starts[i - 1]) / DAY);
+      if (d >= 1 && d <= 60) cadence.set(d, (cadence.get(d) || 0) + 1);
+    }
+  }
+  if (cadence.size) return pick(cadence);
+
+  const byLength = new Map();
   for (const s of sprints) {
     const a = ts(s.startDate);
     const b = ts(s.endDate);
     if (!a || !b || b <= a) continue;
     const d = Math.max(1, Math.round((b - a) / DAY));
-    freq.set(d, (freq.get(d) || 0) + 1);
+    byLength.set(d, (byLength.get(d) || 0) + 1);
   }
-  let best = 14;
-  let bestN = 0;
-  for (const [d, n] of freq) {
-    if (n > bestN || (n === bestN && d < best)) {
-      best = d;
-      bestN = n;
-    }
-  }
-  return best;
+  return pick(byLength);
 }
 
 export const NO_DATES_ID = "sec:nodate";
@@ -145,7 +172,9 @@ export function timeline(sprints, issues, now = Date.now()) {
     const b = dayOf(s.endDate);
     return a != null && b != null && a <= today && today <= b;
   });
-  const typical = running.filter((s) => Math.round((dayOf(s.endDate) - dayOf(s.startDate)) / DAY) === stepDays);
+  // Длительность спринта при том же ритме бывает на день короче (конец — накануне следующего старта),
+  // поэтому сравниваем с допуском в день.
+  const typical = running.filter((s) => Math.abs(Math.round((dayOf(s.endDate) - dayOf(s.startDate)) / DAY) - stepDays) <= 1);
   const anchors = typical.length ? typical : running;
   const origin = anchors.length ? Math.min(...anchors.map((s) => dayOf(s.startDate))) : startOfDay(ts(cur.startDate) || now);
 

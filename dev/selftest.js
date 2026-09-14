@@ -127,7 +127,21 @@ check("datesFromName: обычное имя — null", dn("Sprint 3") === null &
 
 // 2. текущий спринт и временные секции
 check("currentSprint = активный по датам", agg.currentSprint(sprints)?.id === 2, String(agg.currentSprint(sprints)?.id));
-check("шаг секции = самая частая длина спринта", agg.sprintStepDays(sprints) === 14, String(agg.sprintStepDays(sprints)));
+check("шаг секции = ритм спринтов", agg.sprintStepDays(sprints) === 14, String(agg.sprintStepDays(sprints)));
+// Ритм 14 дней при длительности 13 (конец спринта — накануне следующего старта): шаг, взятый из
+// длительности, копил сдвиг и вставлял пустую секцию примерно каждые 13 колонок.
+{
+  const chain = [];
+  for (let i = 0; i < 10; i++) {
+    chain.push({ id: 100 + i, name: `S-${i}`, state: i === 0 ? "ACTIVE" : "FUTURE", startDate: iso(-1 + i * 14), endDate: iso(12 + i * 14), boardId: 42 });
+  }
+  check("шаг = ритм (14), а не длительность (13)", agg.sprintStepDays(chain) === 14, String(agg.sprintStepDays(chain)));
+  const chainIssues = chain.map((sp, i) => mk(`S-${i}`, "EP-1", "AAA", "Ivan", sp.id, 1));
+  const chainCols = agg.timeline(chain, chainIssues);
+  check("пустых секций между соседними спринтами не появляется",
+    chainCols.length === chain.length && chainCols.every((c) => c.sprints.length === 1),
+    chainCols.map((c) => c.sprints.length).join(","));
+}
 const cols = agg.timeline(sprints, issues);
 check("секция 0 начинается с текущего спринта", cols[0]?.id === "sec:0" && cols[0].sprints.some((s) => s.id === 2));
 check("спринты двух команд в одной секции", cols[0]?.sprints.map((s) => s.id).join(",") === "2,5", cols[0]?.sprints.map((s) => s.id).join(","));
