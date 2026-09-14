@@ -9,7 +9,7 @@ import { setLang, applyI18n, t } from "../src/js/i18n.js";
 import * as settings from "../src/js/settings.js";
 import * as agg from "../src/js/agg.js";
 import * as gantt from "../src/js/gantt.js";
-import { parseSprint, datesFromName, checkApis } from "../src/js/sync.js";
+import { parseSprint, datesFromName, checkApis, searchEpics, epicKeysFrom } from "../src/js/sync.js";
 import { classify, isDoneStatus } from "../src/js/status.js";
 import { collectPeople, mergeProfiles, parseSystems, systemsList, teamsList, normName, roleSummary } from "../src/js/team.js";
 import { parseConfig, exportConfig, applyConfig } from "../src/js/configio.js";
@@ -127,7 +127,21 @@ check("datesFromName: обычное имя — null", dn("Sprint 3") === null &
 
 // 2. текущий спринт и временные секции
 check("currentSprint = активный по датам", agg.currentSprint(sprints)?.id === 2, String(agg.currentSprint(sprints)?.id));
-check("шаг секции = самая частая длина спринта", agg.sprintStepDays(sprints) === 14, String(agg.sprintStepDays(sprints)));
+check("шаг секции = ритм спринтов", agg.sprintStepDays(sprints) === 14, String(agg.sprintStepDays(sprints)));
+// Ритм 14 дней при длительности 13 (конец спринта — накануне следующего старта): шаг, взятый из
+// длительности, копил сдвиг и вставлял пустую секцию примерно каждые 13 колонок.
+{
+  const chain = [];
+  for (let i = 0; i < 10; i++) {
+    chain.push({ id: 100 + i, name: `S-${i}`, state: i === 0 ? "ACTIVE" : "FUTURE", startDate: iso(-1 + i * 14), endDate: iso(12 + i * 14), boardId: 42 });
+  }
+  check("шаг = ритм (14), а не длительность (13)", agg.sprintStepDays(chain) === 14, String(agg.sprintStepDays(chain)));
+  const chainIssues = chain.map((sp, i) => mk(`S-${i}`, "EP-1", "AAA", "Ivan", sp.id, 1));
+  const chainCols = agg.timeline(chain, chainIssues);
+  check("пустых секций между соседними спринтами не появляется",
+    chainCols.length === chain.length && chainCols.every((c) => c.sprints.length === 1),
+    chainCols.map((c) => c.sprints.length).join(","));
+}
 const cols = agg.timeline(sprints, issues);
 check("секция 0 начинается с текущего спринта", cols[0]?.id === "sec:0" && cols[0].sprints.some((s) => s.id === 2));
 check("спринты двух команд в одной секции", cols[0]?.sprints.map((s) => s.id).join(",") === "2,5", cols[0]?.sprints.map((s) => s.id).join(","));
@@ -509,13 +523,20 @@ check("epicPeople: скрыты люди только с закрытыми сп
   f1.projects.map((p) => p.label).sort().join(",") === "Ivan,Kim,Lee", f1.projects.map((p) => p.label).join(","));
 check("epicPeople: итоги эпика при этом по всем задачам", f1.count === 5 && f1.sum === 17 * H, `${f1.count} / ${f1.sum / H}`);
 
+// Диаграмма по умолчанию открывается свёрнутой, поэтому проверки по вложенным строкам рисуют
+// её через явное «развернуть всё».
+const renderOpen = (box, model, opts) => {
+  gantt.setCollapsed(opts.mode, []);
+  gantt.render(box, model, opts);
+};
+
 // шапка секции: не больше 7 спринтов, остальные по клику
 const manySprints = [sprints[1], ...Array.from({ length: 12 }, (_, i) => ({ id: 100 + i, name: `Someday ${i + 1}`, state: "FUTURE", startDate: null, endDate: null, boardId: 7 }))];
 const manyIssues = Array.from({ length: 12 }, (_, i) => mk(`M-${i}`, "EP-1", "AAA", "Ivan", 100 + i, 1, "new"));
 const mh = agg.buildModel({ issues: manyIssues, sprints: manySprints, epics, boards, mode: "epicPeople" });
 const gh = document.createElement("div");
 document.body.append(gh);
-gantt.render(gh, mh, { mode: "epicPeople" });
+renderOpen(gh, mh, { mode: "epicPeople" });
 const noDateTh = () => [...gh.querySelectorAll("thead .c-sprint:not(.backlog)")].at(-1);
 check("в шапке секции «Без дат» показаны только 7 спринтов из 12", noDateTh().querySelectorAll(".sp-item").length === 7, String(noDateTh().querySelectorAll(".sp-item").length));
 check("под списком — «ещё 5»", noDateTh().querySelector(".sp-more")?.textContent === t("gantt.headerMore", { n: 5 }), noDateTh().querySelector(".sp-more")?.textContent);
@@ -529,7 +550,7 @@ gh.remove();
 const g3 = document.createElement("div");
 document.body.append(g3);
 let clicked = null;
-gantt.render(g3, m3, { mode: "epicPeople", highlightChild: "ivan", profiles: peopleProfiles, onChildClick: (k, n) => (clicked = `${k}:${n}`) });
+renderOpen(g3, m3, { mode: "epicPeople", highlightChild: "ivan", profiles: peopleProfiles, onChildClick: (k, n) => (clicked = `${k}:${n}`) });
 const nameBtn = (n) => [...g3.querySelectorAll(".plabel-link")].find((b) => b.textContent === n);
 check("epicPeople: уволенный Ivan — серым (p-fired)", nameBtn("Ivan")?.classList.contains("p-fired") && getComputedStyle(nameBtn("Ivan")).color !== getComputedStyle(nameBtn("Petr")).color,
   `${nameBtn("Ivan")?.className} / ${getComputedStyle(nameBtn("Ivan")).color} vs ${getComputedStyle(nameBtn("Petr")).color}`);
@@ -558,6 +579,25 @@ const ep1Row3 = [...g3.querySelectorAll(".g-row.group")].find((r) => r.querySele
 check("epicPeople: setCollapsed сворачивает указанные эпики", ep1Row3.nextElementSibling?.classList.contains("group") && ep1Row3.querySelector(".twisty").textContent === "▸",
   `${ep1Row3.nextElementSibling?.className} / ${ep1Row3.querySelector(".twisty").textContent}`);
 gantt.resetCollapse();
+// по умолчанию (первая отрисовка режима и после «Обновить») все группы свёрнуты
+{
+  const gc = document.createElement("div");
+  document.body.append(gc);
+  gantt.render(gc, m3, { mode: "epicPeople" });
+  const groups = [...gc.querySelectorAll(".g-row.group")];
+  check("по умолчанию все группы свёрнуты", groups.length === m3.groups.length && groups.every((r) => r.querySelector(".twisty").textContent === "▸"),
+    `${groups.length} / ${m3.groups.length}`);
+  check("вложенных строк при этом нет", gc.querySelectorAll(".g-row.proj").length === 0, String(gc.querySelectorAll(".g-row.proj").length));
+  gc.querySelector(".g-row.group .twisty").click();
+  check("клик по стрелке раскрывает группу", gc.querySelectorAll(".g-row.proj").length > 0);
+  gantt.render(gc, m3, { mode: "epicPeople" });
+  check("после ручного раскрытия повторная отрисовка не сворачивает обратно", gc.querySelectorAll(".g-row.proj").length > 0);
+  gantt.resetCollapse();
+  gantt.render(gc, m3, { mode: "epicPeople" });
+  check("resetCollapse (после «Обновить») снова сворачивает всё", gc.querySelectorAll(".g-row.proj").length === 0);
+  gc.remove();
+  gantt.resetCollapse();
+}
 g3.remove();
 
 // 4d. загрузчик конфигурации — разбор и экспорт
@@ -645,6 +685,54 @@ await settings.save({ infoSystems: [], fields: { plannedStart: "", plannedEnd: "
   window.fetch = orig;
 }
 
+// 4h. поиск эпиков: в поле ввода можно вставить список ключей
+{
+  check("ключи из строки: регистр, запятые, переводы строк, дубли",
+    epicKeysFrom(" dbd-867, DBD-868\nDBD-868 текст PRJ_X-12 ").join(",") === "DBD-867,DBD-868,PRJ_X-12",
+    epicKeysFrom(" dbd-867, DBD-868\nDBD-868 текст PRJ_X-12 ").join(","));
+  check("текст без ключей ключей не даёт", epicKeysFrom("личный кабинет 2026").length === 0);
+
+  const orig = window.fetch;
+  const sent = [];
+  const json = (o) => new Response(JSON.stringify(o), { status: 200, headers: { "Content-Type": "application/json" } });
+  window.fetch = async (url, opt) => {
+    const b = opt && opt.body ? JSON.parse(opt.body) : {};
+    if (b.jql) sent.push(b.jql);
+    return json({ issues: [], total: 0, startAt: 0, maxResults: 50 });
+  };
+  const savedFields = { ...settings.get().fields };
+  await settings.save({ fields: { ...savedFields, epicLink: "customfield_10100", sprint: "customfield_10101", version: 5 } });
+  await searchEpics("dbd-867, DBD-868\nDBD-869");
+  check("список ключей уходит одним key in (…), без поиска по названию", sent[0] === "key in (DBD-867,DBD-868,DBD-869) AND issuetype = Epic", sent[0]);
+  sent.length = 0;
+  await searchEpics("личный кабинет");
+  check("текст ищется по названию", sent[0] === 'issuetype = Epic AND summary ~ "личный кабинет" ORDER BY updated DESC', sent[0]);
+  sent.length = 0;
+  await searchEpics("DBD-867 кабинет");
+  check("ключ и текст вместе — два запроса, ключ не попадает в поиск по названию",
+    sent.length === 2 && sent[0].startsWith("key in (DBD-867)") && sent[1].includes('summary ~ "кабинет"'), JSON.stringify(sent));
+  sent.length = 0;
+  await searchEpics("   ");
+  check("пустая строка — все эпики", sent[0] === "issuetype = Epic ORDER BY updated DESC", sent[0]);
+  await settings.save({ fields: savedFields });
+  window.fetch = orig;
+}
+
+// 4i. обработчики-свойства не должны возвращать false: это отменяет действие по умолчанию
+// (из-за такого `onkeydown` в поле поиска не набирался ни один символ).
+{
+  const sources = await Promise.all(
+    ["app", "gantt", "team", "sync", "agg", "flow", "configio"].map(async (n) => [n, await (await fetch(`../src/js/${n}.js`)).text()])
+  );
+  const bad = [];
+  for (const [name, code] of sources) {
+    for (const m of code.matchAll(/\bon[a-z]+\s*=\s*\([^)]*\)\s*=>\s*(?!\{)([^;\n]+)/g)) {
+      if (/&&|\|\|/.test(m[1])) bad.push(`${name}.js: ${m[0].slice(0, 70)}`);
+    }
+  }
+  check("обработчики on* не возвращают результат логического выражения", bad.length === 0, bad.join(" | "));
+}
+
 // 4g. умолчания настроек
 check("окно истории потока по умолчанию — 52 недели", settings.DEFAULTS.flowWeeks === 52, String(settings.DEFAULTS.flowWeeks));
 
@@ -662,9 +750,9 @@ check("i18n en", t("gantt.epic") === "Epic");
 setLang("ru");
 check("i18n ru", t("gantt.epic") === "Эпик");
 
-gantt.render(document.getElementById("g1"), m1, { mode: "epicPeople", onChildClick: () => {} });
+renderOpen(document.getElementById("g1"), m1, { mode: "epicPeople", onChildClick: () => {} });
 const rowOf = (name) => [...document.querySelectorAll("#g1 .g-row.proj")].find((r) => r.querySelector(".plabel").textContent === name);
-gantt.render(document.getElementById("g2"), m2, { mode: "assignee", profiles: peopleProfiles });
+renderOpen(document.getElementById("g2"), m2, { mode: "assignee", profiles: peopleProfiles });
 
 // 7. отрисовка
 const lz = document.querySelectorAll("#g1 .lozenge");
@@ -819,14 +907,14 @@ check("строки команд на вкладке по людям", teamRows.
   await settings.save({ sprintDays: 1 });
   const gO = document.createElement("div");
   document.body.append(gO);
-  gantt.render(gO, m2, { mode: "assignee" });
+  renderOpen(gO, m2, { mode: "assignee" });
   const rowIvan = [...gO.querySelectorAll(".g-row.group")].find((r) => r.querySelector(".glabel").textContent === "Ivan");
   const cells = rowIvan.querySelectorAll(".c-cell");
   check("перегруженная секция обведена красным", cells[0].querySelector(".bar-split")?.classList.contains("overload"), cells[0].querySelector(".bar-split")?.className);
   check("в подсказке — нагрузка и ёмкость", (cells[0].querySelector(".bar-split")?.title || "").includes("2.5д") && cells[0].querySelector(".bar-split").title.includes("1д"), cells[0].querySelector(".bar-split")?.title);
   check("секция в пределах ёмкости не обведена", !cells[1].querySelector(".bar-split")?.classList.contains("overload"));
   await settings.save({ sprintDays: 10 });
-  gantt.render(gO, m2, { mode: "assignee" });
+  renderOpen(gO, m2, { mode: "assignee" });
   check("при ёмкости 10д перегрузки нет", gO.querySelectorAll(".bar.overload").length === 0);
   gO.remove();
 }
@@ -902,7 +990,7 @@ check("standIns: без роли/систем — пусто", gantt.standIns({ 
 
 const g4 = document.createElement("div");
 document.body.append(g4);
-gantt.render(g4, m2, { mode: "assignee", profiles: cmpProfiles, personLoad: loadFixture });
+renderOpen(g4, m2, { mode: "assignee", profiles: cmpProfiles, personLoad: loadFixture });
 const cmpBtnOf = (n) => [...g4.querySelectorAll(".g-row.group")].find((r) => r.querySelector(".glabel").textContent === n)?.querySelector(".cmp-btn");
 check("пиктограмма ⇄ у каждого человека на «По людям»", g4.querySelectorAll(".g-row.group .cmp-btn").length === m2.groups.filter((g) => g.key).length && !cmpBtnOf("Без исполнителя"));
 cmpBtnOf("Ivan").click();
@@ -929,7 +1017,7 @@ check("у Petr без замены — Web (Kim той же роли, но Web �
   [...document.querySelectorAll(".tooltip.tip-compare .cmp-table .cmp-name")].map((n) => n.textContent).join(","));
 document.querySelector(".tip-close").click();
 // на «По эпикам и людям» — тоже
-gantt.render(g3, m3, { mode: "epicPeople", profiles: cmpProfiles, onChildClick: () => {} });
+renderOpen(g3, m3, { mode: "epicPeople", profiles: cmpProfiles, onChildClick: () => {} });
 check("пиктограмма ⇄ у людей внутри эпиков", g3.querySelectorAll(".g-row.proj .cmp-btn").length > 0);
 g3.querySelector(".g-row.proj .cmp-btn").click();
 check("окно сравнения открывается и на «По эпикам и людям»", !!document.querySelector(".tooltip.tip-compare"));
@@ -938,7 +1026,7 @@ g4.remove();
 
 // 9b. критический путь на «По эпикам и людям»
 {
-  gantt.render(g3, m3, { mode: "epicPeople", onChildClick: () => {} });
+  renderOpen(g3, m3, { mode: "epicPeople", onChildClick: () => {} });
   const ep1g = m3.groups.find((g) => g.key === "EP-1");
   const crit = gantt.criticalPeople(ep1g, m3);
   check("критический путь: Petr определяет конец (последний спринт), Ivan не укладывается в срок (44ч > ёмкости)",
@@ -1038,7 +1126,7 @@ cmtBtn.click();
 await new Promise((r) => setTimeout(r, 30));
 check("…и он первый в списке", document.querySelector(".tooltip.tip-comments .cmt-item .cmt-body")?.textContent === "Спасибо, @ielkin!", document.querySelector(".tooltip.tip-comments .cmt-item .cmt-body")?.textContent);
 document.querySelector(".tooltip.tip-comments .tip-close").click();
-gantt.render(g3, m3, { mode: "epicPeople", onChildClick: () => {} });
+renderOpen(g3, m3, { mode: "epicPeople", onChildClick: () => {} });
 check("пиктограмма 💬 есть и на «По эпикам и людям»", g3.querySelectorAll(".g-row.group .cmt-btn").length === m3.groups.length);
 
 const total = document.createElement("div");

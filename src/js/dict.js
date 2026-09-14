@@ -58,7 +58,8 @@ export const DICT = {
     "set.teams": "Команды",
     "set.teamsHint": "По одной в строке (или через запятую). Из этого списка на вкладке «Команда» выбирается команда сотрудника; по нему же люди группируются на вкладке «По людям», когда Tempo API недоступен.",
 
-    "search.placeholder": "Название эпика или ключ (PRJ-123)",
+    "search.placeholder": "Название эпика или ключи: PRJ-123, PRJ-124 — можно списком",
+    "search.missing": "Не найдены эпики: {list}. Проверьте ключи — возможно, это не эпики или нет доступа к проекту.",
     "search.find": "Найти",
     "search.save": "Сохранить выбор",
     "search.results": "Найденные эпики",
@@ -393,7 +394,8 @@ export const DICT = {
     "set.teams": "Teams",
     "set.teamsHint": "One per line (or comma-separated). The “Team” tab picks a person’s team from this list; people are grouped by it on the “By people” tab when the Tempo API is unavailable.",
 
-    "search.placeholder": "Epic summary or key (PRJ-123)",
+    "search.placeholder": "Epic summary or keys: PRJ-123, PRJ-124 — a list works too",
+    "search.missing": "Epics not found: {list}. Check the keys — they may not be epics, or the project may be out of reach.",
     "search.find": "Search",
     "search.save": "Save selection",
     "search.results": "Found epics",

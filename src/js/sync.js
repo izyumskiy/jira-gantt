@@ -166,17 +166,33 @@ function mapIssue(issue, fields, epicKeyFallback) {
 
 // ---------- поиск эпиков ----------
 
+// Ключи задач в строке: можно вставить список через запятую, пробел или в столбик.
+const KEY_PATTERN = "\\b[A-Za-z][A-Za-z0-9_]*-\\d+\\b";
+
+export function epicKeysFrom(text) {
+  const found = String(text || "").toUpperCase().match(new RegExp(KEY_PATTERN, "g")) || [];
+  return [...new Set(found)];
+}
+
+// Поиск эпиков. Ключи ищутся по key in (…), остальной текст — по названию. Смешивать их в одном
+// `summary ~` нельзя: Jira ищет по тексту, и ключ вида PRJ-123 в таком запросе вытаскивает
+// половину проекта вместо одного эпика.
 export async function searchEpics(query) {
   const q = (query || "").trim();
-  let jql = "issuetype = Epic";
-  if (q) {
-    const esc = jira.escapeJql(q);
-    const parts = [`summary ~ "${esc}"`];
-    if (/^[A-Za-z][A-Za-z0-9_]*-\d+$/.test(q)) parts.push(`key = "${esc}"`);
-    jql += ` AND (${parts.join(" OR ")})`;
-  }
-  jql += " ORDER BY updated DESC";
   await ensureFields();
+  const keys = epicKeysFrom(q);
+  const text = q.replace(new RegExp(KEY_PATTERN, "g"), " ").replace(/[\s,;]+/g, " ").trim();
+  if (!keys.length) return searchEpicsByText(text);
+  const byKey = await fetchEpics(keys);
+  if (!text) return byKey;
+  const seen = new Set(byKey.map((e) => e.key));
+  return [...byKey, ...(await searchEpicsByText(text)).filter((e) => !seen.has(e.key))];
+}
+
+async function searchEpicsByText(text) {
+  let jql = "issuetype = Epic";
+  if (text) jql += ` AND summary ~ "${jira.escapeJql(text)}"`;
+  jql += " ORDER BY updated DESC";
   const issues = await jira.search(jql, epicFieldList());
   return issues.map(mapEpic);
 }

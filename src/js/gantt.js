@@ -120,6 +120,9 @@ function criticalButton(g, model, rerender) {
 import { normName } from "./team.js";
 
 const collapsed = { epic: new Set(), epicPeople: new Set(), assignee: new Set() };
+// Режимы, для которых состояние сворачивания уже задано: пока режим не тронут, все группы
+// сворачиваются при первой отрисовке — диаграмма открывается обзором, а не полотном строк.
+const collapseSeeded = new Set();
 
 // В шапке секции показываем не больше стольких спринтов; остальные — по клику на шапку.
 const HEADER_SPRINTS = 7;
@@ -128,6 +131,7 @@ const expandedHeaders = new Set();
 // Свернуть/развернуть группы снаружи (фильтр по человеку на «Ганте по эпикам и людям»).
 export function setCollapsed(mode, keys) {
   collapsed[mode] = new Set(keys);
+  collapseSeeded.add(mode);
 }
 
 function el(tag, cls, text) {
@@ -361,6 +365,12 @@ export function render(container, model, opts) {
     container.append(el("div", "empty", t("gantt.noSprints")));
     restoreScroll();
     return;
+  }
+
+  // По умолчанию (до первого действия пользователя и после «Обновить») всё свёрнуто.
+  if (!collapseSeeded.has(mode)) {
+    collapsed[mode] = new Set(model.groups.map((g) => g.key));
+    collapseSeeded.add(mode);
   }
 
   // Панель: свернуть/развернуть + легенда команд.
@@ -1078,4 +1088,5 @@ function showTooltip(anchor, g, mode, model, profile = null) {
 
 export function resetCollapse() {
   for (const set of Object.values(collapsed)) set.clear();
+  collapseSeeded.clear();
 }

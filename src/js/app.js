@@ -1030,9 +1030,13 @@ async function renderStored() {
 async function doFind() {
   try {
     status(t("st.epicsLoading"));
-    state.results = await sync.searchEpics($("#q").value);
+    const query = $("#q").value;
+    state.results = await sync.searchEpics(query);
     renderResults();
-    hideStatus();
+    // Вставленный список ключей: сразу говорим, каких эпиков не нашлось (чужой проект, не эпик, опечатка).
+    const missing = sync.epicKeysFrom(query).filter((k) => !state.results.some((e) => e.key === k));
+    if (missing.length) status(t("search.missing", { list: missing.join(", ") }), "error");
+    else hideStatus();
   } catch (e) {
     fail(e);
   }
@@ -1608,7 +1612,11 @@ async function boot() {
       fail(e);
     }
   };
-  $("#q").onkeydown = (e) => e.key === "Enter" && $("#btnFind").click();
+  // Именно блоком: обработчик-свойство, вернувший false (а `cond && f()` возвращает false на
+  // любой другой клавише), отменяет действие по умолчанию — в поле не набирался ни один символ.
+  $("#q").onkeydown = (e) => {
+    if (e.key === "Enter") $("#btnFind").click();
+  };
   $("#btnSelectAll").onclick = async () => {
     state.results.forEach((e) => state.selected.add(e.key));
     await persistHidden();
