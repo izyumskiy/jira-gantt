@@ -9,7 +9,7 @@ import { setLang, applyI18n, t } from "../src/js/i18n.js";
 import * as settings from "../src/js/settings.js";
 import * as agg from "../src/js/agg.js";
 import * as gantt from "../src/js/gantt.js";
-import { parseSprint, datesFromName, checkApis } from "../src/js/sync.js";
+import { parseSprint, datesFromName, checkApis, searchEpics, epicKeysFrom } from "../src/js/sync.js";
 import { classify, isDoneStatus } from "../src/js/status.js";
 import { collectPeople, mergeProfiles, parseSystems, systemsList, teamsList, normName, roleSummary } from "../src/js/team.js";
 import { parseConfig, exportConfig, applyConfig } from "../src/js/configio.js";
@@ -642,6 +642,39 @@ await settings.save({ infoSystems: [], fields: { plannedStart: "", plannedEnd: "
   window.fetch = async () => json({ errorMessages: ["denied"] }, 403);
   const denied = await checkApis();
   check("недоступное ядро валит проверку целиком", !denied.core.ok && !denied.ok && !denied.search.ok, JSON.stringify(denied.core));
+  window.fetch = orig;
+}
+
+// 4h. поиск эпиков: в поле ввода можно вставить список ключей
+{
+  check("ключи из строки: регистр, запятые, переводы строк, дубли",
+    epicKeysFrom(" dbd-867, DBD-868\nDBD-868 текст PRJ_X-12 ").join(",") === "DBD-867,DBD-868,PRJ_X-12",
+    epicKeysFrom(" dbd-867, DBD-868\nDBD-868 текст PRJ_X-12 ").join(","));
+  check("текст без ключей ключей не даёт", epicKeysFrom("личный кабинет 2026").length === 0);
+
+  const orig = window.fetch;
+  const sent = [];
+  const json = (o) => new Response(JSON.stringify(o), { status: 200, headers: { "Content-Type": "application/json" } });
+  window.fetch = async (url, opt) => {
+    const b = opt && opt.body ? JSON.parse(opt.body) : {};
+    if (b.jql) sent.push(b.jql);
+    return json({ issues: [], total: 0, startAt: 0, maxResults: 50 });
+  };
+  const savedFields = { ...settings.get().fields };
+  await settings.save({ fields: { ...savedFields, epicLink: "customfield_10100", sprint: "customfield_10101", version: 5 } });
+  await searchEpics("dbd-867, DBD-868\nDBD-869");
+  check("список ключей уходит одним key in (…), без поиска по названию", sent[0] === "key in (DBD-867,DBD-868,DBD-869) AND issuetype = Epic", sent[0]);
+  sent.length = 0;
+  await searchEpics("личный кабинет");
+  check("текст ищется по названию", sent[0] === 'issuetype = Epic AND summary ~ "личный кабинет" ORDER BY updated DESC', sent[0]);
+  sent.length = 0;
+  await searchEpics("DBD-867 кабинет");
+  check("ключ и текст вместе — два запроса, ключ не попадает в поиск по названию",
+    sent.length === 2 && sent[0].startsWith("key in (DBD-867)") && sent[1].includes('summary ~ "кабинет"'), JSON.stringify(sent));
+  sent.length = 0;
+  await searchEpics("   ");
+  check("пустая строка — все эпики", sent[0] === "issuetype = Epic ORDER BY updated DESC", sent[0]);
+  await settings.save({ fields: savedFields });
   window.fetch = orig;
 }
 

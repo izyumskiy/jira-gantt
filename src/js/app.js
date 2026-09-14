@@ -1030,9 +1030,13 @@ async function renderStored() {
 async function doFind() {
   try {
     status(t("st.epicsLoading"));
-    state.results = await sync.searchEpics($("#q").value);
+    const query = $("#q").value;
+    state.results = await sync.searchEpics(query);
     renderResults();
-    hideStatus();
+    // Вставленный список ключей: сразу говорим, каких эпиков не нашлось (чужой проект, не эпик, опечатка).
+    const missing = sync.epicKeysFrom(query).filter((k) => !state.results.some((e) => e.key === k));
+    if (missing.length) status(t("search.missing", { list: missing.join(", ") }), "error");
+    else hideStatus();
   } catch (e) {
     fail(e);
   }
