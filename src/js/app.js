@@ -997,16 +997,18 @@ async function renderStored() {
   const spentByEpic = new Map(stored.map((e) => [e.key, { epic: e.timeSpent || 0, issues: 0, withLogs: 0, total: 0 }]));
   // Доля выполнения: оценки сделанных задач (Готово / On Prod / Cancel) относительно всех.
   const pctByEpic = new Map(stored.map((e) => [e.key, { done: 0, total: 0, doneCount: 0, count: 0, projects: new Map() }]));
+  // Исключённые типы (по умолчанию User Story) — контейнеры для задач: в количестве задач, оценках
+  // и готовности их нет. Списанное на них время остаётся в сумме «Списано» — это реально потраченные часы.
+  const excludeTypes = flowlib.parseTypeList(settings.get().forecastExcludeTypes);
   for (const i of await db.all(db.STORES.issues)) {
     const acc = spentByEpic.get(i.epicKey);
     if (!acc) continue;
-    acc.total += 1;
-    if (i.timeSpent) {
-      acc.issues += i.timeSpent;
-      acc.withLogs += 1;
-    }
     if (!state.issuesByEpic.has(i.epicKey)) state.issuesByEpic.set(i.epicKey, []);
     state.issuesByEpic.get(i.epicKey).push(i.key);
+    acc.issues += i.timeSpent || 0;
+    if (flowlib.isExcludedType(i.typeName, excludeTypes)) continue;
+    acc.total += 1;
+    if (i.timeSpent) acc.withLogs += 1;
     const p = pctByEpic.get(i.epicKey);
     const est = agg.estimateOf(i);
     p.count += 1;
@@ -1499,6 +1501,8 @@ async function saveSettingsForm() {
   });
   status(t("set.saved"));
   await refreshHeader();
+  // Список исключаемых типов влияет на счётчики «Сохранённых эпиков» — пересчитываем сразу.
+  await renderStored();
 }
 
 async function ensurePermission() {
