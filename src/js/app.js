@@ -562,7 +562,10 @@ async function renderEpicFlow(box, epic, onDone = () => {}) {
     return;
   }
   const index = agg.buildTempoIndex(tempo);
+  // Прогноз считает задачи без исключённых типов (User Story и т.п.) — и в истории, и в остатке.
+  const excludeTypes = flowlib.parseTypeList(settings.get().forecastExcludeTypes);
   const model = flowlib.buildFlow({
+    excludeTypes,
     rows,
     teamOf: (p) => index.of(p),
     weeks: Number(settings.get().flowWeeks) || 52,
@@ -570,7 +573,7 @@ async function renderEpicFlow(box, epic, onDone = () => {}) {
   });
   const teams = model.teams.filter((x) => (x.byEpic.get(epic.key) || 0) > 0);
   // незакрытый эпик всё ещё в работе — его период активности тянется до конца окна
-  const remaining = issues.filter((i) => i.epicKey === epic.key && !agg.isDone(i)).length;
+  const remaining = issues.filter((i) => i.epicKey === epic.key && !agg.isDone(i) && !flowlib.isExcludedType(i.typeName, excludeTypes)).length;
   const open = remaining > 0;
   const shares = new Map(teams.map((x) => [x.team.id, flowlib.epicShare(x, epic.key, { open })]));
   renderForecast(box, epic, model, teams, remaining, shares).catch(() => {});
@@ -1344,6 +1347,7 @@ function fillSettingsForm() {
   $("#flowWeeks").value = s.flowWeeks;
   renderFlowDiag().catch(() => {});
   $("#doneStatuses").value = s.doneStatuses;
+  $("#forecastExcludeTypes").value = s.forecastExcludeTypes ?? "";
   $("#infoSystems").value = (s.infoSystems || []).join("\n");
   $("#teamsList").value = (s.teams || []).join("\n");
   $("#lang").value = s.lang;
@@ -1481,6 +1485,7 @@ async function saveSettingsForm() {
     useTempoTeams: $("#useTempoTeams").checked,
     flowWeeks: Number($("#flowWeeks").value) || 52,
     doneStatuses: $("#doneStatuses").value.trim(),
+    forecastExcludeTypes: $("#forecastExcludeTypes").value.trim(),
     infoSystems: team.parseSystems($("#infoSystems").value),
     teams: team.parseSystems($("#teamsList").value),
     fields: {

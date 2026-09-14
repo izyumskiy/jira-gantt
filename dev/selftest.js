@@ -266,6 +266,16 @@ check("подпись секции — диапазон дат", /^\d{2}\.\d{2} 
   const ae = withEpic.teams.find((x) => x.team.id === "t:1");
   check("ряд эпика по неделям не больше общего потока", ae.epicPerWeek.join(",") === "0,0,2" && ae.perWeek.join(",") === "0,1,3",
     `${ae.epicPerWeek.join(",")} / ${ae.perWeek.join(",")}`);
+  // User Story и другие исключённые типы в поток не попадают
+  const withStory = [...rows, { key: "F-8", resolved: day(now, 6), assigneeLogin: "ivan", epicKey: "EP-1", typeName: "User Story" }];
+  const exc = flowlib.parseTypeList(" User Story, Эпик ;");
+  check("список исключаемых типов: регистр и разделители", exc.join("|") === "user story|эпик", exc.join("|"));
+  const noStory = flowlib.buildFlow({ rows: withStory, weeks: 4, now, epicKey: "EP-1", excludeTypes: exc, teamOf: () => teamA });
+  const withStoryFlow = flowlib.buildFlow({ rows: withStory, weeks: 4, now, epicKey: "EP-1", teamOf: () => teamA });
+  check("User Story не входит в поток и в долю эпика",
+    noStory.teams[0].total === withStoryFlow.teams[0].total - 1 && noStory.teams[0].byEpic.get("EP-1") === withStoryFlow.teams[0].byEpic.get("EP-1") - 1,
+    `${noStory.teams[0].total} / ${withStoryFlow.teams[0].total}`);
+  check("isExcludedType: пустой тип не исключается", !flowlib.isExcludedType("", exc) && flowlib.isExcludedType("user STORY", exc));
   check("без epicKey ряд эпика пустой", flowlib.buildFlow({ rows, weeks: 4, now, teamOf: () => teamA }).teams[0].epicPerWeek.every((n) => n === 0));
   // доля за период активности: эпик жил только последнюю неделю (2 из 3), а за всё окно — 2 из 4
   const se = flowlib.epicShare(ae, "EP-1");
@@ -734,6 +744,7 @@ await settings.save({ infoSystems: [], fields: { plannedStart: "", plannedEnd: "
 }
 
 // 4g. умолчания настроек
+check("прогноз по умолчанию не считает User Story", settings.DEFAULTS.forecastExcludeTypes === "User Story");
 check("окно истории потока по умолчанию — 52 недели", settings.DEFAULTS.flowWeeks === 52, String(settings.DEFAULTS.flowWeeks));
 
 // 5. форматирование оценок

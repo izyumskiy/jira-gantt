@@ -352,7 +352,7 @@ export async function refreshFlow({ tempo, issues, others, onProgress = () => {}
   if (!logins.length) return { weeks, logins: 0, issues: 0, skipped: true };
 
   const fields = settings.get().fields;
-  const fieldList = ["summary", "project", "status", "resolutiondate", "assignee", fields.epicLink].filter(Boolean);
+  const fieldList = ["summary", "project", "status", "issuetype", "resolutiondate", "assignee", fields.epicLink].filter(Boolean);
   const out = [];
   for (let i = 0; i < logins.length; i += 25) {
     const chunk = logins.slice(i, i + 25).map((l) => `"${jira.escapeJql(l)}"`).join(",");
@@ -369,7 +369,8 @@ export async function refreshFlow({ tempo, issues, others, onProgress = () => {}
         assigneeName: a.displayName || a.name || "",
         epicKey: (fields.epicLink && f[fields.epicLink]) || "",
         projectKey: f.project?.key || "",
-        statusName: f.status?.name || ""
+        statusName: f.status?.name || "",
+        typeName: f.issuetype?.name || ""
       });
     }
   }

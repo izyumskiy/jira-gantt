@@ -37,9 +37,24 @@ export function fullWeeks(weeks, now = Date.now()) {
   return { from: firstStart, to: lastEnd, starts: keys };
 }
 
+// Типы задач, которые прогноз не считает (по умолчанию User Story): история — контейнер для
+// задач, а не единица работы, и в потоке она удваивала бы то, что уже посчитано её подзадачами.
+// Список из настроек через запятую; сравнение по названию типа без учёта регистра.
+export function parseTypeList(text) {
+  return String(text || "")
+    .split(/[,;\n]/)
+    .map((x) => x.trim().toLowerCase())
+    .filter(Boolean);
+}
+
+export function isExcludedType(typeName, excluded) {
+  return !!typeName && excluded.includes(String(typeName).trim().toLowerCase());
+}
+
 // rows — записи хранилища flow (завершённые задачи с датой), teamOf — функция «человек → команда».
 // epicKey — если задан, у каждой команды дополнительно считается ряд «задачи эпика по неделям».
-export function buildFlow({ rows, teamOf, weeks = 16, now = Date.now(), epicKey = "" }) {
+// excludeTypes — типы задач (в нижнем регистре), которые в поток не попадают.
+export function buildFlow({ rows, teamOf, weeks = 16, now = Date.now(), epicKey = "", excludeTypes = [] }) {
   const win = fullWeeks(weeks, now);
   const index = new Map(win.starts.map((ms, i) => [ms, i]));
   const teams = new Map();
@@ -47,6 +62,7 @@ export function buildFlow({ rows, teamOf, weeks = 16, now = Date.now(), epicKey 
 
   for (const r of rows) {
     if (!r.resolved) continue;
+    if (isExcludedType(r.typeName, excludeTypes)) continue;
     const ms = mondayOf(Date.parse(r.resolved));
     const slot = index.get(ms);
     if (slot === undefined) continue; // вне окна полных недель
