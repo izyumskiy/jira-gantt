@@ -523,13 +523,20 @@ check("epicPeople: скрыты люди только с закрытыми сп
   f1.projects.map((p) => p.label).sort().join(",") === "Ivan,Kim,Lee", f1.projects.map((p) => p.label).join(","));
 check("epicPeople: итоги эпика при этом по всем задачам", f1.count === 5 && f1.sum === 17 * H, `${f1.count} / ${f1.sum / H}`);
 
+// Диаграмма по умолчанию открывается свёрнутой, поэтому проверки по вложенным строкам рисуют
+// её через явное «развернуть всё».
+const renderOpen = (box, model, opts) => {
+  gantt.setCollapsed(opts.mode, []);
+  gantt.render(box, model, opts);
+};
+
 // шапка секции: не больше 7 спринтов, остальные по клику
 const manySprints = [sprints[1], ...Array.from({ length: 12 }, (_, i) => ({ id: 100 + i, name: `Someday ${i + 1}`, state: "FUTURE", startDate: null, endDate: null, boardId: 7 }))];
 const manyIssues = Array.from({ length: 12 }, (_, i) => mk(`M-${i}`, "EP-1", "AAA", "Ivan", 100 + i, 1, "new"));
 const mh = agg.buildModel({ issues: manyIssues, sprints: manySprints, epics, boards, mode: "epicPeople" });
 const gh = document.createElement("div");
 document.body.append(gh);
-gantt.render(gh, mh, { mode: "epicPeople" });
+renderOpen(gh, mh, { mode: "epicPeople" });
 const noDateTh = () => [...gh.querySelectorAll("thead .c-sprint:not(.backlog)")].at(-1);
 check("в шапке секции «Без дат» показаны только 7 спринтов из 12", noDateTh().querySelectorAll(".sp-item").length === 7, String(noDateTh().querySelectorAll(".sp-item").length));
 check("под списком — «ещё 5»", noDateTh().querySelector(".sp-more")?.textContent === t("gantt.headerMore", { n: 5 }), noDateTh().querySelector(".sp-more")?.textContent);
@@ -543,7 +550,7 @@ gh.remove();
 const g3 = document.createElement("div");
 document.body.append(g3);
 let clicked = null;
-gantt.render(g3, m3, { mode: "epicPeople", highlightChild: "ivan", profiles: peopleProfiles, onChildClick: (k, n) => (clicked = `${k}:${n}`) });
+renderOpen(g3, m3, { mode: "epicPeople", highlightChild: "ivan", profiles: peopleProfiles, onChildClick: (k, n) => (clicked = `${k}:${n}`) });
 const nameBtn = (n) => [...g3.querySelectorAll(".plabel-link")].find((b) => b.textContent === n);
 check("epicPeople: уволенный Ivan — серым (p-fired)", nameBtn("Ivan")?.classList.contains("p-fired") && getComputedStyle(nameBtn("Ivan")).color !== getComputedStyle(nameBtn("Petr")).color,
   `${nameBtn("Ivan")?.className} / ${getComputedStyle(nameBtn("Ivan")).color} vs ${getComputedStyle(nameBtn("Petr")).color}`);
@@ -572,6 +579,25 @@ const ep1Row3 = [...g3.querySelectorAll(".g-row.group")].find((r) => r.querySele
 check("epicPeople: setCollapsed сворачивает указанные эпики", ep1Row3.nextElementSibling?.classList.contains("group") && ep1Row3.querySelector(".twisty").textContent === "▸",
   `${ep1Row3.nextElementSibling?.className} / ${ep1Row3.querySelector(".twisty").textContent}`);
 gantt.resetCollapse();
+// по умолчанию (первая отрисовка режима и после «Обновить») все группы свёрнуты
+{
+  const gc = document.createElement("div");
+  document.body.append(gc);
+  gantt.render(gc, m3, { mode: "epicPeople" });
+  const groups = [...gc.querySelectorAll(".g-row.group")];
+  check("по умолчанию все группы свёрнуты", groups.length === m3.groups.length && groups.every((r) => r.querySelector(".twisty").textContent === "▸"),
+    `${groups.length} / ${m3.groups.length}`);
+  check("вложенных строк при этом нет", gc.querySelectorAll(".g-row.proj").length === 0, String(gc.querySelectorAll(".g-row.proj").length));
+  gc.querySelector(".g-row.group .twisty").click();
+  check("клик по стрелке раскрывает группу", gc.querySelectorAll(".g-row.proj").length > 0);
+  gantt.render(gc, m3, { mode: "epicPeople" });
+  check("после ручного раскрытия повторная отрисовка не сворачивает обратно", gc.querySelectorAll(".g-row.proj").length > 0);
+  gantt.resetCollapse();
+  gantt.render(gc, m3, { mode: "epicPeople" });
+  check("resetCollapse (после «Обновить») снова сворачивает всё", gc.querySelectorAll(".g-row.proj").length === 0);
+  gc.remove();
+  gantt.resetCollapse();
+}
 g3.remove();
 
 // 4d. загрузчик конфигурации — разбор и экспорт
@@ -724,9 +750,9 @@ check("i18n en", t("gantt.epic") === "Epic");
 setLang("ru");
 check("i18n ru", t("gantt.epic") === "Эпик");
 
-gantt.render(document.getElementById("g1"), m1, { mode: "epicPeople", onChildClick: () => {} });
+renderOpen(document.getElementById("g1"), m1, { mode: "epicPeople", onChildClick: () => {} });
 const rowOf = (name) => [...document.querySelectorAll("#g1 .g-row.proj")].find((r) => r.querySelector(".plabel").textContent === name);
-gantt.render(document.getElementById("g2"), m2, { mode: "assignee", profiles: peopleProfiles });
+renderOpen(document.getElementById("g2"), m2, { mode: "assignee", profiles: peopleProfiles });
 
 // 7. отрисовка
 const lz = document.querySelectorAll("#g1 .lozenge");
@@ -881,14 +907,14 @@ check("строки команд на вкладке по людям", teamRows.
   await settings.save({ sprintDays: 1 });
   const gO = document.createElement("div");
   document.body.append(gO);
-  gantt.render(gO, m2, { mode: "assignee" });
+  renderOpen(gO, m2, { mode: "assignee" });
   const rowIvan = [...gO.querySelectorAll(".g-row.group")].find((r) => r.querySelector(".glabel").textContent === "Ivan");
   const cells = rowIvan.querySelectorAll(".c-cell");
   check("перегруженная секция обведена красным", cells[0].querySelector(".bar-split")?.classList.contains("overload"), cells[0].querySelector(".bar-split")?.className);
   check("в подсказке — нагрузка и ёмкость", (cells[0].querySelector(".bar-split")?.title || "").includes("2.5д") && cells[0].querySelector(".bar-split").title.includes("1д"), cells[0].querySelector(".bar-split")?.title);
   check("секция в пределах ёмкости не обведена", !cells[1].querySelector(".bar-split")?.classList.contains("overload"));
   await settings.save({ sprintDays: 10 });
-  gantt.render(gO, m2, { mode: "assignee" });
+  renderOpen(gO, m2, { mode: "assignee" });
   check("при ёмкости 10д перегрузки нет", gO.querySelectorAll(".bar.overload").length === 0);
   gO.remove();
 }
@@ -964,7 +990,7 @@ check("standIns: без роли/систем — пусто", gantt.standIns({ 
 
 const g4 = document.createElement("div");
 document.body.append(g4);
-gantt.render(g4, m2, { mode: "assignee", profiles: cmpProfiles, personLoad: loadFixture });
+renderOpen(g4, m2, { mode: "assignee", profiles: cmpProfiles, personLoad: loadFixture });
 const cmpBtnOf = (n) => [...g4.querySelectorAll(".g-row.group")].find((r) => r.querySelector(".glabel").textContent === n)?.querySelector(".cmp-btn");
 check("пиктограмма ⇄ у каждого человека на «По людям»", g4.querySelectorAll(".g-row.group .cmp-btn").length === m2.groups.filter((g) => g.key).length && !cmpBtnOf("Без исполнителя"));
 cmpBtnOf("Ivan").click();
@@ -991,7 +1017,7 @@ check("у Petr без замены — Web (Kim той же роли, но Web �
   [...document.querySelectorAll(".tooltip.tip-compare .cmp-table .cmp-name")].map((n) => n.textContent).join(","));
 document.querySelector(".tip-close").click();
 // на «По эпикам и людям» — тоже
-gantt.render(g3, m3, { mode: "epicPeople", profiles: cmpProfiles, onChildClick: () => {} });
+renderOpen(g3, m3, { mode: "epicPeople", profiles: cmpProfiles, onChildClick: () => {} });
 check("пиктограмма ⇄ у людей внутри эпиков", g3.querySelectorAll(".g-row.proj .cmp-btn").length > 0);
 g3.querySelector(".g-row.proj .cmp-btn").click();
 check("окно сравнения открывается и на «По эпикам и людям»", !!document.querySelector(".tooltip.tip-compare"));
@@ -1000,7 +1026,7 @@ g4.remove();
 
 // 9b. критический путь на «По эпикам и людям»
 {
-  gantt.render(g3, m3, { mode: "epicPeople", onChildClick: () => {} });
+  renderOpen(g3, m3, { mode: "epicPeople", onChildClick: () => {} });
   const ep1g = m3.groups.find((g) => g.key === "EP-1");
   const crit = gantt.criticalPeople(ep1g, m3);
   check("критический путь: Petr определяет конец (последний спринт), Ivan не укладывается в срок (44ч > ёмкости)",
@@ -1100,7 +1126,7 @@ cmtBtn.click();
 await new Promise((r) => setTimeout(r, 30));
 check("…и он первый в списке", document.querySelector(".tooltip.tip-comments .cmt-item .cmt-body")?.textContent === "Спасибо, @ielkin!", document.querySelector(".tooltip.tip-comments .cmt-item .cmt-body")?.textContent);
 document.querySelector(".tooltip.tip-comments .tip-close").click();
-gantt.render(g3, m3, { mode: "epicPeople", onChildClick: () => {} });
+renderOpen(g3, m3, { mode: "epicPeople", onChildClick: () => {} });
 check("пиктограмма 💬 есть и на «По эпикам и людям»", g3.querySelectorAll(".g-row.group .cmt-btn").length === m3.groups.length);
 
 const total = document.createElement("div");
