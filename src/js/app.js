@@ -551,13 +551,15 @@ async function computeTeamShares(epic) {
   return result;
 }
 
-// Поток команд и доля эпика в нём: считается из локальной истории завершений, без запросов.
+// Поток команд и доля эпика: считается из локальной истории завершений, без запросов.
+// Переключатель команд (можно выбрать несколько) пересчитывает таблицу, гистограмму и прогноз.
 async function renderEpicFlow(box, epic, onDone = () => {}) {
   box.textContent = "";
-  box.append(Object.assign(document.createElement("div"), { className: "tip-sub", textContent: t("flow.title") }));
+  const div = (className, textContent = "") => Object.assign(document.createElement("div"), { className, textContent });
+  box.append(div("tip-sub", t("flow.title")));
   const [rows, tempo, issues] = await Promise.all([db.all(db.STORES.flow), db.all(db.STORES.tempo), db.all(db.STORES.issues)]);
   if (!rows.length) {
-    box.append(Object.assign(document.createElement("div"), { className: "muted", textContent: t("flow.none") }));
+    box.append(div("muted", t("flow.none")));
     onDone();
     return;
   }
@@ -576,114 +578,133 @@ async function renderEpicFlow(box, epic, onDone = () => {}) {
   const remaining = issues.filter((i) => i.epicKey === epic.key && !agg.isDone(i) && !flowlib.isExcludedType(i.typeName, excludeTypes)).length;
   const open = remaining > 0;
   const shares = new Map(teams.map((x) => [x.team.id, flowlib.epicShare(x, epic.key, { open })]));
-  renderForecast(box, epic, model, teams, remaining, shares).catch(() => {});
-  if (!teams.length) {
-    box.append(Object.assign(document.createElement("div"), { className: "muted", textContent: t("share.none") }));
-  } else {
-    const tbl = document.createElement("table");
-    tbl.className = "tip-table share-table";
-    for (const x of teams) {
-      const s = shares.get(x.team.id);
-      const act = s.active || s;
-      const pct = Math.round(act.share * 100);
-      const tr = document.createElement("tr");
-      const name = document.createElement("td");
-      name.className = "tp-name";
-      const dot = document.createElement("i");
-      dot.className = `dot ${x.team.color >= 0 ? `tc-${x.team.color}` : "tc-none"}`;
-      name.append(dot, document.createTextNode(x.team.name || t("share.noTeam")));
-      const flowCell = document.createElement("td");
-      flowCell.className = "tp-num";
-      flowCell.textContent = `${x.median} / нед.`;
-      const pctCell = document.createElement("td");
-      pctCell.className = "tp-num share-pct";
-      const bar = document.createElement("span");
-      bar.className = "ipct-bar";
-      bar.style.setProperty("--pct", `${Math.min(100, pct)}%`);
-      const num = document.createElement("span");
-      num.className = "ipct-num";
-      num.textContent = `${pct}%`;
-      pctCell.append(bar, num);
-      tr.title = t("flow.rowHint", {
-        team: x.team.name || t("share.noTeam"),
-        median: x.median,
-        max: x.max,
-        done: act.done,
-        total: act.total,
-        weeks: act.weeks,
-        pct,
-        rw: s.recent ? s.recent.weeks : 0,
-        rpct: s.recent ? Math.round(s.recent.share * 100) : 0,
-        apct: Math.round(s.share * 100),
-        adone: s.done,
-        atotal: s.total
-      });
-      tr.append(name, flowCell, pctCell);
-      tbl.append(tr);
-    }
-    box.append(tbl);
-  }
-  const spans = teams.map((x) => shares.get(x.team.id).active).filter(Boolean);
-  const span = spans.length
-    ? { from: Math.min(...spans.map((a) => a.from)), to: Math.max(...spans.map((a) => a.to)) }
-    : null;
-  if (teams.length) {
-    renderFlowChart(box, model, teams, span, onDone);
-    if (span) {
-      const sum = teams.reduce(
-        (acc, x) => {
-          const a = shares.get(x.team.id).active;
-          return a ? { done: acc.done + a.done, total: acc.total + a.total } : acc;
-        },
-        { done: 0, total: 0 }
-      );
-      box.append(
-        Object.assign(document.createElement("div"), {
-          className: "muted small",
-          textContent: t("flow.spanNote", {
-            from: fmtDay(new Date(model.starts[span.from]).toISOString()),
-            to: fmtDay(new Date(model.starts[span.to] + 6 * 86400000).toISOString()),
-            n: span.to - span.from + 1,
-            pct: sum.total ? Math.round((sum.done / sum.total) * 100) : 0
-          })
-        })
-      );
-    }
-  }
-  const note = document.createElement("div");
-  note.className = model.weeksCount < 5 ? "cmt-error small" : "muted small";
-  note.textContent =
+
+  const windowNote = div(
+    model.weeksCount < 5 ? "cmt-error small" : "muted small",
     t("flow.window", { from: fmtDay(new Date(model.from).toISOString()), to: fmtDay(new Date(model.to).toISOString()), n: model.weeksCount }) +
-    (model.weeksCount < 12 ? ` · ${t("flow.short", { n: model.weeksCount })}` : "");
-  box.append(note);
-  onDone();
+      (model.weeksCount < 12 ? ` · ${t("flow.short", { n: model.weeksCount })}` : "")
+  );
+  const fcBox = div("share-block forecast-block");
+
+  if (!teams.length) {
+    box.append(div("muted", t("share.none")), windowNote, fcBox);
+    drawForecast(fcBox, epic, model, [], remaining, shares);
+    onDone();
+    return;
+  }
+
+  // Выбранные команды; пустой набор — все.
+  const selected = new Set();
+  const picked = () => (selected.size ? teams.filter((x) => selected.has(x.team.id)) : teams);
+
+  const chips = div("chips flow-teams");
+  const options = [{ id: "", name: t("flow.all") }, ...teams.map((x) => ({ id: x.team.id, name: x.team.name || t("share.noTeam") }))];
+  for (const o of options) {
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "chip";
+    chip.dataset.id = o.id;
+    chip.textContent = o.name;
+    chip.onclick = (e) => {
+      e.stopPropagation();
+      // «Все команды» сбрасывает выбор; клик по команде добавляет её или снимает повторным кликом.
+      if (!o.id) selected.clear();
+      else if (selected.has(o.id)) selected.delete(o.id);
+      else selected.add(o.id);
+      redraw();
+    };
+    chips.append(chip);
+  }
+
+  const tbl = document.createElement("table");
+  tbl.className = "tip-table share-table";
+  const rowOf = new Map();
+  for (const x of teams) {
+    const s = shares.get(x.team.id);
+    const act = s.active || s;
+    const pct = Math.round(act.share * 100);
+    const tr = document.createElement("tr");
+    const name = document.createElement("td");
+    name.className = "tp-name";
+    const dot = document.createElement("i");
+    dot.className = `dot ${x.team.color >= 0 ? `tc-${x.team.color}` : "tc-none"}`;
+    name.append(dot, document.createTextNode(x.team.name || t("share.noTeam")));
+    const flowCell = document.createElement("td");
+    flowCell.className = "tp-num";
+    flowCell.textContent = `${x.median} / нед.`;
+    const pctCell = document.createElement("td");
+    pctCell.className = "tp-num share-pct";
+    const bar = document.createElement("span");
+    bar.className = "ipct-bar";
+    bar.style.setProperty("--pct", `${Math.min(100, pct)}%`);
+    const num = document.createElement("span");
+    num.className = "ipct-num";
+    num.textContent = `${pct}%`;
+    pctCell.append(bar, num);
+    tr.title = t("flow.rowHint", {
+      team: x.team.name || t("share.noTeam"),
+      median: x.median,
+      max: x.max,
+      done: act.done,
+      total: act.total,
+      weeks: act.weeks,
+      pct,
+      rw: s.recent ? s.recent.weeks : 0,
+      rpct: s.recent ? Math.round(s.recent.share * 100) : 0,
+      apct: Math.round(s.share * 100),
+      adone: s.done,
+      atotal: s.total
+    });
+    tr.append(name, flowCell, pctCell);
+    tbl.append(tr);
+    rowOf.set(x.team.id, tr);
+  }
+
+  const chart = renderFlowChart(model);
+  const spanNote = div("muted small");
+  box.append(chips, div("muted small", t("flow.pickHint")), tbl, chart.el, spanNote, windowNote, fcBox);
+
+  const redraw = () => {
+    const list = picked();
+    const ids = new Set(list.map((x) => x.team.id));
+    // «Все команды» горит, когда выбор пуст или в нём все команды.
+    const all = !selected.size || selected.size === teams.length;
+    for (const c of chips.children) c.classList.toggle("on", c.dataset.id ? selected.has(c.dataset.id) : all);
+    for (const [id, tr] of rowOf) tr.classList.toggle("off", !ids.has(id));
+    const spans = list.map((x) => shares.get(x.team.id).active).filter(Boolean);
+    const span = spans.length ? { from: Math.min(...spans.map((a) => a.from)), to: Math.max(...spans.map((a) => a.to)) } : null;
+    chart.draw(list, span);
+    spanNote.hidden = !span;
+    if (span) {
+      const sum = spans.reduce((acc, a) => ({ done: acc.done + a.done, total: acc.total + a.total }), { done: 0, total: 0 });
+      spanNote.textContent = t("flow.spanNote", {
+        from: fmtDay(new Date(model.starts[span.from]).toISOString()),
+        to: fmtDay(new Date(model.starts[span.to] + 6 * 86400000).toISOString()),
+        n: span.to - span.from + 1,
+        pct: sum.total ? Math.round((sum.done / sum.total) * 100) : 0
+      });
+    }
+    drawForecast(fcBox, epic, model, list, remaining, shares);
+    onDone();
+  };
+  redraw();
 }
 
-// Гистограмма завершённых задач по неделям: столбец — неделя, тёмная часть — задачи эпика.
-// Переключатель выбирает команду или сумму по всем.
-function renderFlowChart(parent, model, teams, span = null, onDone = () => {}) {
-  const wrap = document.createElement("div");
-  wrap.className = "flow-chart";
-  parent.append(wrap);
-  wrap.append(Object.assign(document.createElement("div"), { className: "tip-sub", textContent: t("flow.chart") }));
-
-  const tabs = document.createElement("div");
-  tabs.className = "chips";
-  wrap.append(tabs);
+// Гистограмма завершённых задач по неделям: столбец — неделя, жёлтая часть — задачи эпика.
+// Рисуется суммой по выбранным командам; недели вне периода их работы над эпиком приглушены.
+function renderFlowChart(model) {
+  const el = document.createElement("div");
+  el.className = "flow-chart";
+  el.append(Object.assign(document.createElement("div"), { className: "tip-sub", textContent: t("flow.chart") }));
   const bars = document.createElement("div");
   bars.className = "bars";
-  wrap.append(bars);
   const axis = document.createElement("div");
   axis.className = "bars-axis";
-  wrap.append(axis);
+  el.append(bars, axis);
 
-  const options = [{ id: "", name: t("flow.all") }, ...teams.map((x) => ({ id: x.team.id, name: x.team.name || t("share.noTeam") }))];
-  let current = "";
-
-  const draw = () => {
-    const picked = current ? teams.filter((x) => x.team.id === current) : teams;
-    const total = model.starts.map((_, i) => picked.reduce((n, x) => n + x.perWeek[i], 0));
-    const epicOnly = model.starts.map((_, i) => picked.reduce((n, x) => n + x.epicPerWeek[i], 0));
+  const draw = (list, span) => {
+    const total = model.starts.map((_, i) => list.reduce((n, x) => n + x.perWeek[i], 0));
+    const epicOnly = model.starts.map((_, i) => list.reduce((n, x) => n + x.epicPerWeek[i], 0));
     const max = Math.max(1, ...total);
     bars.textContent = "";
     axis.textContent = "";
@@ -711,86 +732,54 @@ function renderFlowChart(parent, model, teams, span = null, onDone = () => {}) {
       tick.textContent = i % 4 === 0 ? fmtDay(new Date(ms).toISOString()).slice(0, 5) : "";
       axis.append(tick);
     });
-    [...tabs.children].forEach((c) => c.classList.toggle("on", c.dataset.id === current));
-    onDone();
   };
-
-  for (const o of options) {
-    const chip = document.createElement("button");
-    chip.type = "button";
-    chip.className = "chip";
-    chip.dataset.id = o.id;
-    chip.textContent = o.name;
-    chip.onclick = (e) => {
-      e.stopPropagation();
-      current = o.id;
-      draw();
-    };
-    tabs.append(chip);
-  }
-  draw();
+  return { el, draw };
 }
 
-// Прогноз срока эпика: остаток задач распределяется между командами по их вкладу в эпик,
-// каждая команда симулируется по своей истории, срок прогона — максимум по командам.
-async function renderForecast(parent, epic, model, teams, remaining, shares) {
-  const box = document.createElement("div");
-  box.className = "share-block forecast-block";
-  box.append(Object.assign(document.createElement("div"), { className: "tip-sub", textContent: t("fc.title") }));
-  parent.append(box);
-
+// Прогноз срока эпика по выбранным командам: остаток делят только они (пропорционально вкладу в
+// эпик), история каждой — недели периода их работы над эпиком; срок прогона — максимум по командам.
+function drawForecast(box, epic, model, list, remaining, shares) {
+  box.textContent = "";
   const note = (text, error = false) =>
     box.append(Object.assign(document.createElement("div"), { className: error ? "cmt-error small" : "muted small", textContent: text }));
+  box.append(Object.assign(document.createElement("div"), { className: "tip-sub", textContent: t("fc.title") }));
 
-  if (model.weeksCount < flowlib.FORECAST_MIN_WEEKS) {
-    note(t("fc.short", { n: model.weeksCount, min: flowlib.FORECAST_MIN_WEEKS }), true);
+  const res = flowlib.forecastForTeams({ teams: list, shares, epicKey: epic.key, remaining });
+  if (res.reason === "short") {
+    note(t("fc.short", { n: res.weeks, min: flowlib.FORECAST_MIN_WEEKS }), true);
     return;
   }
-  const epicDone = teams.reduce((n, x) => n + (x.byEpic.get(epic.key) || 0), 0);
-  if (!remaining || !epicDone) {
+  if (!res.fc) {
     note(t("fc.none"));
     return;
   }
-  const input = teams.map((x) => {
-    const done = x.byEpic.get(epic.key) || 0;
-    return {
-      team: x.team,
-      perWeek: x.perWeek,
-      share: flowlib.forecastShare(shares.get(x.team.id)),
-      remaining: (remaining * done) / epicDone
-    };
-  });
-  const fc = flowlib.forecastDelivery({ teams: input });
-  if (!fc) {
-    note(t("fc.none"));
-    return;
-  }
-  box.append(Object.assign(document.createElement("div"), { className: "muted small", textContent: t("fc.remaining", { n: remaining }) }));
+  const { fc, history } = res;
+  note(t("fc.remaining", { n: remaining }));
   const tbl = document.createElement("table");
   tbl.className = "tip-table";
   for (const [p, key] of [[50, "p50"], [85, "p85"], [95, "p95"]]) {
     const tr = document.createElement("tr");
     const cell = document.createElement("td");
     cell.className = "tp-name" + (p === 85 ? " fc-main" : "");
-    cell.textContent = t("fc.line", {
-      pct: p,
-      weeks: fc.weeks[key],
-      date: fmtDay(fc.dates[key].toISOString())
-    });
+    cell.textContent = t("fc.line", { pct: p, weeks: fc.weeks[key], date: fmtDay(fc.dates[key].toISOString()) });
     tr.append(cell);
     tbl.append(tr);
   }
   box.append(tbl);
   if (fc.last.length) {
     const top = fc.last[0];
-    box.append(
-      Object.assign(document.createElement("div"), {
-        className: "muted small",
-        textContent: t("fc.last", { team: top.team.name || t("share.noTeam"), pct: top.pct })
-      })
-    );
+    note(t("fc.last", { team: top.team.name || t("share.noTeam"), pct: top.pct }));
   }
-  if (model.weeksCount < flowlib.FORECAST_OK_WEEKS) note(t("fc.warn", { n: model.weeksCount, ok: flowlib.FORECAST_OK_WEEKS }), true);
+  note(
+    t("fc.basis", {
+      teams: list.map((x) => x.team.name || t("share.noTeam")).join(", "),
+      from: fmtDay(new Date(model.starts[history.from]).toISOString()),
+      to: fmtDay(new Date(model.starts[history.to] + 6 * 86400000).toISOString()),
+      n: history.weeks,
+      ok: flowlib.FORECAST_OK_WEEKS
+    })
+  );
+  if (history.weeks < flowlib.FORECAST_OK_WEEKS) note(t("fc.warn", { n: history.weeks, ok: flowlib.FORECAST_OK_WEEKS }), true);
   note(t("fc.caveat"));
 }
 

@@ -140,7 +140,8 @@ main { padding: 14px 16px 40px; }
 .share-table .ipct-bar { width: 40px; margin-right: 6px; }
 /* Гистограмма завершённых задач по неделям. */
 .flow-chart { margin-top: 8px; }
-.flow-chart .chips { margin-bottom: 6px; }
+.flow-teams { margin: 4px 0 2px; }
+.share-table tr.off { opacity: .4; }
 .bars { display: flex; align-items: flex-end; gap: 3px; height: 90px; border-bottom: 1px solid var(--line); }
 .bar-col { flex: 1; height: 100%; display: flex; align-items: flex-end; cursor: default; }
 .bar-stack { width: 100%; min-height: 1px; background: #c1c7d0; border-radius: 2px 2px 0 0; display: flex; align-items: flex-end; }

@@ -743,6 +743,38 @@ await settings.save({ infoSystems: [], fields: { plannedStart: "", plannedEnd: "
   check("обработчики on* не возвращают результат логического выражения", bad.length === 0, bad.join(" | "));
 }
 
+// 4j. прогноз по выбранным командам (переключатель в карточке эпика, можно несколько)
+{
+  const W = 20;
+  const tf = (id, per, epicFrom, epicPer) => {
+    const perWeek = new Array(W).fill(per);
+    const epicPerWeek = perWeek.map((_, i) => (i >= epicFrom ? epicPer : 0));
+    const done = epicPerWeek.reduce((a, b) => a + b, 0);
+    return { team: { id, name: id }, perWeek, epicPerWeek, total: per * W, byEpic: new Map([["EP-1", done]]) };
+  };
+  const A = tf("A", 10, 15, 5); // 25 задач эпика за последние 5 недель, доля 50%
+  const B = tf("B", 2, 17, 1); // 3 задачи эпика за последние 3 недели, доля 50%
+  const shares = new Map([A, B].map((x) => [x.team.id, flowlib.epicShare(x, "EP-1", { open: true })]));
+  const run = (teams) => flowlib.forecastForTeams({ teams, shares, epicKey: "EP-1", remaining: 28, runs: 50, rnd: () => 0.5 });
+
+  const both = run([A, B]);
+  check("все команды: остаток делится по вкладу в эпик (25 : 3)",
+    both.fc.teams.find((x) => x.team.id === "A").remaining === 25 && both.fc.teams.find((x) => x.team.id === "B").remaining === 3,
+    JSON.stringify(both.fc.teams.map((x) => [x.team.id, x.remaining])));
+  check("история — период работы над эпиком, растянутый до 12 недель", both.history.from === 8 && both.history.weeks === 12, JSON.stringify(both.history));
+  const onlyB = run([B]);
+  check("выбрана одна команда — весь остаток на ней", onlyB.fc.teams.length === 1 && onlyB.fc.teams[0].remaining === 28, JSON.stringify(onlyB.fc.teams.map((x) => x.remaining)));
+  const onlyA = run([A]);
+  check("выбор команды меняет срок: медленная команда одна — дольше", onlyB.fc.weeks.p50 > onlyA.fc.weeks.p50, `${onlyA.fc.weeks.p50} / ${onlyB.fc.weeks.p50}`);
+  check("история прогноза режется по периоду", onlyA.fc.teams[0].perWeek.length === onlyA.history.weeks, String(onlyA.fc.teams[0].perWeek.length));
+  const shortT = { ...tf("C", 3, 0, 1), perWeek: [3, 3, 3], epicPerWeek: [1, 1, 1] };
+  const shortShares = new Map([["C", flowlib.epicShare(shortT, "EP-1", { open: true })]]);
+  check("меньше 5 недель истории — прогноз не строится",
+    flowlib.forecastForTeams({ teams: [shortT], shares: shortShares, epicKey: "EP-1", remaining: 5 }).reason === "short");
+  check("без остатка или без команд — прогноза нет", run([]).reason === "none" &&
+    flowlib.forecastForTeams({ teams: [A], shares, epicKey: "EP-1", remaining: 0 }).reason === "none");
+}
+
 // 4g. умолчания настроек
 check("прогноз по умолчанию не считает User Story", settings.DEFAULTS.forecastExcludeTypes === "User Story");
 check("окно истории потока по умолчанию — 52 недели", settings.DEFAULTS.flowWeeks === 52, String(settings.DEFAULTS.flowWeeks));

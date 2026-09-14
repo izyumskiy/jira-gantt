@@ -192,3 +192,28 @@ export function forecastShare(s) {
   if (s.active && s.active.share) return s.active.share;
   return s.share;
 }
+
+// Прогноз по выбранным командам. Остаток задач эпика целиком делят выбранные команды —
+// пропорционально их вкладу в эпик (кого сняли, тот больше не работает над остатком). История
+// каждой команды — недели текущего периода работы выбранных команд над эпиком: от самой ранней
+// недели с их завершениями до конца окна, но не короче FORECAST_OK_WEEKS (иначе пара недель
+// случайного всплеска решала бы срок). Доля потока — самая свежая оценка (forecastShare).
+export function forecastForTeams({ teams, shares, epicKey, remaining, runs = 10000, now = Date.now(), rnd = Math.random }) {
+  if (!teams.length || !remaining) return { reason: "none" };
+  const epicDone = teams.reduce((n, x) => n + (x.byEpic.get(epicKey) || 0), 0);
+  if (!epicDone) return { reason: "none" };
+  const to = teams[0].perWeek.length - 1;
+  const froms = teams.map((x) => shares.get(x.team.id)?.active?.from).filter((v) => v != null);
+  const start = froms.length ? Math.min(...froms) : 0;
+  const from = Math.max(0, Math.min(start, to - FORECAST_OK_WEEKS + 1));
+  const history = { from, to, weeks: to - from + 1 };
+  if (history.weeks < FORECAST_MIN_WEEKS) return { reason: "short", weeks: history.weeks, history };
+  const input = teams.map((x) => ({
+    team: x.team,
+    perWeek: x.perWeek.slice(from, to + 1),
+    share: forecastShare(shares.get(x.team.id)),
+    remaining: (remaining * (x.byEpic.get(epicKey) || 0)) / epicDone
+  }));
+  const fc = forecastDelivery({ teams: input, runs, now, rnd });
+  return fc ? { fc, history } : { reason: "none", history };
+}
