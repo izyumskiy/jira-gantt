@@ -1612,7 +1612,11 @@ async function boot() {
       fail(e);
     }
   };
-  $("#q").onkeydown = (e) => e.key === "Enter" && $("#btnFind").click();
+  // Именно блоком: обработчик-свойство, вернувший false (а `cond && f()` возвращает false на
+  // любой другой клавише), отменяет действие по умолчанию — в поле не набирался ни один символ.
+  $("#q").onkeydown = (e) => {
+    if (e.key === "Enter") $("#btnFind").click();
+  };
   $("#btnSelectAll").onclick = async () => {
     state.results.forEach((e) => state.selected.add(e.key));
     await persistHidden();

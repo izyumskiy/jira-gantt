@@ -678,6 +678,21 @@ await settings.save({ infoSystems: [], fields: { plannedStart: "", plannedEnd: "
   window.fetch = orig;
 }
 
+// 4i. обработчики-свойства не должны возвращать false: это отменяет действие по умолчанию
+// (из-за такого `onkeydown` в поле поиска не набирался ни один символ).
+{
+  const sources = await Promise.all(
+    ["app", "gantt", "team", "sync", "agg", "flow", "configio"].map(async (n) => [n, await (await fetch(`../src/js/${n}.js`)).text()])
+  );
+  const bad = [];
+  for (const [name, code] of sources) {
+    for (const m of code.matchAll(/\bon[a-z]+\s*=\s*\([^)]*\)\s*=>\s*(?!\{)([^;\n]+)/g)) {
+      if (/&&|\|\|/.test(m[1])) bad.push(`${name}.js: ${m[0].slice(0, 70)}`);
+    }
+  }
+  check("обработчики on* не возвращают результат логического выражения", bad.length === 0, bad.join(" | "));
+}
+
 // 4g. умолчания настроек
 check("окно истории потока по умолчанию — 52 недели", settings.DEFAULTS.flowWeeks === 52, String(settings.DEFAULTS.flowWeeks));
 
