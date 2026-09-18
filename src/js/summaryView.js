@@ -103,6 +103,17 @@ export async function loadData({ mode = "seen", session = { baseSyncId: null }, 
   for (const tm of tempo) sizes.set(`t:${tm.id}`, (tm.members || []).length);
   for (const p of profiles) if (p.team) sizes.set(`m:${p.team}`, (sizes.get(`m:${p.team}`) || 0) + 1);
   const excludeTypes = flowlib.parseTypeList(s.forecastExcludeTypes);
+  // Автообновление сегодня не удалось из-за недоступности Jira — скорее всего, не включён VPN.
+  let unreachableAt = 0;
+  try {
+    const { autoSyncState = {} } = await chrome.storage.local.get("autoSyncState");
+    const today = new Date(now).toDateString();
+    if (s.autoSync.enabled && autoSyncState.lastAttempt === "unreachable" && new Date(s.lastSync || 0).toDateString() !== today) {
+      unreachableAt = autoSyncState.lastAttemptAt || 0;
+    }
+  } catch {
+    // вне расширения — без состояния автообновления
+  }
   const signals = summary.computeSignals({
     current,
     base: base && base.states,
@@ -117,6 +128,7 @@ export async function loadData({ mode = "seen", session = { baseSyncId: null }, 
     profiles,
     lastSync: s.lastSync,
     apiLimited,
+    unreachableAt,
     thresholds: s.summary,
     excludeTypes,
     now
@@ -125,7 +137,7 @@ export async function loadData({ mode = "seen", session = { baseSyncId: null }, 
   const rawAcks = (await db.metaGet("acks", {})) || {};
   const acks = summary.pruneAcks(rawAcks, signals);
   if (Object.keys(acks).length !== Object.keys(rawAcks).length) await db.metaSet("acks", acks);
-  return { current, base, weekly, signals, acks, lastSync: s.lastSync, lastSyncId, now, epics };
+  return { current, base, weekly, signals, acks, lastSync: s.lastSync, lastSyncId, now, epics, unreachableAt };
 }
 
 // Счётчик на вкладке (Б7): новые сигналы «внимание» и «критично», не принятые и не показанные
@@ -214,7 +226,9 @@ const DATE_PARAMS = new Set(["from", "to", "due", "date"]);
 export function signalText(sig, current) {
   const params = { ...sig.params, epic: epicLabel(current.get(sig.epicKey)) || sig.epicKey || "" };
   const dated = sig.type === "shiftLater" || sig.type === "shiftEarlier" || sig.type === "dueChanged" || sig.type === "overdue" || sig.type === "near";
+  if (sig.type === "unreachable") params.at = fmtDateTime(params.at);
   for (const k of Object.keys(params)) {
+    if (sig.type === "unreachable") break;
     if (dated && DATE_PARAMS.has(k)) params[k] = fmtDate(params[k]);
     else if (k === "buffer" || (sig.type === "melting" && (k === "from" || k === "to"))) params[k] = fmtWeeks(params[k]);
     else if (typeof params[k] === "number" && !Number.isInteger(params[k])) params[k] = fmtNum(params[k]);
@@ -292,6 +306,7 @@ export async function render(container, { mode = "seen", session, onOpenEpic = (
   // 1. Шапка: когда обновлено, с чем сравниваем, переключатель базы.
   const head = el("div", "sum-head");
   head.append(el("span", "muted", t("sum.updated", { at: fmtDateTime(data.lastSync || data.lastSyncId) })));
+  if (data.unreachableAt) head.append(el("span", "cmt-error", t("sum.unreachable", { at: fmtDate(new Date(data.lastSync || data.lastSyncId).toISOString()) })));
   const baseText = data.base
     ? t("sum.base", { at: fmtDateTime(data.base.at) }) + (data.base.note ? ` · ${data.base.note}` : "")
     : t("sum.noBase");

@@ -18,6 +18,7 @@ import * as analytics from "../src/js/analytics.js";
 import * as summary from "../src/js/summary.js";
 import * as summaryView from "../src/js/summaryView.js";
 import * as trendCharts from "../src/js/trendCharts.js";
+import * as autoSync from "../src/js/autoSync.js";
 import { runForecast, workerAvailable } from "../src/js/forecastClient.js";
 import { classify, isDoneStatus } from "../src/js/status.js";
 import { collectPeople, mergeProfiles, parseSystems, systemsList, teamsList, normName, roleSummary } from "../src/js/team.js";
@@ -1361,6 +1362,77 @@ await settings.save({ infoSystems: [], fields: { plannedStart: "", plannedEnd: "
   check("«Вернуть» снимает отметку", Object.keys((await dbm.metaGet("acks", {})) || {}).length === 0);
   box.remove();
   await settings.save({ baseUrl: "https://jira.example.local/" });
+  await dbm.clearAll();
+}
+
+// Этап 4: одна синхронизация на все вкладки (А4) и автообновление с учётом VPN (Б8)
+{
+  const at = (dow, hh, mm = 0) => {
+    // ближайший день недели dow (1 = пн … 7 = вс) в hh:mm
+    const d = new Date(2026, 8, 14, hh, mm); // 14.09.2026 — понедельник
+    d.setDate(d.getDate() + (dow - 1));
+    return d.getTime();
+  };
+  const auto = { enabled: true, days: [1, 2, 3, 4, 5], from: "09:00", to: "18:00" };
+  check("Б8: план — выключено / выходной / до окна / после окна / сегодня уже обновлялись / пора",
+    autoSync.planAuto({ auto: { ...auto, enabled: false }, now: at(1, 10) }) === "disabled" &&
+      autoSync.planAuto({ auto, now: at(6, 10) }) === "day" &&
+      autoSync.planAuto({ auto, now: at(1, 8, 59) }) === "window" &&
+      autoSync.planAuto({ auto, now: at(1, 18) }) === "window" &&
+      autoSync.planAuto({ auto, now: at(1, 10), lastSync: at(1, 9, 30) }) === "done" &&
+      autoSync.planAuto({ auto, now: at(2, 10), lastSync: at(1, 17) }) === "run");
+  check("Б8: проба — любой ответ значит «доступна», ошибка сети — нет",
+    (await autoSync.probeJira("https://jira.example.local/", { fetchImpl: async () => new Response("", { status: 401 }) })) === true &&
+      (await autoSync.probeJira("https://jira.example.local", { fetchImpl: async () => { throw new TypeError("Failed to fetch"); } })) === false);
+  const t0 = Date.now();
+  const hung = await autoSync.probeJira("https://jira.example.local", { timeoutMs: 50, fetchImpl: (u, o) => new Promise((_, rej) => o.signal.addEventListener("abort", () => rej(new Error("abort")))) });
+  check("Б8: проба без ответа (нет VPN) обрывается по таймауту", hung === false && Date.now() - t0 < 1000);
+  const day = at(1, 10);
+  let st = {};
+  const r1 = autoSync.decideNotification({ ok: false, kind: "network", state: st, now: day });
+  check("Б8: Jira недоступна — без уведомления, отмечено «недоступна»", !r1.notify && r1.state.lastAttempt === "unreachable");
+  const r2 = autoSync.decideNotification({ ok: false, kind: "auth", state: r1.state, now: day });
+  const r3 = autoSync.decideNotification({ ok: false, kind: "auth", state: r2.state, now: day + 3600000 });
+  const r4 = autoSync.decideNotification({ ok: false, kind: "auth", state: r3.state, now: day + 86400000 });
+  check("Б8: «войдите в Jira» — не чаще раза в день", r2.notify && !r3.notify && r4.notify);
+  check("Б8: успех — уведомление всегда", autoSync.decideNotification({ ok: true, state: r4.state, now: day }).notify === true);
+
+  // А4: пока замок держит другая вкладка, вторая синхронизация не запускается
+  let release;
+  const held = new Promise((r) => (release = r));
+  const holding = navigator.locks.request(autoSync.SYNC_LOCK, () => held);
+  let ran = 0;
+  let busyCalled = 0;
+  const second = await autoSync.withSyncLock(async () => { ran += 1; return 1; }, { onBusy: () => (busyCalled += 1) });
+  check("А4: замок занят — синхронизация не запускается, сообщение «идёт в другой вкладке»", second.busy && ran === 0 && busyCalled === 1);
+  release();
+  await holding;
+  await second.done;
+  const third = await autoSync.withSyncLock(async () => { ran += 1; return 7; });
+  check("А4: после освобождения замка синхронизация идёт", !third.busy && third.result === 7 && ran === 1);
+
+  // сводка: «Jira была недоступна» — сигнал и строка в шапке
+  const unr = summary.computeSignals({ current: new Map(), thresholds: settings.DEFAULTS.summary, unreachableAt: Date.now() });
+  check("Б8: сигнал «Jira была недоступна — проверьте VPN»", unr.some((x) => x.type === "unreachable" && x.severity === "warning"));
+  const saved = { auto: settings.get().autoSync, lastSync: settings.get().lastSync };
+  await dbm.clearAll();
+  await dbm.putAll(dbm.STORES.epics, [{ key: "EP-1", summary: "ЛК" }]);
+  await dbm.putAll(dbm.STORES.syncLog, [{ epicKey: "EP-1", syncId: 111, total: 1, done: 0, remaining: 1, estTotal: 0, estDone: 0, dueDate: "", teams: [], statusCategory: "indeterminate" }]);
+  await dbm.metaSet("lastSyncId", 111);
+  await settings.save({ autoSync: { ...auto }, lastSync: Date.now() - 2 * 86400000 });
+  chrome.storage.local._d.autoSyncState = { lastAttempt: "unreachable", lastAttemptAt: Date.now() };
+  const dataU = await summaryView.loadData({ session: { baseSyncId: null } });
+  check("Б8: сводка знает, что сегодня Jira была недоступна", dataU.unreachableAt > 0 && dataU.signals.some((x) => x.type === "unreachable"));
+  delete chrome.storage.local._d.autoSyncState;
+
+  // конфигурация: расписание — в экспорте, импорт только корректных полей
+  const ex = await exportConfig();
+  check("Б8: расписание автообновления — в экспорте", ex.autoSync && ex.autoSync.enabled === true && ex.autoSync.days.length === 5);
+  await applyConfig(parseConfig(JSON.stringify({ autoSync: { enabled: false, days: [1, 3, 9, "x"], from: "08:30", to: "25:00" } })), { onLog: () => {} });
+  check("Б8: импорт расписания — корректные поля, неверные отброшены",
+    settings.get().autoSync.enabled === false && settings.get().autoSync.days.join() === "1,3" && settings.get().autoSync.from === "08:30" && settings.get().autoSync.to === "18:00",
+    JSON.stringify(settings.get().autoSync));
+  await settings.save({ autoSync: saved.auto, lastSync: saved.lastSync });
   await dbm.clearAll();
 }
 

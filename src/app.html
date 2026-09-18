@@ -276,6 +276,34 @@
         </div>
 
         <div class="card">
+          <h3 data-i18n="set.auto"></h3>
+          <small class="muted" data-i18n="set.autoHint"></small>
+          <label class="field check">
+            <input id="autoEnabled" type="checkbox" />
+            <span data-i18n="set.autoEnabled"></span>
+          </label>
+          <div class="row auto-days">
+            <label class="check"><input type="checkbox" data-day="1" /><span data-i18n="day.1"></span></label>
+            <label class="check"><input type="checkbox" data-day="2" /><span data-i18n="day.2"></span></label>
+            <label class="check"><input type="checkbox" data-day="3" /><span data-i18n="day.3"></span></label>
+            <label class="check"><input type="checkbox" data-day="4" /><span data-i18n="day.4"></span></label>
+            <label class="check"><input type="checkbox" data-day="5" /><span data-i18n="day.5"></span></label>
+            <label class="check"><input type="checkbox" data-day="6" /><span data-i18n="day.6"></span></label>
+            <label class="check"><input type="checkbox" data-day="7" /><span data-i18n="day.7"></span></label>
+          </div>
+          <div class="row">
+            <label class="field narrow">
+              <span data-i18n="set.autoFrom"></span>
+              <input id="autoFrom" type="time" />
+            </label>
+            <label class="field narrow">
+              <span data-i18n="set.autoTo"></span>
+              <input id="autoTo" type="time" />
+            </label>
+          </div>
+        </div>
+
+        <div class="card">
           <h3 data-i18n="set.config"></h3>
           <small class="muted" data-i18n="set.configHint"></small>
           <div class="row">

@@ -13,6 +13,7 @@ import * as flowlib from "./flow.js";
 import * as analytics from "./analytics.js";
 import { runForecast } from "./forecastClient.js";
 import * as summaryView from "./summaryView.js";
+import * as autoSync from "./autoSync.js";
 
 const $ = (sel) => document.querySelector(sel);
 const state = {
@@ -1110,10 +1111,44 @@ async function doSaveSelection() {
 // ---------- синхронизация ----------
 
 let syncing = false;
+// Другие вкладки плагина узнают о синхронизации и перечитывают данные (А4).
+const syncChannel = typeof BroadcastChannel !== "undefined" ? new BroadcastChannel(autoSync.CHANNEL) : null;
+if (syncChannel) {
+  syncChannel.onmessage = (e) => {
+    if (e.data && e.data.type === "synced") afterForeignSync().catch(() => {});
+  };
+}
+
+async function afterForeignSync() {
+  await refreshHeader();
+  state.shareCache.clear();
+  gantt.resetCollapse();
+  redrawActive();
+  refreshSummaryBadge().catch(() => {});
+}
+
+// Итог: { ok: true } | { ok: false, kind: "network" | "auth" | "http" | "busy", message }.
 async function doSync({ full = false } = {}) {
-  if (syncing) return;
+  if (syncing) return { ok: false, kind: "busy" };
   syncing = true;
   $("#btnRefresh").disabled = $("#btnReload").disabled = true;
+  try {
+    // Одна синхронизация на все вкладки: если другая вкладка уже обновляет — ждём её и перечитываем.
+    const locked = await autoSync.withSyncLock(() => runSync(full), { onBusy: () => status(t("st.syncOtherTab")) });
+    if (locked.busy) {
+      await locked.done;
+      await afterForeignSync();
+      hideStatus();
+      return { ok: false, kind: "busy" };
+    }
+    return locked.result;
+  } finally {
+    syncing = false;
+    $("#btnRefresh").disabled = $("#btnReload").disabled = false;
+  }
+}
+
+async function runSync(full) {
   try {
     const result = await sync.sync({ full, onProgress: (m) => status(m) });
     await refreshHeader();
@@ -1154,12 +1189,38 @@ async function doSync({ full = false } = {}) {
     gantt.resetCollapse();
     redrawActive();
     refreshSummaryBadge().catch(() => {});
+    if (syncChannel) syncChannel.postMessage({ type: "synced" });
+    return { ok: true };
   } catch (e) {
     fail(e);
-  } finally {
-    syncing = false;
-    $("#btnRefresh").disabled = $("#btnReload").disabled = false;
+    return { ok: false, kind: (e && e.kind) || "http", message: e && e.message ? e.message : String(e) };
   }
+}
+
+// Автообновление (Б8): синхронизация по просьбе фонового скрипта или при открытии страницы,
+// итог — фоновому скрипту для уведомления.
+async function runAutoSync() {
+  const res = await doSync({ full: false });
+  if (res.kind === "busy") return;
+  let text = "";
+  if (res.ok) {
+    const n = await summaryView.badgeCount().catch(() => 0);
+    text = n ? t("auto.done", { n }) : t("auto.doneCalm");
+  } else if (res.kind === "auth") text = t("auto.auth");
+  else if (res.kind !== "network") text = t("auto.error", { msg: res.message || "" });
+  try {
+    await chrome.runtime.sendMessage({ type: "ohmygant-auto-done", ok: res.ok, kind: res.kind, text });
+  } catch {
+    // фонового скрипта нет (dev-страница) — уведомление не нужно
+  }
+}
+
+// Страница открыта вручную, расписание включено, сегодня обновления не было и Jira доступна —
+// обновляемся сразу.
+async function autoSyncOnOpen() {
+  const s = settings.get();
+  if (autoSync.planAuto({ auto: s.autoSync, lastSync: s.lastSync }) !== "run") return;
+  if (await autoSync.probeJira(s.baseUrl)) await runAutoSync();
 }
 
 async function refreshHeader() {
@@ -1366,6 +1427,10 @@ function fillSettingsForm() {
   $("#useTempoTeams").checked = !!s.useTempoTeams;
   $("#flowWeeks").value = s.flowWeeks;
   $("#requestTimeoutSec").value = s.requestTimeoutSec;
+  $("#autoEnabled").checked = !!s.autoSync.enabled;
+  document.querySelectorAll("[data-day]").forEach((cb) => (cb.checked = s.autoSync.days.includes(Number(cb.dataset.day))));
+  $("#autoFrom").value = s.autoSync.from;
+  $("#autoTo").value = s.autoSync.to;
   document.querySelectorAll("[data-sum]").forEach((inp) => (inp.value = s.summary[inp.dataset.sum]));
   renderFlowDiag().catch(() => {});
   $("#doneStatuses").value = s.doneStatuses;
@@ -1507,6 +1572,12 @@ async function saveSettingsForm() {
     useTempoTeams: $("#useTempoTeams").checked,
     flowWeeks: Number($("#flowWeeks").value) || 52,
     requestTimeoutSec: Number($("#requestTimeoutSec").value) || 30,
+    autoSync: {
+      enabled: $("#autoEnabled").checked,
+      days: [...document.querySelectorAll("[data-day]")].filter((cb) => cb.checked).map((cb) => Number(cb.dataset.day)),
+      from: $("#autoFrom").value || "09:00",
+      to: $("#autoTo").value || "18:00"
+    },
     // Пороги «Сводки»: пустое или нечисловое поле — значение по умолчанию.
     summary: Object.fromEntries(
       [...document.querySelectorAll("[data-sum]")].map((inp) => {
@@ -1807,6 +1878,20 @@ async function boot() {
   renderResults();
   await refreshHeader();
   if (!s.baseUrl) showTab("settings");
+
+  // Автообновление (Б8): фоновый скрипт открывает страницу с #auto или просит обновиться сообщением.
+  try {
+    chrome.runtime.onMessage.addListener((msg) => {
+      if (msg && msg.type === "ohmygant-auto-sync") runAutoSync().catch(() => {});
+      if (msg && msg.type === "ohmygant-show-summary") showTab("summary");
+    });
+  } catch {
+    // dev-страница без chrome.runtime
+  }
+  if (location.hash === "#summary") showTab("summary");
+  if (location.hash === "#auto") runAutoSync().catch(() => {});
+  else if (s.baseUrl) autoSyncOnOpen().catch(() => {});
+  refreshSummaryBadge().catch(() => {});
 }
 
 boot().catch(fail);

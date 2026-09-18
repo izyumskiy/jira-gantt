@@ -808,3 +808,7 @@ circle.tr-total { fill: #6b778c; }
 .sig.acked .sig-text { color: var(--muted); text-decoration: line-through; text-decoration-color: rgba(107, 119, 140, .5); }
 .sum-copy { display: flex; gap: 6px; }
 .tab-badge { display: inline-block; min-width: 16px; margin-left: 6px; padding: 0 5px; border-radius: 8px; background: #de350b; color: #fff; font-size: 11px; line-height: 16px; text-align: center; font-weight: 600; }
+
+/* ---------- автообновление (Б8) ---------- */
+.auto-days { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 6px 0; }
+.auto-days .check { display: inline-flex; align-items: center; gap: 4px; }

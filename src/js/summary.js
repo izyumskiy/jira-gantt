@@ -59,6 +59,7 @@ export function computeSignals({
   profiles = [], // профили вкладки «Команда»
   lastSync = 0,
   apiLimited = false,
+  unreachableAt = 0, // автообновление сегодня не удалось: Jira недоступна (VPN)
   thresholds: th,
   excludeTypes = [],
   now = Date.now()
@@ -309,6 +310,7 @@ export function computeSignals({
     add({ type: "stale", group: "quality", severity: "warning", params: { days: workdaysBetween(lastSync, now) } });
   }
   if (apiLimited) add({ type: "apiLimited", group: "quality", severity: "info" });
+  if (unreachableAt) add({ type: "unreachable", group: "quality", severity: "warning", params: { at: unreachableAt } });
 
   return out;
 }

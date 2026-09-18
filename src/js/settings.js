@@ -12,6 +12,8 @@ export const DEFAULTS = {
   useTempoTeams: true, // брать команды людей из Tempo (если дополнение установлено)
   flowWeeks: 52, // окно истории завершённых задач (недель) — основа прогноза по потоку
   requestTimeoutSec: 30, // таймаут запроса к Jira: без VPN запрос иначе висит больше минуты
+  // Автообновление (Б8): один раз за рабочий день, как только Jira доступна (VPN).
+  autoSync: { enabled: false, days: [1, 2, 3, 4, 5], from: "09:00", to: "18:00" },
   teams: [], // справочник команд для ручного распределения людей (вкладка «Команда»)
   doneStatuses: "", // статусы своего потока, которые считаем завершёнными, через запятую
   forecastExcludeTypes: "User Story", // типы задач, которые прогноз сроков не считает, через запятую
@@ -78,7 +80,7 @@ function listen() {
     chrome.storage.onChanged?.addListener((changes, area) => {
       if (area !== "local" || !changes[KEY] || !changes[KEY].newValue) return;
       const raw = changes[KEY].newValue;
-      cache = { ...DEFAULTS, ...raw, fields: { ...DEFAULTS.fields, ...(raw.fields || {}) }, summary: { ...DEFAULTS.summary, ...(raw.summary || {}) } };
+      cache = { ...DEFAULTS, ...raw, fields: { ...DEFAULTS.fields, ...(raw.fields || {}) }, summary: { ...DEFAULTS.summary, ...(raw.summary || {}) }, autoSync: { ...DEFAULTS.autoSync, ...(raw.autoSync || {}) } };
     });
   } catch {
     // окружение без событий хранилища (тесты) — работаем без синхронизации кэша
@@ -89,7 +91,7 @@ export async function load() {
   listen();
   if (cache) return cache;
   const raw = (await chrome.storage.local.get(KEY))[KEY] || {};
-  cache = { ...DEFAULTS, ...raw, fields: { ...DEFAULTS.fields, ...(raw.fields || {}) }, summary: { ...DEFAULTS.summary, ...(raw.summary || {}) } };
+  cache = { ...DEFAULTS, ...raw, fields: { ...DEFAULTS.fields, ...(raw.fields || {}) }, summary: { ...DEFAULTS.summary, ...(raw.summary || {}) }, autoSync: { ...DEFAULTS.autoSync, ...(raw.autoSync || {}) } };
   const from = Number(raw.schema) || 0;
   if (Object.keys(raw).length && from < SCHEMA) {
     for (let i = from; i < SCHEMA; i++) MIGRATIONS[i](cache);
@@ -103,7 +105,7 @@ export async function load() {
 
 export async function save(patch) {
   const cur = await load();
-  cache = { ...cur, ...patch, fields: { ...cur.fields, ...(patch.fields || {}) }, summary: { ...cur.summary, ...(patch.summary || {}) } };
+  cache = { ...cur, ...patch, fields: { ...cur.fields, ...(patch.fields || {}) }, summary: { ...cur.summary, ...(patch.summary || {}) }, autoSync: { ...cur.autoSync, ...(patch.autoSync || {}) } };
   await chrome.storage.local.set({ [KEY]: cache });
   return cache;
 }
