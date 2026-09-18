@@ -373,6 +373,8 @@ a.s-story-link:hover { color: var(--accent); text-decoration: underline; }
 .tooltip.tip-project { min-width: 300px; max-width: 380px; }
 .tip-project select, .tip-project input { width: 100%; margin: 2px 0 6px; }
 .s-proj-actions { display: flex; justify-content: flex-end; margin: 4px 0; }
+.s-nostories { margin: 0 0 8px; padding: 8px 12px; border: 1px solid #ffe380; border-radius: 6px; background: #fffae6; color: #172b4d; }
+.s-add-type { margin-left: 4px; padding: 2px 8px; font-size: 12px; }
 /* Заметки (Р4): строка под эпиком и историей, первые две строки текста. */
 .g-row.s-note { height: 1px; } /* явная высота: иначе строка забирает лишнее место растянутой таблицы; контент её всё равно растянет */
 .g-row.s-note > .c-name { padding-top: 2px; padding-bottom: 4px; background: var(--panel); font-weight: 400; }

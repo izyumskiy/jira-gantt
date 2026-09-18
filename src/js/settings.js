@@ -19,7 +19,8 @@ export const DEFAULTS = {
   forecastExcludeTypes: "User Story", // типы задач, которые прогноз сроков не считает, через запятую
   // Ракурс «Эпик — история» (ТЗ «Эпик — история», Р2): какие задачи — истории, какой связью к ним
   // привязаны задачи, через сколько дней заметка считается устаревшей.
-  storyTypes: "User Story",
+  // Jira отдаёт название типа на языке пользователя: «Story» в русском интерфейсе — «История».
+  storyTypes: "User Story, Story, История",
   storyLinkType: "Relates",
   noteStaleDays: 14,
   storyShowNotes: true, // галочка «Заметки» на ракурсе «Эпик — история» (Р4)
@@ -64,12 +65,17 @@ export const DEFAULTS = {
 };
 
 // Версия схемы настроек: миграции правят уже сохранённые значения, когда меняется умолчание.
-export const SCHEMA = 1;
-const MIGRATIONS = [
+export const SCHEMA = 2;
+export const MIGRATIONS = [
   // 1: окно истории потока по умолчанию стало годом. Старое умолчание (16) поднимаем, выбранное
   // вручную другое значение не трогаем.
   (s) => {
     if (Number(s.flowWeeks) === 16) s.flowWeeks = 52;
+  },
+  // 2: «Типы историй» по умолчанию понимают и русское название типа («История»). Прежнее
+  // нетронутое умолчание «User Story» поднимаем, выбранное вручную не трогаем.
+  (s) => {
+    if (String(s.storyTypes || "").trim().toLowerCase() === "user story") s.storyTypes = DEFAULTS.storyTypes;
   }
 ];
 

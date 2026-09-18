@@ -104,6 +104,26 @@ export function render(container, model, opts = {}) {
   bar.insertBefore(nt, bar.children[2] || null);
   container.append(bar);
 
+  // Историй не нашлось ни в одном эпике — говорим почему, а не молчим: какие типы задач есть в
+  // эпиках и что указано в «Типах историй».
+  if (!model.storyTotal && model.typeCounts && model.typeCounts.length) {
+    const hint = el("div", "s-nostories");
+    hint.append(
+      el("strong", null, t("story.noneFound", { setting: opts.storyTypesText || "—" })),
+      " ",
+      t("story.noneFoundTypes", { types: model.typeCounts.map((x) => `${x.name} (${x.n})`).join(", ") })
+    );
+    // Похожий на историю тип — одной кнопкой добавить его в «Типы историй».
+    for (const name of model.storyCandidates || []) {
+      if (!opts.onAddStoryType) break;
+      const b = el("button", "primary s-add-type", t("story.useType", { name }));
+      b.type = "button";
+      b.onclick = () => opts.onAddStoryType(name);
+      hint.append(" ", b);
+    }
+    container.append(hint);
+  }
+
   const wrap = el("div", "gantt-wrap");
   const table = el("table", "gantt mode-epicStories");
   table.append(gantt.chartHead(model, rerender, { title: t("story.project"), hint: ` / ${t("gantt.epic")} / ${t("story.story")}` }));

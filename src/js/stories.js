@@ -225,6 +225,17 @@ export function buildStoryModel({
     pn.status = { id: pn.allDone ? "done" : "" };
     projects.push(pn);
   }
+  // Диагностика: какие типы задач есть в показанных эпиках. Если историй не нашлось нигде, ракурс
+  // покажет этот список — обычно «Типы историй» не совпадают с названием типа в Jira.
+  const typeCounts = new Map();
+  let storyTotal = 0;
+  for (const e of epics) {
+    for (const i of byEpic.get(e.key) || []) {
+      const name = String(i.typeName || "").trim() || "—";
+      typeCounts.set(name, (typeCounts.get(name) || 0) + 1);
+      if (isStory(i)) storyTotal += 1;
+    }
+  }
   projects.sort(
     (a, b) =>
       Number(a.key === NO_PROJECT) - Number(b.key === NO_PROJECT) ||
@@ -243,6 +254,10 @@ export function buildStoryModel({
     projects,
     priorities,
     childKind: "person",
-    excludeTypeNames
+    excludeTypeNames,
+    storyTotal,
+    // Типы, похожие на истории, — кандидаты для кнопки «Считать историями».
+    storyCandidates: [...typeCounts.keys()].filter((n) => /stor|истор/i.test(n) && !isExcludedType(n, storyTypes)),
+    typeCounts: [...typeCounts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([name, n]) => ({ name, n }))
   };
 }

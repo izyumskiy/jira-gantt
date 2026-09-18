@@ -2512,6 +2512,45 @@ check("пиктограмма 💬 есть и на «По эпикам и лю�
   box.remove();
 }
 
+// Дефект: истории не выводились под эпиками — ракурс должен объяснять, почему историй нет.
+{
+  const stories = await import("../src/js/stories.js");
+  const sv = await import("../src/js/storiesView.js");
+  const EPS = [{ key: "D-E", summary: "Эпик", statusName: "В работе", statusCategory: "indeterminate" }];
+  const ISS = [
+    { ...mk("D-1", "D-E", "AAA", "Ivan", 2, 1, "new"), typeName: "Story", links: [] },
+    { ...mk("D-2", "D-E", "AAA", "Ivan", 2, 1, "new"), typeName: "Task", links: [] },
+    { ...mk("D-3", "D-E", "AAA", "Ivan", 2, 1, "new"), typeName: "Task", links: [] }
+  ];
+  const miss = stories.buildStoryModel({ epics: EPS, issues: ISS, sprints, boards, storyTypes: ["user story"], excludeTypes: ["user story"] });
+  check("Дефект: тип историй не совпал — историй 0, в модели типы задач эпика", miss.storyTotal === 0 && miss.typeCounts.map((x) => `${x.name}:${x.n}`).join() === "Task:2,Story:1", JSON.stringify(miss.typeCounts));
+  const box = document.createElement("div");
+  document.body.append(box);
+  sv.resetCollapse();
+  sv.render(box, miss, { storyTypesText: "User Story" });
+  const hint = box.querySelector(".s-nostories");
+  check("Дефект: над диаграммой — подсказка с типами задач и значением «Типов историй»", !!hint && hint.textContent.includes("Story (1)") && hint.textContent.includes("User Story"), hint && hint.textContent);
+  const hit = stories.buildStoryModel({ epics: EPS, issues: ISS, sprints, boards, storyTypes: ["story"], excludeTypes: ["story"] });
+  sv.render(box, hit, { storyTypesText: "Story" });
+  box.querySelector(".gantt-bar .link").click();
+  const added = [];
+  sv.render(box, miss, { storyTypesText: "User Story", onAddStoryType: (n) => added.push(n) });
+  box.querySelector(".s-add-type")?.click();
+  check("Дефект: в подсказке кнопка «Считать историями» для похожего типа", JSON.stringify(added) === '["Story"]' && JSON.stringify(miss.storyCandidates) === '["Story"]');
+  const ru = stories.buildStoryModel({ epics: EPS, issues: ISS.map((i) => (i.typeName === "Story" ? { ...i, typeName: "История" } : i)), sprints, boards, storyTypes: flowlib.storyTypes({ storyTypes: settings.DEFAULTS.storyTypes }), excludeTypes: [] });
+  check("Дефект: по умолчанию «Типы историй» понимают русское «История»", ru.storyTotal === 1);
+  const m1 = { storyTypes: " User Story " };
+  const m2 = { storyTypes: "Epic Story" };
+  settings.MIGRATIONS[1](m1);
+  settings.MIGRATIONS[1](m2);
+  check("Дефект: прежнее нетронутое умолчание «User Story» поднимается миграцией, своё значение не трогаем",
+    m1.storyTypes === settings.DEFAULTS.storyTypes && m2.storyTypes === "Epic Story" && settings.SCHEMA === 2);
+  sv.render(box, hit, { storyTypesText: "Story" });
+  box.querySelector(".gantt-bar .link").click();
+  check("Дефект: при верном типе история под эпиком, подсказки нет", hit.storyTotal === 1 && !box.querySelector(".s-nostories") && box.querySelector('.s-story[data-story="D-1"]'));
+  box.remove();
+}
+
 const total = document.createElement("div");
 total.className = failures ? "t-fail" : "t-ok";
 total.textContent = failures ? `${failures} FAILED` : "ALL PASSED";
