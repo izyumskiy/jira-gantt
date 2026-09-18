@@ -812,3 +812,8 @@ circle.tr-total { fill: #6b778c; }
 /* ---------- автообновление (Б8) ---------- */
 .auto-days { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 6px 0; }
 .auto-days .check { display: inline-flex; align-items: center; gap: 4px; }
+
+/* ---------- точность прогнозов (Б9) ---------- */
+.sum-accuracy { margin-top: 12px; }
+.acc-table td.acc-hit { color: #1f845a; }
+.acc-table td.acc-miss { color: #de350b; font-weight: 600; }

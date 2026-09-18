@@ -19,6 +19,7 @@ import * as summary from "../src/js/summary.js";
 import * as summaryView from "../src/js/summaryView.js";
 import * as trendCharts from "../src/js/trendCharts.js";
 import * as autoSync from "../src/js/autoSync.js";
+import * as accuracy from "../src/js/accuracy.js";
 import { runForecast, workerAvailable } from "../src/js/forecastClient.js";
 import { classify, isDoneStatus } from "../src/js/status.js";
 import { collectPeople, mergeProfiles, parseSystems, systemsList, teamsList, normName, roleSummary } from "../src/js/team.js";
@@ -1288,7 +1289,7 @@ await settings.save({ infoSystems: [], fields: { plannedStart: "", plannedEnd: "
   const rowsTxt = [...box.querySelectorAll(".sum-table tbody tr.clickable")].map((tr) => tr.textContent);
   check("Б5: вкладка — шапка, итог по цветам, «Требует внимания», 5 блоков, таблица портфеля",
     !!box.querySelector(".sum-head") && box.querySelectorAll(".sum-total").length >= 2 && box.querySelectorAll(".sum-attention .sig").length >= 1 &&
-      box.querySelectorAll("details.sum-group").length === 5 && rowsTxt.length === 2, `${rowsTxt.length}`);
+      box.querySelectorAll("details.sum-group:not(.sum-accuracy)").length === 5 && rowsTxt.length === 2, `${rowsTxt.length}`);
   check("Б5: портфель — от худшего запаса", rowsTxt[0].startsWith("EP-2"), rowsTxt.join(" | "));
   check("Б5: мини-график запаса — линия по недельным записям", !!box.querySelector(".sum-table tbody tr .spark polyline"));
   box.querySelector(".sum-table tbody tr.clickable").click();
@@ -1433,6 +1434,59 @@ await settings.save({ infoSystems: [], fields: { plannedStart: "", plannedEnd: "
     settings.get().autoSync.enabled === false && settings.get().autoSync.days.join() === "1,3" && settings.get().autoSync.from === "08:30" && settings.get().autoSync.to === "18:00",
     JSON.stringify(settings.get().autoSync));
   await settings.save({ autoSync: saved.auto, lastSync: saved.lastSync });
+  await dbm.clearAll();
+}
+
+// Б9. точность прогнозов
+{
+  const W = 7 * 86400000;
+  const finish = "2026-06-10";
+  const fin = flowlib.mondayOf(Date.parse(`${finish}T12:00:00`));
+  const wk = (weeksBefore) => flowlib.weekKey(fin - weeksBefore * W + 12 * 3600000);
+  const recA = [
+    { epicKey: "EP-A", week: wk(8), p85: "2026-06-20", statusCategory: "indeterminate", restored: true },
+    { epicKey: "EP-A", week: wk(4), p85: "2026-06-01", statusCategory: "indeterminate" },
+    { epicKey: "EP-A", week: wk(2), p85: "2026-06-10", statusCategory: "indeterminate" },
+    { epicKey: "EP-A", week: wk(0), p85: "", statusCategory: "done", resolved: `${finish}T15:00:00.000+0300`, epicName: "ЛК" }
+  ];
+  // EP-B: даты завершения эпика нет — берётся дата закрытия последней задачи
+  const recB = [
+    { epicKey: "EP-B", week: wk(4), p85: "2026-06-30", statusCategory: "indeterminate" },
+    { epicKey: "EP-B", week: wk(0), statusCategory: "done", resolved: "" }
+  ];
+  const recC = [{ epicKey: "EP-C", week: wk(4), p85: "2026-06-01", statusCategory: "indeterminate" }]; // не завершён
+  const issB = [{ ...mk("B-1", "EP-B", "AAA", "Ivan", 2, 1, "done"), resolved: "2026-06-12T10:00:00" }, { ...mk("B-2", "EP-B", "AAA", "Ivan", 2, 1, "done"), resolved: "2026-06-05T10:00:00" }];
+  const acc = accuracy.forecastAccuracy({ weekly: new Map([["EP-A", recA], ["EP-B", recB], ["EP-C", recC]]), issuesByEpic: new Map([["EP-B", issB]]) });
+  const rowA = acc.rows.find((r) => r.epicKey === "EP-A");
+  check("Б9: прогнозы за 8/4/2 недели сравниваются с фактом (финиш в день прогноза — попал)",
+    rowA.forecasts[8].hit === true && rowA.forecasts[4].hit === false && rowA.forecasts[2].hit === true && rowA.forecasts[8].restored === true);
+  check("Б9: без даты завершения эпика финиш — по последней закрытой задаче", acc.rows.find((r) => r.epicKey === "EP-B")?.finish === "2026-06-12T10:00:00");
+  check("Б9: незавершённые эпики не участвуют, итог — доля попаданий", !acc.rows.some((r) => r.epicKey === "EP-C") && acc.n === 4 && acc.hits === 3 && acc.share === 75,
+    JSON.stringify({ n: acc.n, hits: acc.hits }));
+  check("Б9: по горизонтам", acc.byHorizon[4].n === 2 && acc.byHorizon[4].hits === 1 && acc.byHorizon[8].n === 1);
+  const copies = (recs, n, from = 0) => Array.from({ length: n }, (_, i) => [`E${i + from}`, recs.map((r) => ({ ...r, epicKey: `E${i + from}` }))]);
+  const hitsOnly = recA.filter((r) => r.week !== wk(4)); // за 8 и 2 недели — попадания
+  const missOnly = recA.filter((r) => r.week === wk(4) || r.statusCategory === "done"); // за 4 недели — промах
+  const okCase = accuracy.forecastAccuracy({ weekly: new Map([...copies(hitsOnly, 3), ...copies(missOnly, 1, 3)]) }); // 6 из 7 ≈ 86%
+  const optCase = accuracy.forecastAccuracy({ weekly: new Map(copies(recA, 5)) }); // 10 из 15 ≈ 67%
+  const cauCase = accuracy.forecastAccuracy({ weekly: new Map(copies(hitsOnly, 5)) }); // 10 из 10
+  check("Б9: меньше 5 сравнений — выводов нет; ≈86% — можно верить; 67% — оптимистичен; 100% — перестраховка",
+    acc.verdict === "few" && okCase.verdict === "ok" && optCase.verdict === "optimistic" && cauCase.verdict === "cautious",
+    `${okCase.share} ${okCase.verdict} / ${optCase.share} ${optCase.verdict} / ${cauCase.share} ${cauCase.verdict}`);
+
+  // через вкладку: история удалённого из выбора эпика участвует в проверке
+  await dbm.clearAll();
+  await dbm.putAll(dbm.STORES.epics, [{ key: "EP-X", summary: "Другой" }]);
+  await dbm.putAll(dbm.STORES.syncLog, [{ epicKey: "EP-X", syncId: 222, total: 1, done: 0, remaining: 1, estTotal: 0, estDone: 0, dueDate: "", teams: [], statusCategory: "indeterminate" }]);
+  await dbm.putAll(dbm.STORES.epicWeeks, recA);
+  await dbm.metaSet("lastSyncId", 222);
+  const box = document.createElement("div");
+  document.body.append(box);
+  const data = await summaryView.render(box, { session: { baseSyncId: null } });
+  check("Б9: удалённый из выбора эпик остаётся в проверке точности", data.acc.rows.some((r) => r.epicKey === "EP-A") && !data.current.has("EP-A"));
+  const accBox = box.querySelector("details.sum-accuracy");
+  check("Б9: раздел в «Сводке» свёрнут, в нём таблица с ✓ / ✗", !!accBox && !accBox.open && accBox.querySelectorAll(".acc-table td.acc-hit").length === 2 && accBox.querySelectorAll(".acc-table td.acc-miss").length === 1);
+  box.remove();
   await dbm.clearAll();
 }
 

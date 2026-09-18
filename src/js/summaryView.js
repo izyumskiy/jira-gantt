@@ -9,6 +9,7 @@ import * as flowlib from "./flow.js";
 import * as analytics from "./analytics.js";
 import * as summary from "./summary.js";
 import * as charts from "./trendCharts.js";
+import * as accuracy from "./accuracy.js";
 
 const DAY = 86400000;
 
@@ -94,6 +95,18 @@ export async function loadData({ mode = "seen", session = { baseSyncId: null }, 
     if (!weekly.has(r.epicKey)) weekly.set(r.epicKey, []);
     weekly.get(r.epicKey).push(r);
   }
+  // Точность прогнозов (Б9) — по всей истории, включая эпики, убранные из выбора.
+  const weeklyAll = new Map();
+  for (const r of weekRows) {
+    if (!weeklyAll.has(r.epicKey)) weeklyAll.set(r.epicKey, []);
+    weeklyAll.get(r.epicKey).push(r);
+  }
+  const issuesByEpic = new Map();
+  for (const i of issues) {
+    if (!issuesByEpic.has(i.epicKey)) issuesByEpic.set(i.epicKey, []);
+    issuesByEpic.get(i.epicKey).push(i);
+  }
+  const acc = accuracy.forecastAccuracy({ weekly: weeklyAll, issuesByEpic });
   const base = await loadBase(mode, session, lastSyncId, now);
   const s = settings.get();
   const model = agg.buildModel({ issues, others, sprints, epics, boards, tempo, profiles, mode: "assignee", timelineIssues: [...issues, ...others] });
@@ -137,7 +150,7 @@ export async function loadData({ mode = "seen", session = { baseSyncId: null }, 
   const rawAcks = (await db.metaGet("acks", {})) || {};
   const acks = summary.pruneAcks(rawAcks, signals);
   if (Object.keys(acks).length !== Object.keys(rawAcks).length) await db.metaSet("acks", acks);
-  return { current, base, weekly, signals, acks, lastSync: s.lastSync, lastSyncId, now, epics, unreachableAt };
+  return { current, base, weekly, signals, acks, lastSync: s.lastSync, lastSyncId, now, epics, unreachableAt, acc };
 }
 
 // Счётчик на вкладке (Б7): новые сигналы «внимание» и «критично», не принятые и не показанные
@@ -454,7 +467,53 @@ export async function render(container, { mode = "seen", session, onOpenEpic = (
 
   // Тренд запаса по портфелю (Б6.1): по умолчанию жёлтые и красные эпики, не больше 8 линий.
   container.append(portfolioTrend(data, rows, th));
+  // Точность прогнозов (Б9) — свёрнута.
+  container.append(accuracyBlock(data.acc));
   return data;
+}
+
+function accuracyBlock(acc) {
+  const details = el("details", "sum-group sum-accuracy");
+  const title = acc.n
+    ? t("acc.title", { share: Math.round(acc.share), hits: acc.hits, n: acc.n })
+    : t("acc.titleEmpty");
+  details.append(el("summary", null, title));
+  details.append(el("div", `small ${acc.verdict === "ok" ? "muted" : acc.verdict === "few" ? "muted" : "cmt-error"}`, t(`acc.verdict.${acc.verdict}`, { min: accuracy.MIN_CASES })));
+  if (acc.n) {
+    const parts = accuracy.HORIZONS.map((h) => {
+      const b = acc.byHorizon[h];
+      return b.n ? t("acc.horizon", { h, share: Math.round((b.hits / b.n) * 100), hits: b.hits, n: b.n }) : "";
+    }).filter(Boolean);
+    details.append(el("div", "muted small", parts.join(" · ")));
+  }
+  if (!acc.rows.length) return details;
+  const table = el("table", "sum-table acc-table");
+  const hr = el("tr");
+  hr.append(el("th", null, t("sum.col.epic")), el("th", null, t("acc.col.finish")));
+  for (const h of accuracy.HORIZONS) hr.append(el("th", null, t("acc.col.before", { h })));
+  const thead = el("thead");
+  thead.append(hr);
+  table.append(thead);
+  const tbody = el("tbody");
+  for (const row of acc.rows) {
+    const tr = el("tr");
+    tr.append(el("td", "sum-epic", row.label), el("td", "tp-num", fmtDate(row.finish)));
+    for (const h of accuracy.HORIZONS) {
+      const f = row.forecasts[h];
+      const td = el("td", `tp-num${f ? (f.hit ? " acc-hit" : " acc-miss") : ""}`);
+      if (f) {
+        td.textContent = `${fmtDate(f.p85)} ${f.hit ? "✓" : "✗"}`;
+        td.title = (f.hit ? t("acc.hit") : t("acc.miss")) + (f.restored ? ` · ${t("tr.restored")}` : "");
+      } else td.textContent = t("dash");
+      tr.append(td);
+    }
+    tbody.append(tr);
+  }
+  table.append(tbody);
+  const wrap = el("div", "sum-table-wrap");
+  wrap.append(table);
+  details.append(wrap);
+  return details;
 }
 
 function epicCharts(key, data, onOpenEpic) {
