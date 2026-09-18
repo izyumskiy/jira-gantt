@@ -12,6 +12,59 @@ import { runForecast } from "./forecastClient.js";
 const DAY_MS = 86400000;
 const SYNC_LOG_DAYS = 30; // журнал синхронизаций — для «что изменилось»
 const EPIC_WEEKS_KEEP = 104; // недельные записи — для трендов
+// Версия восстановления истории: растёт, когда меняется алгоритм, — тогда история восстанавливается
+// заново (настоящие записи при этом не трогаются).
+const BACKFILL_VERSION = 1;
+
+// Восстановление истории задним числом (Б3): недельные записи для прошедших недель, где настоящих
+// записей нет. Запускается после первой синхронизации новой версии и после «Скачать».
+export async function backfillHistory({ onProgress = () => {}, today = Date.now() } = {}) {
+  const s = settings.get();
+  const [epics, issues, flowRows, tempo, profiles, weekRows] = await Promise.all([
+    db.all(db.STORES.epics),
+    db.all(db.STORES.issues),
+    db.all(db.STORES.flow),
+    db.all(db.STORES.tempo),
+    db.all(db.STORES.people),
+    db.all(db.STORES.epicWeeks)
+  ]);
+  const real = new Map();
+  for (const r of weekRows) {
+    if (r.restored) continue;
+    if (!real.has(r.epicKey)) real.set(r.epicKey, new Set());
+    real.get(r.epicKey).add(r.week);
+  }
+  const flowWeeks = Number(s.flowWeeks) || 52;
+  const loadedAt = s.lastSync || today;
+  // Первая полная неделя истории потока: запрос «resolutiondate >= -Nw» начинается посреди недели.
+  const flowStart = flowlib.mondayOf(loadedAt - flowWeeks * 7 * DAY_MS) + 7 * DAY_MS;
+  const lastWeek = flowlib.mondayOf(flowlib.mondayOf(today) - 3 * DAY_MS); // последняя полная неделя
+  const excludeTypes = flowlib.parseTypeList(s.forecastExcludeTypes);
+  const records = [];
+  for (let i = 0; i < epics.length; i++) {
+    onProgress(t("st.backfill", { i: i + 1, n: epics.length }));
+    records.push(
+      ...(await analytics.restoreEpicWeeks({
+        epic: epics[i],
+        issues,
+        flowRows,
+        tempo,
+        profiles,
+        excludeTypes,
+        flowStart,
+        lastWeek,
+        skipWeeks: real.get(epics[i].key) || new Set(),
+        run: runForecast
+      }))
+    );
+  }
+  const at = Date.now();
+  await db.commit([
+    { store: db.STORES.epicWeeks, put: records.map((r) => ({ ...r, at })) },
+    { store: db.STORES.meta, put: [{ k: "backfillVersion", v: BACKFILL_VERSION }] }
+  ]);
+  return { epics: epics.length, weeks: records.length };
+}
 
 // ---------- определение кастомных полей ----------
 
@@ -811,11 +864,24 @@ export async function sync({ full = false, onProgress = () => {} } = {}) {
   onProgress(t("st.saving"));
   await db.commit(ops);
   await settings.save({ lastSync: Date.now() });
+
+  // История задним числом: после «Скачать» и при первой синхронизации новой версии. Её сбой
+  // синхронизацию не отменяет — данные уже записаны.
+  let backfill = null;
+  if (states && (full || (await db.metaGet("backfillVersion", 0)) < BACKFILL_VERSION)) {
+    try {
+      backfill = await backfillHistory({ onProgress });
+    } catch (e) {
+      console.warn("[OhMyGant] history backfill failed", e);
+      backfill = { error: e && e.message ? e.message : String(e) };
+    }
+  }
   onProgress(t("st.done"));
   return {
     issues: collected.length,
     removed: vanished.length,
     syncId: states ? syncId : null,
+    backfill,
     sprints: sprintMap.size,
     others: others.length,
     othersError,

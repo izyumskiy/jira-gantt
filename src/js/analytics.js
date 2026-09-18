@@ -54,7 +54,8 @@ export function flowTeamOf({ tempo = [], profiles = [] }) {
 }
 
 // Поток команд и доля эпика: команды, работавшие над эпиком, их доли и остаток задач эпика.
-export function epicFlowState({ epic, rows, tempo = [], profiles = [], issues, excludeTypes = [], weeks = 52, now = Date.now() }) {
+// remaining можно передать готовым — так считается прошлая неделя при восстановлении истории (Б3).
+export function epicFlowState({ epic, rows, tempo = [], profiles = [], issues, excludeTypes = [], weeks = 52, now = Date.now(), remaining = null }) {
   const model = flowlib.buildFlow({
     excludeTypes,
     rows,
@@ -65,9 +66,11 @@ export function epicFlowState({ epic, rows, tempo = [], profiles = [], issues, e
   });
   const teams = model.teams.filter((x) => (x.byEpic.get(epic.key) || 0) > 0);
   // незакрытый эпик всё ещё в работе — его период активности тянется до конца окна
-  const remaining = issues.filter(
-    (i) => i.epicKey === epic.key && !agg.isDone(i) && !flowlib.isExcludedType(i.typeName, excludeTypes)
-  ).length;
+  if (remaining == null) {
+    remaining = issues.filter(
+      (i) => i.epicKey === epic.key && !agg.isDone(i) && !flowlib.isExcludedType(i.typeName, excludeTypes)
+    ).length;
+  }
   const open = remaining > 0;
   const shares = new Map(teams.map((x) => [x.team.id, flowlib.epicShare(x, epic.key, { open })]));
   return { model, teams, remaining, open, shares };
@@ -159,4 +162,89 @@ export async function portfolioStates({ epics, issues, flowRows, tempo = [], pro
     })
   );
   return new Map(out.map((st) => [st.epicKey, st]));
+}
+
+// Передышка для страницы между кусками тяжёлого расчёта. Не setTimeout: в фоновой вкладке (а
+// автообновление работает именно там) Chrome замедляет таймеры до раза в секунду и реже.
+// Сообщения MessageChannel не замедляются.
+export function yieldToPage() {
+  if (typeof MessageChannel === "undefined") return Promise.resolve();
+  return new Promise((resolve) => {
+    const ch = new MessageChannel();
+    ch.port1.onmessage = () => {
+      ch.port1.close();
+      resolve();
+    };
+    ch.port2.postMessage(0);
+  });
+}
+
+// Восстановление истории (Б3): состояние эпика на конец каждой прошедшей недели W.
+//   объём — задачи эпика, созданные до конца W; остаток — не закрытые к концу W (agg.closedAt);
+//   поток команд — только история завершений до начала W; доли — на момент W;
+//   прогноз — как текущий (Б2), но 2 000 прогонов и отсчёт от понедельника W.
+// flowStart — понедельник первой полной недели истории потока, lastWeek — понедельник последней
+// полной недели; skipWeeks — недели с настоящими записями, их не трогаем. Первая неделя — не
+// раньше создания эпика и не раньше, чем через FORECAST_MIN_WEEKS недель истории потока.
+// Срок исполнения, состав команд и эпик задачи — текущие (ограничения восстановления).
+export async function restoreEpicWeeks({
+  epic,
+  issues,
+  flowRows,
+  tempo = [],
+  profiles = [],
+  excludeTypes = [],
+  flowStart,
+  lastWeek,
+  skipWeeks = new Set(),
+  runs = 2000,
+  run = null
+}) {
+  const WEEK = 7 * 86400000;
+  const scopeAll = issues.filter((i) => i.epicKey === epic.key && !flowlib.isExcludedType(i.typeName, excludeTypes));
+  let from = flowlib.mondayOf(flowStart + flowlib.FORECAST_MIN_WEEKS * WEEK + 12 * 3600000);
+  const created = Date.parse(epic.created || "");
+  if (Number.isFinite(created)) from = Math.max(from, flowlib.mondayOf(created));
+  const resolved = Date.parse(epic.resolved || "");
+
+  const jobs = [];
+  // Шаг — через mondayOf: переход на летнее время не должен сдвигать недели.
+  for (let week = from; week <= lastWeek; week = flowlib.mondayOf(week + WEEK + 12 * 3600000)) {
+    const key = flowlib.weekKey(week);
+    if (skipWeeks.has(key)) continue;
+    // Отдаём управление странице каждые несколько недель: расчёт потока идёт в основном потоке,
+    // и без передышек интерфейс подвисал бы на сотни миллисекунд (А3).
+    if (jobs.length && jobs.length % 5 === 0) await yieldToPage();
+    const end = week + WEEK;
+    const scope = scopeAll.filter((i) => !i.created || Date.parse(i.created) < end);
+    const closed = scope.filter((i) => {
+      const c = agg.closedAt(i);
+      return !!c && Date.parse(c) < end;
+    });
+    const remaining = scope.length - closed.length;
+    const weeksAvail = Math.round((week - flowStart) / WEEK);
+    const flow = epicFlowState({ epic, rows: flowRows, tempo, profiles, issues: [], excludeTypes, weeks: weeksAvail + 1, now: week, remaining });
+    const counters = {
+      pct: {
+        count: scope.length,
+        doneCount: closed.length,
+        total: scope.reduce((n, i) => n + agg.estimateOf(i), 0),
+        done: closed.reduce((n, i) => n + agg.estimateOf(i), 0)
+      }
+    };
+    const doneThen = Number.isFinite(resolved) && resolved < end;
+    const epicThen = { ...epic, statusName: "", statusCategory: doneThen ? "done" : "", resolved: doneThen ? epic.resolved : "" };
+    jobs.push(
+      (async () => {
+        const fc = flow.teams.length && remaining ? await epicForecast({ epic: epicThen, flow, runs, today: week, run }) : null;
+        return {
+          ...toState(epicThen, counters, flow, fc, null),
+          week: key,
+          restored: true,
+          approximate: weeksAvail < flowlib.FORECAST_OK_WEEKS
+        };
+      })()
+    );
+  }
+  return Promise.all(jobs);
 }

@@ -12,7 +12,7 @@ import { setLang, applyI18n, t } from "../src/js/i18n.js";
 import * as settings from "../src/js/settings.js";
 import * as agg from "../src/js/agg.js";
 import * as gantt from "../src/js/gantt.js";
-import { parseSprint, datesFromName, checkApis, searchEpics, epicKeysFrom, sync as runSync } from "../src/js/sync.js";
+import { parseSprint, datesFromName, checkApis, searchEpics, epicKeysFrom, sync as runSync, backfillHistory } from "../src/js/sync.js";
 import * as jiraApi from "../src/js/jira.js";
 import * as analytics from "../src/js/analytics.js";
 import { runForecast, workerAvailable } from "../src/js/forecastClient.js";
@@ -1073,6 +1073,67 @@ await settings.save({ infoSystems: [], fields: { plannedStart: "", plannedEnd: "
 
   window.fetch = orig;
   await settings.save({ fields: saved.fields, useTempoTeams: saved.useTempoTeams, flowWeeks: saved.flowWeeks });
+  await dbm.clearAll();
+}
+
+// Б3. восстановление истории задним числом
+{
+  const DAYMS = 86400000;
+  const WEEK = 7 * DAYMS;
+  const nowMs = Date.now();
+  const flowStart = flowlib.mondayOf(nowMs - 30 * WEEK) + WEEK;
+  const lastWeek = flowlib.mondayOf(flowlib.mondayOf(nowMs) - 3 * DAYMS);
+  const epic = { key: "EP-B", created: new Date(nowMs - 20 * WEEK).toISOString(), resolved: "", dueDate: ymd(200) };
+  const closedTs = (i) => nowMs - (10 - i) * WEEK - DAYMS;
+  const issuesB = Array.from({ length: 10 }, (_, i) => ({
+    ...mk(`B3-${i}`, "EP-B", "AAA", "Ivan", null, 1, i < 6 ? "done" : "prog"),
+    created: new Date(nowMs - 18 * WEEK).toISOString(),
+    resolved: i < 6 ? new Date(closedTs(i)).toISOString() : ""
+  }));
+  // поздно добавленная задача — в объёме только с недели создания
+  issuesB.push({ ...mk("B3-late", "EP-B", "AAA", "Ivan", null, 1, "prog"), created: new Date(nowMs - 3 * WEEK).toISOString(), resolved: "" });
+  const flowRowsB = [];
+  for (let w = 1; w <= 25; w++) for (let i = 0; i < 3; i++) {
+    flowRowsB.push({ key: `FB-${w}-${i}`, resolved: new Date(nowMs - w * WEEK - 2 * DAYMS).toISOString(), assigneeKey: "ivan", assigneeLogin: "ivan", assigneeName: "Ivan", epicKey: w <= 12 && i === 0 ? "EP-B" : "EP-9", typeName: "" });
+  }
+  const skipKey = flowlib.weekKey(nowMs - 5 * WEEK);
+  const recs = await analytics.restoreEpicWeeks({ epic, issues: issuesB, flowRows: flowRowsB, flowStart, lastWeek, skipWeeks: new Set([skipKey]), runs: 500 });
+  const byWeek = new Map(recs.map((r) => [r.week, r]));
+  const firstExpected = flowlib.weekKey(Math.max(flowlib.mondayOf(Date.parse(epic.created)), flowlib.mondayOf(flowStart + 5 * WEEK + 12 * 3600000)));
+  check("Б3: восстановление начинается не раньше создания эпика и 5 недель истории потока",
+    recs.length > 0 && recs.map((r) => r.week).sort()[0] === firstExpected, `${recs.map((r) => r.week).sort()[0]} / ${firstExpected}`);
+  check("Б3: неделя с настоящей записью не восстанавливается", !byWeek.has(skipKey) && recs.every((r) => r.restored === true));
+  check("Б3: текущая неделя не восстанавливается — только прошедшие", !byWeek.has(flowlib.weekKey(nowMs)) && byWeek.has(flowlib.weekKey(lastWeek)));
+  const wk = flowlib.mondayOf(nowMs - 8 * WEEK);
+  const endWk = wk + WEEK;
+  const manualClosed = issuesB.filter((x) => x.resolved && Date.parse(x.resolved) < endWk && Date.parse(x.created) < endWk).length;
+  const manualScope = issuesB.filter((x) => Date.parse(x.created) < endWk).length;
+  const r8 = byWeek.get(flowlib.weekKey(wk));
+  check("Б3: остаток на прошлую неделю совпадает с ручным подсчётом по датам создания и закрытия",
+    r8 && r8.total === manualScope && r8.done === manualClosed && r8.remaining === manualScope - manualClosed,
+    JSON.stringify(r8 && { total: r8.total, done: r8.done, remaining: r8.remaining, manualScope, manualClosed }));
+  const rLast = byWeek.get(flowlib.weekKey(lastWeek));
+  check("Б3: поздно добавленная задача входит в объём только с недели создания", r8.total === 10 && rLast.total === 11, `${r8.total} / ${rLast.total}`);
+  check("Б3: на прошлых неделях есть прогноз, недели с короткой историей помечены ориентировочными",
+    !!r8.p85 && recs.some((r) => r.approximate) && recs.some((r) => !r.approximate));
+  check("Б3: эпик, закрытый позже, на прошлых неделях не «готов»", recs.every((r) => r.statusCategory !== "done"));
+
+  // через хранилище: настоящие записи не перезаписываются, версия восстановления отмечена
+  const saved = { flowWeeks: settings.get().flowWeeks, lastSync: settings.get().lastSync };
+  await settings.save({ flowWeeks: 30, lastSync: nowMs });
+  await dbm.clearAll();
+  await dbm.putAll(dbm.STORES.epics, [epic]);
+  await dbm.putAll(dbm.STORES.issues, issuesB);
+  await dbm.putAll(dbm.STORES.flow, flowRowsB);
+  const realWeek = flowlib.weekKey(nowMs - 4 * WEEK);
+  await dbm.putAll(dbm.STORES.epicWeeks, [{ epicKey: "EP-B", week: realWeek, restored: false, total: 999 }]);
+  const t0 = Date.now();
+  const bf = await backfillHistory({ today: nowMs });
+  const stored = await dbm.all(dbm.STORES.epicWeeks);
+  check("Б3: настоящая запись недели после восстановления не изменилась",
+    stored.find((r) => r.week === realWeek)?.total === 999 && stored.filter((r) => r.restored).length === bf.weeks && bf.weeks > 10, `${bf.weeks} недель за ${Date.now() - t0} мс`);
+  check("Б3: версия восстановления отмечена", (await dbm.metaGet("backfillVersion", 0)) === 1);
+  await settings.save(saved);
   await dbm.clearAll();
 }
 
