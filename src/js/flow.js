@@ -54,6 +54,26 @@ export function parseTypeList(text) {
     .filter(Boolean);
 }
 
+// Типы задач, не учитываемые в подсчётах: один набор на всех экранах — список, карточка, прогноз,
+// «Сводка», «По эпикам» и загрузка людей (Р9). s — настройки.
+export function excludedTypes(s) {
+  return parseTypeList(s && s.forecastExcludeTypes);
+}
+
+// Те же типы в написании из настройки — для JQL-ссылок в Jira.
+export function excludedTypeNames(s) {
+  const seen = new Set();
+  const out = [];
+  for (const x of String((s && s.forecastExcludeTypes) || "").split(/[,;\n]/)) {
+    const name = x.trim();
+    if (name && !seen.has(name.toLowerCase())) {
+      seen.add(name.toLowerCase());
+      out.push(name);
+    }
+  }
+  return out;
+}
+
 export function isExcludedType(typeName, excluded) {
   return !!typeName && excluded.includes(String(typeName).trim().toLowerCase());
 }

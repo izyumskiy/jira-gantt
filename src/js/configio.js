@@ -10,6 +10,7 @@
 //   "infoSystems": ["1С CRM", "..."],
 //   "teams":       ["1C", "Платформы данных"],
 //   "epics":       ["PRJ-1", "PRJ-2"],
+//   "epicOrder":   ["PRJ-2", "PRJ-1"],   — ручной порядок на «По эпикам» (необязательно)
 //   "people":      [{ "name": "Иван Ёлкин", "role": "developer", "status": "staff",
 //                     "systems": ["1С CRM"], "team": "1C" }]
 // }
@@ -45,6 +46,7 @@ export function parseConfig(text) {
     requestTimeoutSec: Number(cfg.requestTimeoutSec) > 0 ? Number(cfg.requestTimeoutSec) : null,
     autoSync: cfg.autoSync && typeof cfg.autoSync === "object" ? cfg.autoSync : null,
     epics: Array.isArray(cfg.epics) ? cfg.epics.map((k) => String(k).trim()).filter(Boolean) : [],
+    epicOrder: Array.isArray(cfg.epicOrder) ? [...new Set(cfg.epicOrder.map((k) => String(k).trim().toUpperCase()).filter(Boolean))] : [],
     people: Array.isArray(cfg.people) ? cfg.people.filter((p) => p && typeof p === "object" && p.name) : []
   };
 }
@@ -135,6 +137,14 @@ export async function applyConfig(cfg, { onLog = () => {} } = {}) {
     }
   }
 
+  // 2б. Ручной порядок эпиков (Р8): эпики вне выбора отбрасываются, новые встанут в конец сами.
+  if (cfg.epicOrder && cfg.epicOrder.length) {
+    const selected = new Set((await sync.selectedEpics()).map((e) => e.key));
+    const order = cfg.epicOrder.filter((k) => selected.has(k));
+    await db.metaSet(sync.EPIC_ORDER_KEY, order.length ? order : null);
+    log(t("cfg.orderSet", { n: order.length }));
+  }
+
   // 3. Сотрудники: роль, статус, системы — по имени; неизвестные системы попадают в справочник.
   if (cfg.people.length) {
     const profiles = await db.all(db.STORES.people);
@@ -192,6 +202,7 @@ export async function exportConfig() {
     requestTimeoutSec: s.requestTimeoutSec,
     autoSync: { ...s.autoSync },
     epics: epics.map((e) => e.key),
+    epicOrder: (await db.metaGet(sync.EPIC_ORDER_KEY, null)) || [],
     people: rows.map((r) => ({
       name: r.displayName,
       login: r.login || "",
