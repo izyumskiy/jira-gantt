@@ -165,6 +165,12 @@ export async function userSearch(query) {
   return (Array.isArray(list) ? list : []).map((u) => ({ name: u.name || u.key, displayName: u.displayName || u.name }));
 }
 
+// Приоритеты Jira: порядок в ответе — от высшего к низшему (Р2, Р6).
+export async function priorities() {
+  const list = await request("/rest/api/2/priority");
+  return Array.isArray(list) ? list : [];
+}
+
 // Один спринт по id — так обновляем даты, даже если ни одна задача не менялась.
 export function sprint(sprintId) {
   return request(`/rest/agile/1.0/sprint/${encodeURIComponent(sprintId)}`);

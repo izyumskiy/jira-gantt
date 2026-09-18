@@ -949,7 +949,7 @@ await settings.save({ infoSystems: [], fields: { plannedStart: "", plannedEnd: "
   const saved = { fields: { ...settings.get().fields }, useTempoTeams: settings.get().useTempoTeams, flowWeeks: settings.get().flowWeeks, lastSync: settings.get().lastSync };
   await settings.save({ fields: { ...saved.fields, epicLink: "customfield_10100", sprint: "customfield_10101", version: 5 }, useTempoTeams: false, flowWeeks: 4, lastSync: Date.now() - 3600000 });
   await dbm.clearAll();
-  await dbm.metaSet("issueSchema", 4);
+  await dbm.metaSet("issueSchema", 5); // текущая схема задач — иначе «Обновить» станет полной выгрузкой
   await dbm.putAll(dbm.STORES.epics, [{ key: "EP-A", summary: "Эпик А" }]);
   await dbm.putAll(dbm.STORES.issues, [
     mk("KEEP-1", "EP-A", "AAA", "Ivan", null, 1, "prog"),
@@ -2102,7 +2102,7 @@ check("пиктограмма 💬 есть и на «По эпикам и лю�
 {
   const ex = flowlib.excludedTypes({ forecastExcludeTypes: "User Story, user story;Epic Task" });
   check("Р9: исключённые типы — один набор, без учёта регистра; для JQL — написание из настроек без дублей",
-    ex.join("|") === "user story|user story|epic task" && flowlib.excludedTypeNames({ forecastExcludeTypes: "User Story, user story;Epic Task" }).join("|") === "User Story|Epic Task");
+    ex.join("|") === "user story|epic task" && flowlib.excludedTypeNames({ forecastExcludeTypes: "User Story, user story;Epic Task" }).join("|") === "User Story|Epic Task");
   const story = { ...mk("S-1", "EP-1", "AAA", "Story Owner", 2, 16, "new"), typeName: "User Story" };
   const storyOff = { ...mk("S-2", "EP-1", "AAA", "Story Owner", null, 8, "prog"), typeName: "User Story" };
   const withStories = [...issues, story, storyOff];
@@ -2152,6 +2152,147 @@ check("пиктограмма 💬 есть и на «По эпикам и лю�
   check("Р1: «Команда» — текстом, вне группы", !!doc.querySelector('.tabs > .tab[data-tab="team"][data-i18n="tab.team"]'));
   check("Р1: «Эпик — история» скрыт, пока ракурса нет (этап 3)", views[2]?.hasAttribute("hidden"));
   check("Р1: у группы есть подпись для экранного диктора", group?.dataset.i18nAria === "tab.views" && DICT.en["tab.views"]);
+}
+
+// Р2, Р6. Данные: приоритеты, связи, комментарии; пиктограммы приоритетов.
+{
+  const omgMod = await import("../src/js/omg.js");
+  const prio = await import("../src/js/priority.js");
+  const syncMod = await import("../src/js/sync.js");
+  const cm = (id, created, body, author = "Иван") => ({ id: String(id), created, body, author: { displayName: author } });
+  // Разбор меток проекта (Р3): последняя по дате создания, пустая — «Без проекта», регистр и пробелы.
+  const p1 = omgMod.parseComments([
+    cm(2, "2026-09-10T10:00:00.000+0300", "(omg project) Новый сайт"),
+    cm(1, "2026-09-01T10:00:00.000+0300", "(omg project) Старый сайт"),
+    cm(3, "2026-09-11T10:00:00.000+0300", "просто комментарий (omg project) не в начале")
+  ]);
+  check("Р3: действует последняя по дате метка проекта, текст не в начале — не метка", p1.project?.name === "Новый сайт", JSON.stringify(p1));
+  check("Р3: последняя метка с пустым названием — «Без проекта»",
+    omgMod.parseComments([cm(1, "2026-09-01T10:00:00Z", "(omg project) Сайт"), cm(2, "2026-09-02T10:00:00Z", "  (OMG Project)  \nлишнее")]).project === null);
+  check("Р3: кодовое слово без учёта регистра и с пробелами в начале; название — первая строка без пробелов по краям",
+    omgMod.parseComments([cm(1, "2026-09-01T10:00:00Z", "  (OMG  Project)   ПРОЕКТ  \nвторая строка")]).project?.name === "ПРОЕКТ");
+  check("Р3: «Проект» и «ПРОЕКТ » — один проект", omgMod.projectKey("Проект") === omgMod.projectKey(" ПРОЕКТ  ") && omgMod.projectKey("Мой  проект") === "мой проект");
+  check("Р3: квадратные скобки — не кодовое слово", omgMod.parseComments([cm(1, "2026-09-01T10:00:00Z", "[omg project] Сайт")]).project === null);
+  const n1 = omgMod.parseComments([
+    cm(5, "2026-09-05T10:00:00Z", "(omg comment)\nВторая заметка\nстрока 2", "Пётр"),
+    cm(4, "2026-09-04T10:00:00Z", "(omg comment) Первая"),
+    cm(6, "2026-09-06T10:00:00Z", "обычный комментарий")
+  ]);
+  check("Р4: заметки по дате, последняя — действующая, текст без кодового слова, обычные комментарии не попадают",
+    n1.notes.length === 2 && n1.notes[0].text === "Первая" && n1.notes[1].text === "Вторая заметка\nстрока 2" && n1.notes[1].author === "Пётр", JSON.stringify(n1.notes));
+  check("Р3/Р4: текст публикуемых комментариев", omgMod.projectComment(" Сайт ") === "(omg project) Сайт" && omgMod.projectComment("") === "(omg project)" && omgMod.noteComment(" Текст ") === "(omg comment)\nТекст");
+
+  // Приоритеты (Р6).
+  const order = [{ id: "1", name: "Highest" }, { id: "2", name: "High" }, { id: "3", name: "Medium" }, { id: "4", name: "Low" }, { id: "5", name: "Lowest" }];
+  const P = (id) => order.find((x) => x.id === id);
+  check("Р6: порядок из Jira, без приоритета — ниже самого низкого",
+    prio.rankOf(P("1"), order) === 0 && prio.rankOf(P("5"), order) === 4 && prio.rankOf(null, order) === 5 && prio.compare(P("2"), P("4"), order) < 0 && prio.compare(null, P("5"), order) > 0);
+  check("Р6: самый высокий из списка", prio.highest([P("4"), null, P("2"), P("3")], order)?.id === "2" && prio.highest([null], order) === null);
+  check("Р6: запасной кружок — от красного к серому", prio.fallbackColor(P("1"), order) === "#de350b" && prio.fallbackColor(P("5"), order) === "#a5adba" && prio.fallbackColor(null, order) === "#a5adba");
+  const bad = prio.icon({ id: "2", name: "High", iconUrl: "/no-such-icon.svg" }, order, t);
+  const holder = document.createElement("div");
+  holder.append(bad);
+  document.body.append(holder);
+  await new Promise((r) => setTimeout(r, 400));
+  const dot = holder.querySelector(".prio-dot");
+  check("Р6: пиктограмма не загрузилась — цветной кружок с названием в подсказке", !!dot && dot.title === "High" && !holder.querySelector("img"), holder.innerHTML);
+  holder.remove();
+  const good = prio.icon({ id: "1", name: "Highest", iconUrl: "https://jira.example.local/images/icons/priorities/highest.svg" }, order, t);
+  check("Р6: пиктограмма из Jira — картинка с названием в подсказке", good.tagName === "IMG" && good.title === "Highest" && good.src.endsWith("highest.svg"));
+  check("Р6: без приоритета — серый кружок «Приоритет не задан»", prio.icon(null, order, t).title === t("prio.none"));
+
+  // Типы историй всегда вне подсчётов (Р2).
+  check("Р2: типы историй входят в исключённые, даже если их нет в «Типах задач, не учитываемых в подсчётах»",
+    flowlib.excludedTypes({ forecastExcludeTypes: "Sub-task", storyTypes: "Story, User Story" }).join("|") === "sub-task|story|user story" &&
+      flowlib.excludedTypeNames({ forecastExcludeTypes: "User Story", storyTypes: "user story, Story" }).join("|") === "User Story|Story");
+
+  // Связи (Р2).
+  const links = syncMod.linksOf([
+    { type: { name: "Relates" }, outwardIssue: { key: "T-1", fields: { issuetype: { name: "Task" } } } },
+    { type: { name: "Blocks" }, inwardIssue: { key: "T-2", fields: { issuetype: { name: "Bug" } } } },
+    { type: { name: "Relates" } }
+  ]);
+  check("Р2: связи — тип, ключ и тип задачи на том конце, в любую сторону", JSON.stringify(links) === JSON.stringify([{ type: "Relates", key: "T-1", typeName: "Task" }, { type: "Blocks", key: "T-2", typeName: "Bug" }]));
+  const storyIs = (i) => flowlib.isExcludedType(i.typeName, ["user story"]);
+  const iss = new Map([
+    ["US-1", { key: "US-1", typeName: "User Story", links: [
+      { type: "Relates", key: "T-1", typeName: "Task" }, { type: "relates", key: "X-9", typeName: "Task" }, { type: "Blocks", key: "X-8", typeName: "Task" },
+      { type: "Relates", key: "EP-Q", typeName: "Epic" }, { type: "Relates", key: "US-7", typeName: "User Story" }, { type: "Relates", key: "EP-S", typeName: "" }] }],
+    ["T-1", { key: "T-1", typeName: "Task", links: [{ type: "Relates", key: "X-5", typeName: "Task" }] }]
+  ]);
+  check("Р2: догружаются только чужие задачи историй по связи из настроек; эпики, истории и связи задач не в счёт",
+    syncMod.linkedKeysToLoad({ issues: iss, isStory: storyIs, linkType: "Relates", epicKeys: ["EP-S"] }).join() === "X-9");
+
+  // Синхронизация с заглушкой Jira: приоритеты, связи, комментарии, чужие задачи, порядок приоритетов.
+  const orig = window.fetch;
+  const saved = { fields: { ...settings.get().fields }, useTempoTeams: settings.get().useTempoTeams };
+  await settings.save({ fields: { ...saved.fields, epicLink: "customfield_10100", sprint: "customfield_10101", version: 5 }, useTempoTeams: false, storyTypes: "User Story", storyLinkType: "Relates" });
+  await dbm.clearAll();
+  await dbm.putAll(dbm.STORES.epics, [{ key: "EP-S", summary: "Эпик С" }]);
+  const json = (o, status = 200) => new Response(JSON.stringify(o), { status, headers: { "Content-Type": "application/json" } });
+  const stt = { name: "В работе", statusCategory: { key: "indeterminate" } };
+  const who = { name: "ivan", key: "ivan", displayName: "Ivan" };
+  const hi = { id: "2", name: "High", iconUrl: "https://jira.example.local/high.svg" };
+  const lnk = (key, typeName, name = "Relates") => ({ type: { name }, outwardIssue: { key, fields: { issuetype: { name: typeName } } } });
+  const issue = (key, type, links = [], epic = "EP-S") => ({ key, fields: { summary: key, project: { key: "AAA" }, assignee: who, status: stt, issuetype: { name: type }, priority: hi, issuelinks: links, updated: new Date().toISOString(), created: new Date().toISOString(), customfield_10100: epic, timeoriginalestimate: 3600 } });
+  const epicUpdated = "2026-09-17T10:00:00.000+0300";
+  const commentReq = [];
+  window.fetch = async (url, opt = {}) => {
+    const u = String(url);
+    const b = opt.body ? JSON.parse(opt.body) : {};
+    if (u.includes("/rest/api/2/myself")) return json({ name: "ivan" });
+    if (u.includes("/rest/api/2/priority")) return json([{ id: "1", name: "Highest", iconUrl: "h.svg" }, hi, { id: "3", name: "Medium", iconUrl: "m.svg" }]);
+    if (u.includes("/rest/api/2/issue/US-1/comment")) return json({ comments: [cm(1, "2026-09-01T10:00:00Z", "(omg comment) Старая"), cm(2, "2026-09-02T10:00:00Z", "(omg comment) Свежая заметка")], total: 2 });
+    if (u.includes("/rest/agile/1.0/board")) return json({ values: [], isLast: true });
+    if (u.includes("/rest/api/2/search")) {
+      const jql = b.jql || "";
+      if ((b.fields || []).includes("comment")) {
+        commentReq.push(jql);
+        const rows = [];
+        if (jql.includes("EP-S")) rows.push({ key: "EP-S", fields: { comment: { total: 2, comments: [cm(1, "2026-09-01T10:00:00Z", "(omg project) Сайт"), cm(2, "2026-09-03T10:00:00Z", "(omg comment) Заметка эпика")] } } });
+        if (jql.includes("US-1")) rows.push({ key: "US-1", fields: { comment: { total: 2, comments: [cm(1, "2026-09-01T10:00:00Z", "(omg comment) Старая")] } } });
+        return json({ issues: rows, total: rows.length });
+      }
+      if (jql.includes("resolutiondate >=")) return json({ issues: [], total: 0 });
+      if (jql.includes("key in (EP-S)")) return json({ issues: [{ key: "EP-S", fields: { summary: "Эпик С", status: stt, project: { key: "AAA" }, priority: hi, updated: epicUpdated } }], total: 1 });
+      if (jql.includes("in (EP-S)")) return json({ issues: [issue("US-1", "User Story", [lnk("T-1", "Task"), lnk("X-9", "Task"), lnk("EP-Q", "Epic"), lnk("X-8", "Task", "Blocks")]), issue("T-1", "Task", [lnk("US-1", "User Story")])], total: 2 });
+      if (jql.includes("key in (X-9)")) return json({ issues: [issue("X-9", "Task", [], "EP-Z")], total: 1 });
+      return json({ issues: [], total: 0 });
+    }
+    return json({}, 404);
+  };
+  let res = null;
+  let err = null;
+  try { res = await runSync({ full: true }); } catch (e) { err = e; }
+  const us = await dbm.getOne(dbm.STORES.issues, "US-1");
+  const t1 = await dbm.getOne(dbm.STORES.issues, "T-1");
+  const ep = await dbm.getOne(dbm.STORES.epics, "EP-S");
+  check("Р2: синхронизация прошла, ошибок комментариев и чужих задач нет", !err && res && !res.commentsError && !res.linkedError, err ? err.message : JSON.stringify(res && { c: res.commentsError, l: res.linkedError }));
+  check("Р2: у задач приоритет и связи", t1?.priority?.name === "High" && t1.links.length === 1 && us?.links.length === 4);
+  check("Р2: у эпика приоритет, время изменения и метка проекта", ep?.priority?.id === "2" && ep.updated === epicUpdated && ep.omg?.project?.name === "Сайт" && ep.omg.notes[0]?.text === "Заметка эпика", JSON.stringify(ep && ep.omg));
+  check("Р2: у истории заметки; не все комментарии в поиске — догружены поштучно", us?.omg?.notes.length === 2 && us.omg.notes[1].text === "Свежая заметка", JSON.stringify(us && us.omg));
+  check("Р2: комментарии обычных задач не запрашиваются", !commentReq.some((j) => j.includes("T-1")));
+  const linkedRows = await dbm.all(dbm.STORES.linked);
+  check("Р2: чужая задача истории загружена отдельно; эпик на том конце и связь другого типа — нет", linkedRows.map((r) => r.key).join() === "X-9" && linkedRows[0].epicKey === "EP-Z", linkedRows.map((r) => r.key).join());
+  check("Р2: порядок приоритетов сохранён", (await dbm.metaGet("priorities"))?.map((p) => p.name).join() === "Highest,High,Medium");
+  commentReq.length = 0;
+  try { res = await runSync({ full: false }); } catch (e) { err = e; }
+  const ep2 = await dbm.getOne(dbm.STORES.epics, "EP-S");
+  check("Р2: «Обновить» — комментарии неизменившегося эпика не перечитываются, разбор сохраняется",
+    !err && !commentReq.some((j) => j.includes("EP-S")) && ep2?.omg?.project?.name === "Сайт", JSON.stringify(commentReq));
+  // Сбой запроса комментариев: разбор истории не теряется, об ошибке — отдельной строкой.
+  const okFetch = window.fetch;
+  window.fetch = async (url, opt = {}) => {
+    const b = opt.body ? JSON.parse(opt.body) : {};
+    if (String(url).includes("/rest/api/2/search") && (b.fields || []).includes("comment")) return json({ errorMessages: ["boom"] }, 500);
+    return okFetch(url, opt);
+  };
+  try { res = await runSync({ full: false }); } catch (e) { err = e; }
+  const us3 = await dbm.getOne(dbm.STORES.issues, "US-1");
+  check("Р2: комментарии не прочитались — заметки истории прежние, синхронизация завершена, об ошибке сказано", !err && us3?.omg?.notes.length === 2 && !!res?.commentsError, err ? err.message : JSON.stringify(us3 && us3.omg));
+  window.fetch = orig;
+  await settings.save({ fields: saved.fields, useTempoTeams: saved.useTempoTeams });
+  await dbm.clearAll();
 }
 
 const total = document.createElement("div");

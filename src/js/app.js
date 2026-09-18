@@ -1178,13 +1178,15 @@ async function runSync(full) {
       lines.push(t("st.tempoSummary", { teams: result.tempoStats.teams, members: result.tempoStats.members }).replace(/^ · /, ""));
     }
     if (result.othersError) lines.push(result.othersError);
+    if (result.commentsError) lines.push(result.commentsError);
+    if (result.linkedError) lines.push(result.linkedError);
     // Ограничения API: выгрузка прошла, но часть источников закрыта — об этом надо сказать прямо.
     const api = result.apiStats;
     const apiLimited = api && (!api.agile.ok || (!api.tempo.ok && !api.tempo.skipped));
     if (api && !api.agile.ok) lines.push(t("st.apiAgileLimited", { msg: api.agile.msg }));
     if (api && !api.tempo.ok && !api.tempo.skipped) lines.push(t("st.apiTempoLimited", { msg: api.tempo.msg }));
     // Одной строкой, чтобы сводка не перекрывалась ошибкой; ошибка красит всю строку.
-    const isError = (st && st.boardsFailed.length) || result.othersError || apiLimited;
+    const isError = (st && st.boardsFailed.length) || result.othersError || result.commentsError || result.linkedError || apiLimited;
     if (lines.length) status(lines.join(" — "), isError ? "error" : "info");
     gantt.resetCollapse();
     redrawActive();
@@ -1466,6 +1468,9 @@ function fillSettingsForm() {
   renderFlowDiag().catch(() => {});
   $("#doneStatuses").value = s.doneStatuses;
   $("#forecastExcludeTypes").value = s.forecastExcludeTypes ?? "";
+  $("#storyTypes").value = s.storyTypes ?? "";
+  $("#storyLinkType").value = s.storyLinkType ?? "";
+  $("#noteStaleDays").value = s.noteStaleDays ?? "";
   $("#infoSystems").value = (s.infoSystems || []).join("\n");
   $("#teamsList").value = (s.teams || []).join("\n");
   $("#lang").value = s.lang;
@@ -1618,6 +1623,9 @@ async function saveSettingsForm() {
     ),
     doneStatuses: $("#doneStatuses").value.trim(),
     forecastExcludeTypes: $("#forecastExcludeTypes").value.trim(),
+    storyTypes: $("#storyTypes").value.trim() || settings.DEFAULTS.storyTypes,
+    storyLinkType: $("#storyLinkType").value.trim() || settings.DEFAULTS.storyLinkType,
+    noteStaleDays: Number($("#noteStaleDays").value) > 0 ? Number($("#noteStaleDays").value) : settings.DEFAULTS.noteStaleDays,
     infoSystems: team.parseSystems($("#infoSystems").value),
     teams: team.parseSystems($("#teamsList").value),
     fields: {
