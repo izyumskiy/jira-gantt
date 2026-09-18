@@ -1137,7 +1137,7 @@ async function afterForeignSync() {
 async function doSync({ full = false } = {}) {
   if (syncing) return { ok: false, kind: "busy" };
   syncing = true;
-  $("#btnRefresh").disabled = $("#btnReload").disabled = true;
+  setSyncBusy(true);
   try {
     // Одна синхронизация на все вкладки: если другая вкладка уже обновляет — ждём её и перечитываем.
     const locked = await autoSync.withSyncLock(() => runSync(full), { onBusy: () => status(t("st.syncOtherTab")) });
@@ -1150,8 +1150,28 @@ async function doSync({ full = false } = {}) {
     return locked.result;
   } finally {
     syncing = false;
-    $("#btnRefresh").disabled = $("#btnReload").disabled = false;
+    setSyncBusy(false);
   }
+}
+
+// Кнопка синхронизации на время выгрузки: неактивна, значок ↻ крутится.
+function setSyncBusy(on) {
+  for (const id of ["#btnRefresh", "#btnSyncMenu", "#btnRefreshItem", "#btnReload"]) if ($(id)) $(id).disabled = on;
+  $("#btnRefresh")?.classList.toggle("syncing", on);
+  if (on) closeSyncMenu();
+}
+
+function closeSyncMenu() {
+  const menu = $("#syncMenu");
+  if (!menu || menu.hidden) return;
+  menu.hidden = true;
+  $("#btnSyncMenu").setAttribute("aria-expanded", "false");
+}
+
+function openSyncMenu() {
+  $("#syncMenu").hidden = false;
+  $("#btnSyncMenu").setAttribute("aria-expanded", "true");
+  $("#btnRefreshItem").focus();
 }
 
 async function runSync(full) {
@@ -1528,10 +1548,12 @@ async function drawStories() {
       },
       storyTypesText: s.storyTypes,
       storyLinkText: s.storyLinkType,
-      // Кнопка из подсказки «у историй нет задач»: выбрать связь задачи с историей.
-      onSetLinkType: async (name) => {
-        await settings.save({ storyLinkType: name });
-        if ($("#storyLinkType")) $("#storyLinkType").value = name;
+      // Кнопка из подсказки «у историй нет задач»: добавить связь в «Связь задачи с историей».
+      onAddLinkType: async (name) => {
+        const list = String(settings.get().storyLinkType || "").split(/[,;\n]/).map((x) => x.trim()).filter(Boolean);
+        if (!list.some((x) => x.toLowerCase() === name.toLowerCase())) list.push(name);
+        await settings.save({ storyLinkType: list.join(", ") });
+        if ($("#storyLinkType")) $("#storyLinkType").value = settings.get().storyLinkType;
         status(t("story.linkSet", { name }));
         drawStories();
       },
@@ -1901,8 +1923,29 @@ async function boot() {
     await settings.save({ epicAssigneeFilter: $("#epicAssignee3").value });
     drawStories();
   };
-  $("#btnRefresh").onclick = () => doSync({ full: false });
-  $("#btnReload").onclick = () => doSync({ full: true });
+  // ↻ — «Обновить»; Shift+щелчок — «Скачать заново». ▾ — меню с обоими действиями.
+  $("#btnRefresh").onclick = (e) => doSync({ full: !!e.shiftKey });
+  $("#btnSyncMenu").onclick = (e) => {
+    e.stopPropagation();
+    $("#syncMenu").hidden ? openSyncMenu() : closeSyncMenu();
+  };
+  $("#btnRefreshItem").onclick = () => {
+    closeSyncMenu();
+    doSync({ full: false });
+  };
+  $("#btnReload").onclick = () => {
+    closeSyncMenu();
+    doSync({ full: true });
+  };
+  document.addEventListener("click", (e) => {
+    if (!e.target.closest(".sync-btn")) closeSyncMenu();
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !$("#syncMenu").hidden) {
+      closeSyncMenu();
+      $("#btnSyncMenu").focus();
+    }
+  });
 
   $("#btnGrant").onclick = async () => {
     try {

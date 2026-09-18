@@ -127,6 +127,28 @@ input[type="search"] { min-width: 320px; }
 .today { align-self: center; margin-left: 10px; padding: 0 6px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .lang { font-size: 18px; line-height: 1; padding: 2px 4px; }
+/* Синхронизация — одна кнопка: ↻ «Обновить» и ▾ меню, склеены в одну «таблетку». */
+.sync-btn { position: relative; display: inline-flex; }
+.sync-btn .sync-main { display: inline-flex; align-items: center; padding: 5px 9px; border-radius: 4px 0 0 4px; }
+.sync-btn .sync-more { padding: 5px 6px; border-radius: 0 4px 4px 0; border-left: 1px solid rgba(255, 255, 255, .35); font-size: 11px; line-height: 16px; }
+.sync-main svg { display: block; }
+.sync-main.syncing svg { animation: sync-spin 1s linear infinite; }
+@keyframes sync-spin { to { transform: rotate(360deg); } }
+.sync-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 40;
+  min-width: 260px;
+  padding: 4px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(9, 30, 66, .2);
+}
+.sync-menu[hidden] { display: none; }
+.sync-menu button { display: flex; flex-direction: column; align-items: flex-start; width: 100%; border: none; background: none; padding: 6px 10px; text-align: left; border-radius: 4px; }
+.sync-menu button:hover, .sync-menu button:focus-visible { background: var(--accent-soft); }
 .muted { color: var(--muted); }
 .hidden { display: none !important; }
 

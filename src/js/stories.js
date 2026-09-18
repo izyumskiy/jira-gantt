@@ -10,7 +10,7 @@
 // - итог проекта — сумма итогов его эпиков.
 import * as agg from "./agg.js";
 import { classify } from "./status.js";
-import { isExcludedType } from "./flow.js";
+import { isExcludedType, linkMatcher } from "./flow.js";
 import * as prio from "./priority.js";
 import * as omg from "./omg.js";
 
@@ -107,7 +107,8 @@ export function projectPriority(epicNodes, order) {
 
 // epics — эпики для показа (после галочек и фильтров), issues — задачи выбранных эпиков,
 // linked — чужие задачи историй (хранилище linked), priorities — порядок приоритетов Jira.
-// storyTypes / excludeTypes — в нижнем регистре; linkType — тип связи задачи с историей.
+// storyTypes / excludeTypes — в нижнем регистре; linkType — связи задачи с историей (список через
+// запятую: название типа связи или её подпись в Jira, см. flow.linkMatcher).
 export function buildStoryModel({
   epics,
   issues,
@@ -130,8 +131,7 @@ export function buildStoryModel({
   const isStory = (i) => isExcludedType(i.typeName, storyTypes);
   const isEpicType = (typeName) => String(typeName || "").trim().toLowerCase() === "epic";
   const counted = (i) => !isExcludedType(i.typeName, excludeTypes) && !isStory(i) && !isEpicType(i.typeName);
-  const lt = String(linkType || "").trim().toLowerCase();
-  const okLink = (l) => !lt || String(l.type || "").toLowerCase() === lt;
+  const okLink = linkMatcher(linkType);
 
   const issueByKey = new Map(issues.map((i) => [i.key, i]));
   const linkedByKey = new Map(linked.map((i) => [i.key, i]));
@@ -177,7 +177,10 @@ export function buildStoryModel({
       const rel = new Map(); // ключ задачи → тип задачи на том конце (для «не загружена»)
       for (const l of s.links || []) {
         const tn = String(l.typeName || "");
-        if (!isEpicType(tn) && !isExcludedType(tn, storyTypes)) linkTypeCounts.set(l.type || "—", (linkTypeCounts.get(l.type || "—") || 0) + 1);
+        // Подпись связи понятнее названия типа («is subtask of» против «Subtask»), и настройка
+        // понимает обе — считаем по подписи, если она есть.
+        const name = l.desc || l.type || "—";
+        if (!isEpicType(tn) && !isExcludedType(tn, storyTypes)) linkTypeCounts.set(name, (linkTypeCounts.get(name) || 0) + 1);
         if (okLink(l)) rel.set(l.key, l.typeName || "");
       }
       for (const k of reverse.get(s.key) || []) if (!rel.has(k)) rel.set(k, "");

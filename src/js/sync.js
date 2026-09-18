@@ -198,14 +198,16 @@ function issueSprint(value) {
 
 // ---------- маппинг задачи ----------
 
-// Связи задачи (Р2): тип связи, ключ и тип задачи на том конце. Тип нужен, чтобы не считать задачами
-// истории эпики и другие истории, не догружая их.
+// Связи задачи (Р2): тип связи, подпись связи с этой стороны (как в Jira на странице задачи:
+// «relates to», «is subtask of»), ключ и тип задачи на том конце. Тип нужен, чтобы не считать
+// задачами истории эпики и другие истории, не догружая их.
 export function linksOf(issuelinks) {
   const out = [];
   for (const l of Array.isArray(issuelinks) ? issuelinks : []) {
     const other = l && (l.outwardIssue || l.inwardIssue);
     if (!other || !other.key) continue;
-    out.push({ type: (l.type && l.type.name) || "", key: other.key, typeName: other.fields?.issuetype?.name || "" });
+    const desc = (l.type && (l.outwardIssue ? l.type.outward : l.type.inward)) || "";
+    out.push({ type: (l.type && l.type.name) || "", desc, key: other.key, typeName: other.fields?.issuetype?.name || "" });
   }
   return out;
 }
@@ -479,13 +481,13 @@ async function collectOmg(keys, onProgress) {
 // Чужие задачи историй: по связям историй (тип связи — из настроек, направление не важно) — задачи,
 // которых нет среди задач выбранных эпиков. Эпики и другие истории на том конце задачами не считаются.
 export function linkedKeysToLoad({ issues, isStory, linkType, epicKeys }) {
-  const lt = String(linkType || "").trim().toLowerCase();
+  const okLink = flowlib.linkMatcher(linkType);
   const epicSet = new Set(epicKeys);
   const want = new Set();
   for (const i of issues.values()) {
     if (!isStory(i)) continue;
     for (const l of i.links || []) {
-      if (lt && String(l.type || "").toLowerCase() !== lt) continue;
+      if (!okLink(l)) continue;
       if (issues.has(l.key) || epicSet.has(l.key)) continue;
       const tn = String(l.typeName || "").toLowerCase();
       if (tn === "epic" || (tn && isStory({ typeName: l.typeName }))) continue;
@@ -748,7 +750,7 @@ function jqlDate(ms) {
 
 // Версия набора полей задачи в базе. Растёт, когда mapIssue начинает сохранять новые поля:
 // инкрементальное обновление их у старых задач не добавит, поэтому один раз делаем полную выгрузку.
-const ISSUE_SCHEMA = 5; // 5: приоритет и связи задач (Р2)
+const ISSUE_SCHEMA = 6; // 5: приоритет и связи задач (Р2); 6: подпись связи («is subtask of»)
 
 // full = true — скачиваем задачи целиком, иначе только изменённые с прошлой синхронизации.
 //
