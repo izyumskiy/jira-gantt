@@ -106,7 +106,7 @@ async function openEpicCard(key, anchor) {
   const epic = (await db.all(db.STORES.epics)).find((e) => e.key === key);
   if (!epic) return;
   const c = analytics
-    .epicCounters([epic], await db.all(db.STORES.issues), { excludeTypes: flowlib.parseTypeList(settings.get().forecastExcludeTypes) })
+    .epicCounters([epic], await db.all(db.STORES.issues), { excludeTypes: flowlib.excludedTypes(settings.get()) })
     .get(key);
   showEpicInfo(anchor, epic, c.spent, c.pct);
 }
@@ -634,7 +634,7 @@ async function renderEpicFlow(box, epic, onDone = () => {}) {
     tempo,
     profiles,
     issues,
-    excludeTypes: flowlib.parseTypeList(settings.get().forecastExcludeTypes),
+    excludeTypes: flowlib.excludedTypes(settings.get()),
     weeks: Number(settings.get().flowWeeks) || 52
   });
   const { model, teams, shares } = flow;
@@ -1064,7 +1064,7 @@ async function renderStored() {
   if (stored.length || hasFilter()) box.append(listHead());
   // Списано, готовность и задачи по проектам — из модуля расчётов (те же числа, что в карточке).
   const counters = analytics.epicCounters(stored, await db.all(db.STORES.issues), {
-    excludeTypes: flowlib.parseTypeList(settings.get().forecastExcludeTypes)
+    excludeTypes: flowlib.excludedTypes(settings.get())
   });
   state.issuesByEpic = new Map([...counters].map(([k, c]) => [k, c.issueKeys]));
   const spentByEpic = new Map([...counters].map(([k, c]) => [k, c.spent]));
@@ -1324,6 +1324,23 @@ function renderPeopleFilterNote() {
   box.append(clear);
 }
 
+// Ручной порядок эпиков (Р8): отметка над диаграммой и кнопка возврата к автоматическому.
+function renderEpicOrderNote(manual) {
+  const box = $("#epicOrderNote");
+  box.textContent = "";
+  if (!manual) return;
+  box.append(t("order.manual"));
+  const reset = document.createElement("button");
+  reset.type = "button";
+  reset.className = "link";
+  reset.textContent = t("order.reset");
+  reset.onclick = async () => {
+    await db.metaSet(sync.EPIC_ORDER_KEY, null);
+    drawGantt("epicPeople", $("#page-epicPeople"));
+  };
+  box.append(reset);
+}
+
 function applyEpicFilter(model) {
   if (!state.epicFilter) return;
   const key = state.epicFilter.key;
@@ -1360,6 +1377,7 @@ async function drawGantt(mode, container) {
       db.all(db.STORES.tempo)
     ]);
     let target = container;
+    const excludeTypes = flowlib.excludedTypes(settings.get());
     let epicsShown = epics;
     let issuesShown = issues;
     if (mode === "epicPeople") {
@@ -1387,10 +1405,23 @@ async function drawGantt(mode, container) {
       tempo,
       profiles,
       mode,
-      timelineIssues: [...issues, ...others]
+      timelineIssues: [...issues, ...others],
+      // На «По эпикам» истории не считаются (Р9), как в списке, карточке и «Сводке».
+      excludeTypes,
+      excludeTypeNames: flowlib.excludedTypeNames(settings.get())
     });
-    const opts = { mode, profiles, personLoad: analytics.personLoad(model, issues, others) };
+    const opts = { mode, profiles, personLoad: analytics.personLoad(model, issues, others, excludeTypes) };
     if (mode === "epicPeople") {
+      // Ручной порядок хранится по всем выбранным эпикам, включая скрытые: скрытый эпик держит место.
+      const stored = await db.metaGet(sync.EPIC_ORDER_KEY, null);
+      const manual = Array.isArray(stored) && stored.length > 0;
+      const order = agg.effectiveEpicOrder(stored, model.groups.map((g) => g.key), epics.map((e) => e.key));
+      if (manual) model.groups = agg.applyEpicOrder(model.groups, order);
+      renderEpicOrderNote(manual);
+      opts.onReorder = async (key, afterKey) => {
+        await db.metaSet(sync.EPIC_ORDER_KEY, agg.moveEpic(order, key, afterKey));
+        drawGantt("epicPeople", $("#page-epicPeople"));
+      };
       applyPersonFilter(model);
       renderPersonFilterNote();
       opts.highlightChild = state.personFilter ? state.personFilter.key : "";

@@ -110,12 +110,13 @@ export async function loadData({ mode = "seen", session = { baseSyncId: null }, 
   const base = await loadBase(mode, session, lastSyncId, now);
   const s = settings.get();
   const model = agg.buildModel({ issues, others, sprints, epics, boards, tempo, profiles, mode: "assignee", timelineIssues: [...issues, ...others] });
-  const load = analytics.personLoad(model, issues, others);
+  // Загрузка людей — без исключённых типов (историй), как на «По эпикам» и в окне ⇄ (Р9).
+  const load = analytics.personLoad(model, issues, others, flowlib.excludedTypes(s));
   const teamOf = analytics.flowTeamOf({ tempo, profiles });
   const sizes = new Map();
   for (const tm of tempo) sizes.set(`t:${tm.id}`, (tm.members || []).length);
   for (const p of profiles) if (p.team) sizes.set(`m:${p.team}`, (sizes.get(`m:${p.team}`) || 0) + 1);
-  const excludeTypes = flowlib.parseTypeList(s.forecastExcludeTypes);
+  const excludeTypes = flowlib.excludedTypes(s);
   // Автообновление сегодня не удалось из-за недоступности Jira — скорее всего, не включён VPN.
   let unreachableAt = 0;
   try {

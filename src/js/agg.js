@@ -7,6 +7,7 @@
 import { t } from "./i18n.js";
 import * as settings from "./settings.js";
 import { classify, isDoneStatus, isCancelledStatus } from "./status.js";
+import { isExcludedType } from "./flow.js";
 
 // ---------- оценки ----------
 
@@ -410,12 +411,29 @@ function briefOf(issue, est, done) {
 
 export const BACKLOG_ID = "sec:backlog";
 
+// Веха завершения эпика на диаграммах (Р7): срок исполнения, а если его нет — плановое завершение.
+// Срок исполнения важнее: это обещание заказчику. «Сводка» и прогноз считают только от срока
+// исполнения и эту функцию не используют.
+export function epicMilestone(epic) {
+  if (!epic) return null;
+  const dueDate = epic.dueDate || "";
+  const plannedEnd = epic.plannedEnd || "";
+  if (dueDate) return { date: dueDate, kind: "due", dueDate, plannedEnd };
+  if (plannedEnd) return { date: plannedEnd, kind: "planned", dueDate, plannedEnd };
+  return null;
+}
+
 // mode: "epicPeople" (эпики → исполнители, вкладка «По эпикам») | "assignee" (люди → проекты);
 // others — задачи людей вне целевых эпиков (учитываются только по людям).
 // timelineIssues — по каким задачам строить шкалу времени. Передаётся вся выгрузка, чтобы шкала
 // была одинаковой на всех вкладках и не менялась от фильтров.
-export function buildModel({ issues, others = [], sprints, epics, boards = [], tempo = [], profiles = [], mode, timelineIssues = null }) {
+// excludeTypes — типы задач, не учитываемые в подсчётах (по умолчанию User Story), в нижнем регистре.
+// На «По эпикам» их задачи не участвуют ни в полосах, ни в подсказках, ни в отборе людей (Р9): история —
+// контейнер, её оценка дублирует оценки задач. «По людям» по-прежнему показывает все задачи человека.
+// excludeTypeNames — те же типы в написании из настроек, для JQL-ссылок подсказки.
+export function buildModel({ issues: allIssues, others = [], sprints, epics, boards = [], tempo = [], profiles = [], mode, timelineIssues = null, excludeTypes = [], excludeTypeNames = [] }) {
   const epicLike = mode !== "assignee"; // группы — эпики
+  const issues = mode === "epicPeople" && excludeTypes.length ? allIssues.filter((i) => !isExcludedType(i.typeName, excludeTypes)) : allIssues;
   // «По людям» — про загрузку: берём остаток, если он проставлен, иначе исходную оценку.
   const estOf = mode === "assignee" ? workEstimateOf : estimateOf;
   const teamsInfo = buildTeams(sprints, boards);
@@ -466,7 +484,8 @@ export function buildModel({ issues, others = [], sprints, epics, boards = [], t
         label: groupLabelOf(issue),
         status: epic ? { name: epic.statusName || "", category: epic.statusCategory || "", id: cls.id } : null,
         statusRank: cls ? cls.rank : 0,
-        dueDate: epic ? epic.dueDate || "" : "", // срок исполнения эпика — веха на диаграмме
+        dueDate: epic ? epic.dueDate || "" : "", // срок исполнения эпика
+        milestone: epicMilestone(epic), // веха на диаграмме: срок исполнения или плановое завершение (Р7)
         login: mode === "assignee" ? issue.assigneeLogin || "" : "",
         team: null,
         teamVotes: new Map(),
@@ -673,8 +692,45 @@ export function buildModel({ issues, others = [], sprints, epics, boards = [], t
     teamOfSprint: (id) => teamsInfo.of(sprintById.get(id)),
     sprintById,
     targetKeys: epics.map((e) => e.key),
+    // Типы, исключённые из подсчётов: подсказка «По эпикам» добавляет их в JQL, чтобы числа совпадали с Jira.
+    excludeTypeNames: mode === "epicPeople" ? excludeTypeNames : [],
     childKind: mode === "epicPeople" ? "person" : "epic"
   };
+}
+
+// ---------- ручной порядок эпиков на «По эпикам» (Р8) ----------
+// Порядок хранится списком ключей всех выбранных эпиков, включая скрытые галочкой и фильтрами:
+// скрытый эпик сохраняет место и при показе встаёт туда же.
+
+// Действующий порядок. stored — сохранённый список (null — порядок не задавался), autoKeys — ключи
+// в автоматическом порядке, allKeys — все выбранные эпики. Эпики, убранные из выбора, выпадают;
+// новые (их нет в сохранённом) встают в конец, между собой — в автоматическом порядке.
+export function effectiveEpicOrder(stored, autoKeys, allKeys) {
+  const all = new Set(allKeys);
+  const auto = [...new Set([...autoKeys.filter((k) => all.has(k)), ...allKeys])];
+  if (!Array.isArray(stored) || !stored.length) return auto;
+  const kept = [...new Set(stored.filter((k) => all.has(k)))];
+  const inStored = new Set(kept);
+  return [...kept, ...auto.filter((k) => !inStored.has(k))];
+}
+
+// Переставляет группы модели по порядку; группы вне списка — в конце, в прежнем порядке.
+export function applyEpicOrder(groups, order) {
+  const pos = new Map(order.map((k, i) => [k, i]));
+  const at = (g) => (pos.has(g.key) ? pos.get(g.key) : Infinity);
+  return groups
+    .map((g, i) => ({ g, i }))
+    .sort((a, b) => at(a.g) - at(b.g) || a.i - b.i)
+    .map((x) => x.g);
+}
+
+// Перенос эпика: встаёт сразу после afterKey (null — в самое начало). afterKey — видимый эпик над
+// линией-указателем, поэтому скрытые эпики между видимыми остаются после перенесённого.
+export function moveEpic(order, key, afterKey) {
+  const rest = order.filter((k) => k !== key);
+  const at = afterKey == null ? 0 : rest.indexOf(afterKey) + 1;
+  if (afterKey != null && at === 0) return order.slice(); // afterKey не найден — ничего не меняем
+  return [...rest.slice(0, at), key, ...rest.slice(at)];
 }
 
 export function fmtDate(iso) {
@@ -693,16 +749,17 @@ export function sectionLabel(sec) {
 // Занятость людей по ближайшим секциям (текущая и две следующие) — для окна «кто может подменить».
 // Считается по всей выгрузке, а не по видимым эпикам: фильтры не должны искажать нагрузку.
 // Оценка — по остатку, как на вкладке «По людям»; задачи вне спринта в работе — в текущей секции.
+// Задачи исключённых типов (истории) в загрузку не входят (Р9): их оценка дублирует оценки задач.
 export const LOAD_SECTIONS = 3;
 
-export function personLoad(model, issues, others) {
+export function personLoad(model, issues, others, excludeTypes = []) {
   const sections = model.columns.filter((c) => c.start != null).slice(0, LOAD_SECTIONS);
   const inLoad = new Set(sections.map((sec) => sec.id));
   const sectionOf = new Map();
   for (const sec of sections) for (const sp of sec.sprints) sectionOf.set(sp.id, sec.id);
   const byName = new Map();
   for (const i of [...issues, ...others]) {
-    if (!i.assigneeName) continue;
+    if (!i.assigneeName || isExcludedType(i.typeName, excludeTypes)) continue;
     const secId = isOffSprintWork(i) && inLoad.has(model.currentId) ? model.currentId : sectionOf.get(i.sprintId);
     if (!secId) continue;
     const key = normPerson(i.assigneeName);

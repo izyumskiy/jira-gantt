@@ -325,6 +325,22 @@ table.gantt { border-collapse: separate; border-spacing: 0; }
 
 .twisty { border: none; background: none; padding: 0 6px 0 0; color: var(--muted); cursor: pointer; }
 .gnum { color: var(--muted); margin-right: 5px; font-weight: 400; }
+/* Ручной порядок эпиков (Р8): ручка перетаскивания и линия-указатель между эпиками. */
+.drag-handle {
+  border: none;
+  background: none;
+  padding: 0 3px 0 0;
+  color: var(--muted);
+  font-weight: 700;
+  letter-spacing: -3px;
+  cursor: grab;
+  opacity: 0.5;
+}
+.g-row:hover .drag-handle, .drag-handle:focus-visible { opacity: 1; }
+.drag-handle:active { cursor: grabbing; }
+.g-row.dragging { opacity: 0.45; }
+.g-row.drop-before > td { box-shadow: inset 0 2px 0 var(--accent); }
+.g-row.drop-after > td { box-shadow: inset 0 -2px 0 var(--accent); }
 .glabel {
   border: none;
   background: none;
@@ -489,6 +505,9 @@ table.gantt { border-collapse: separate; border-spacing: 0; }
 .due-red.due-flag { background: #de350b; }
 .due-green.due-line { border-color: #36b37e; }
 .due-green.due-flag { background: #36b37e; }
+/* Веха по плановому завершению (нет срока исполнения, Р7): точечная линия, флажок «◇». */
+.due-planned.due-line { border-left-style: dotted; }
+.due-planned.due-line.edge-right { border-right-style: dotted; }
 .swatch-due { border-left: 2px dashed #de350b; width: 0; height: 12px; border-radius: 0; opacity: 1; }
 .c-empty { background: transparent; }
 

@@ -1675,7 +1675,7 @@ check("текущая секция помечена словом «текущи�
 check("у второй секции подписи нет — только спринты", ![...document.querySelectorAll("#g1 thead .c-sprint")][1].querySelector(".sp-name"));
 check("секция без дат подписана «Без дат»", [...document.querySelectorAll("#g1 thead .c-sprint:not(.backlog)")].at(-1).querySelector(".sp-name")?.textContent === t("gantt.noDates"));
 check("легенда команд отрисована — в горизонтальной прокрутке", document.querySelectorAll("#g1 .legend-scroll .legend-item").length === 2 && getComputedStyle(document.querySelector("#g1 .legend-scroll")).overflowX === "auto");
-check("подписи легенды короткие", document.querySelector("#g1 .legend-done").textContent === t("gantt.legendDone") && t("gantt.legendDone") === "доля готовых задач" && t("gantt.legendDue") === "срок исполнения");
+check("подписи легенды короткие", document.querySelector("#g1 .legend-done").textContent === t("gantt.legendDone") && t("gantt.legendDone") === "доля готовых задач" && t("gantt.legendDue") === "срок ◆, план ◇");
 check("на «По эпикам» цифры скрыты — жёлтого баллона «осталось» нет", document.querySelectorAll("#g1 .badge.b-left").length === 0);
 check("у исполнителей жёлтого баллона нет", document.querySelectorAll("#g2 .badge.b-left").length === 0);
 const ivanRow = [...document.querySelectorAll("#g2 .g-row.group")].find((r) => r.querySelector(".glabel").textContent === "Ivan");
@@ -1977,6 +1977,163 @@ check("…и он первый в списке", document.querySelector(".toolti
 document.querySelector(".tooltip.tip-comments .tip-close").click();
 renderOpen(g3, m3, { mode: "epicPeople", onChildClick: () => {} });
 check("пиктограмма 💬 есть и на «По эпикам и людям»", g3.querySelectorAll(".g-row.group .cmt-btn").length === m3.groups.length);
+
+// Р7. Веха завершения: срок исполнения, а если его нет — плановое завершение.
+{
+  const msDue = agg.epicMilestone({ key: "E", dueDate: ymd(5), plannedEnd: ymd(20) });
+  const msPlan = agg.epicMilestone({ key: "E", dueDate: "", plannedEnd: ymd(8) });
+  check("Р7: срок исполнения важнее планового завершения", msDue.kind === "due" && msDue.date === ymd(5));
+  check("Р7: без срока — веха по плановому завершению", msPlan.kind === "planned" && msPlan.date === ymd(8));
+  check("Р7: без обеих дат вехи нет", agg.epicMilestone({ key: "E" }) === null && agg.epicMilestone(null) === null);
+
+  const pe = [
+    { key: "EP-1", summary: "Только плановое", statusName: "В работе", statusCategory: "indeterminate", dueDate: "", plannedEnd: ymd(5) },
+    { key: "EP-2", summary: "Обе даты", statusName: "В работе", statusCategory: "indeterminate", dueDate: ymd(5), plannedEnd: ymd(8) },
+    { key: "EP-3", summary: "Без дат", statusName: "В работе", statusCategory: "indeterminate", dueDate: "", plannedEnd: "" }
+  ];
+  const pm = agg.buildModel({ issues, others: [], sprints, epics: pe, boards, mode: "epicPeople" });
+  const gOf = (k) => pm.groups.find((g) => g.key === k);
+  const i1 = gantt.dueInfo(gOf("EP-1"), pm);
+  const i2 = gantt.dueInfo(gOf("EP-2"), pm);
+  check("Р7: плановая веха — значок ◇, подсказка «Плановое завершение», класс due-planned",
+    i1 && i1.kind === "planned" && i1.label.startsWith("◇") && i1.cls.includes("due-planned") && i1.cls.includes("due-red") && i1.title.startsWith(t("gantt.plannedIn", { date: "", n: 5 }).split(" ")[0]),
+    JSON.stringify(i1));
+  check("Р7: обе даты — веха по сроку (◆), в подсказке и плановое завершение",
+    i2 && i2.kind === "due" && i2.label.startsWith("◆") && !i2.cls.includes("due-planned") && i2.title.includes(t("gantt.alsoPlanned", { date: "" }).trim()),
+    JSON.stringify(i2));
+  check("Р7: у эпика без дат вехи нет", gantt.dueInfo(gOf("EP-3"), pm) === null);
+  const one = agg.buildModel({ issues, others: [], sprints, epics: [{ ...pe[1], plannedEnd: ymd(5) }], boards, mode: "epicPeople" }).groups.find((g) => g.key === "EP-2");
+  check("Р7: даты совпадают — плановое завершение в подсказке не дублируется", !gantt.dueInfo(one, pm).title.includes(t("gantt.alsoPlanned", { date: "" }).trim()));
+  const gp = document.createElement("div");
+  document.body.append(gp);
+  renderOpen(gp, pm, { mode: "epicPeople" });
+  const rowP = [...gp.querySelectorAll(".g-row.group")].find((r) => r.querySelector(".glabel").textContent.startsWith("EP-1"));
+  check("Р7: на «По эпикам» флажок ◇ у строки эпика и линия через вложенные строки",
+    /◇ \d{2}\.\d{2}/.test(rowP.querySelector(".due-flag")?.textContent || "") && rowP.nextElementSibling?.querySelector(".due-line.due-planned") != null);
+  // ⚡: «не укладывается» считается до той же вехи — у EP-1 только плановое завершение через 5 дн.
+  const crit = gantt.criticalPeople(gOf("EP-1"), pm);
+  check("Р7: критический путь считает ёмкость до плановой вехи", [...crit.values()].flat().some((r) => r.includes(t("crit.overCapacity", { rem: "", cap: "", due: "" }).split(":")[0])), JSON.stringify([...crit]));
+  check("Р7: прогноз и «Сводка» считают только от срока исполнения — у эпика с одним плановым завершением срока нет",
+    Number.isNaN(analytics.dueMsOf({ key: "EP-1", dueDate: "", plannedEnd: ymd(5) })));
+  gp.remove();
+}
+
+// Р8. Ручной порядок эпиков на «По эпикам».
+{
+  const all = ["A", "B", "C", "D", "H"];
+  const auto = ["A", "B", "C", "D"]; // H скрыт — в модели его нет
+  check("Р8: без сохранённого порядка — автоматический, скрытые в конце", agg.effectiveEpicOrder(null, auto, all).join() === "A,B,C,D,H");
+  check("Р8: новые эпики — в конец, между собой в автоматическом порядке; убранные выпадают",
+    agg.effectiveEpicOrder(["C", "X", "A"], ["A", "B", "C", "D"], ["A", "B", "C", "D"]).join() === "C,A,B,D");
+  check("Р8: перенос в начало и после эпика", agg.moveEpic(["A", "B", "C"], "C", null).join() === "C,A,B" && agg.moveEpic(["A", "B", "C"], "A", "B").join() === "B,A,C");
+  // Между видимыми B и C скрыт H: брошенный после B эпик встаёт перед H, H остаётся на месте.
+  check("Р8: бросок между видимыми при скрытом между ними — сразу после видимого, скрытый на своём месте",
+    agg.moveEpic(["A", "B", "H", "C", "D"], "D", "B").join() === "A,B,D,H,C");
+  check("Р8: неизвестный afterKey — порядок не меняется", agg.moveEpic(["A", "B"], "A", "Z").join() === "A,B");
+  const grp = (k) => ({ key: k });
+  check("Р8: группы переставляются по порядку, группы вне порядка — в конце",
+    agg.applyEpicOrder([grp("A"), grp("B"), grp("C"), grp("Q")], ["C", "A", "B"]).map((g) => g.key).join() === "C,A,B,Q");
+
+  // Отрисовка: ручка, номера, клавиатура, перетаскивание.
+  const om = agg.buildModel({ issues, others: [], sprints, epics, boards, mode: "epicPeople" });
+  const autoKeys = om.groups.map((g) => g.key);
+  om.groups = agg.applyEpicOrder(om.groups, [autoKeys[2], autoKeys[0], autoKeys[1], ...autoKeys.slice(3)]);
+  const calls = [];
+  const go = document.createElement("div");
+  document.body.append(go);
+  gantt.setCollapsed("epicPeople", []);
+  gantt.render(go, om, { mode: "epicPeople", onReorder: (k, a) => calls.push([k, a]) });
+  const grows = () => [...go.querySelectorAll(".g-row.group")];
+  const handleOf = (k) => [...go.querySelectorAll(".drag-handle")].find((h) => h.dataset.key === k);
+  check("Р8: у каждого эпика ручка ⋮⋮ слева от номера", grows().every((r) => r.querySelector(".c-name").firstElementChild.classList.contains("drag-handle") && r.querySelector(".drag-handle + .gnum")));
+  check("Р8: номера идут по новому порядку", grows()[0].querySelector(".glabel").textContent.startsWith(autoKeys[2]) && grows()[0].querySelector(".gnum").textContent === "1.");
+  const order = om.groups.map((g) => g.key);
+  handleOf(order[2]).dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", altKey: true, bubbles: true }));
+  handleOf(order[0]).dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", altKey: true, bubbles: true }));
+  handleOf(order[1]).dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", altKey: true, bubbles: true }));
+  handleOf(order[0]).dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", altKey: true, bubbles: true }));
+  handleOf(order[0]).dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+  check("Р8: Alt+↑ — после эпика на две позиции выше, со второго места — в начало, с первого — ничего; Alt+↓ — после следующего; без Alt — ничего",
+    JSON.stringify(calls) === JSON.stringify([[order[2], order[0]], [order[1], null], [order[0], order[1]]]), JSON.stringify(calls));
+  calls.length = 0;
+  // Перетаскивание: тащим последний эпик и бросаем в верхнюю половину блока первого.
+  const dt = new DataTransfer();
+  const last = order[order.length - 1];
+  handleOf(last).dispatchEvent(new DragEvent("dragstart", { bubbles: true, dataTransfer: dt }));
+  const r0 = grows()[0].getBoundingClientRect();
+  grows()[0].dispatchEvent(new DragEvent("dragover", { bubbles: true, cancelable: true, clientY: r0.top + 1, dataTransfer: dt }));
+  check("Р8: при перетаскивании видна линия-указатель над первым эпиком", grows()[0].classList.contains("drop-before"));
+  grows()[0].dispatchEvent(new DragEvent("drop", { bubbles: true, cancelable: true, clientY: r0.top + 1, dataTransfer: dt }));
+  check("Р8: бросок над первым эпиком — в начало", JSON.stringify(calls) === JSON.stringify([[last, null]]) && !go.querySelector(".drop-before, .drop-after"), JSON.stringify(calls));
+  calls.length = 0;
+  // Бросок на вложенную строку исполнителя: блок эпика — строка эпика и его исполнители; нижняя часть — после эпика.
+  handleOf(order[0]).dispatchEvent(new DragEvent("dragstart", { bubbles: true, dataTransfer: dt }));
+  const child = [...go.querySelectorAll(".g-row.proj")].filter((r) => r.dataset.gkey === order[1]).at(-1);
+  const rc = child.getBoundingClientRect();
+  child.dispatchEvent(new DragEvent("dragover", { bubbles: true, cancelable: true, clientY: rc.bottom - 1, dataTransfer: dt }));
+  child.dispatchEvent(new DragEvent("drop", { bubbles: true, cancelable: true, clientY: rc.bottom - 1, dataTransfer: dt }));
+  check("Р8: бросок на исполнителя эпика — после эпика целиком, не внутрь", JSON.stringify(calls) === JSON.stringify([[order[0], order[1]]]), JSON.stringify(calls));
+  calls.length = 0;
+  handleOf(order[1]).dispatchEvent(new DragEvent("dragstart", { bubbles: true, dataTransfer: dt }));
+  grows()[1].dispatchEvent(new DragEvent("dragover", { bubbles: true, cancelable: true, clientY: grows()[1].getBoundingClientRect().top + 1, dataTransfer: dt }));
+  grows()[1].dispatchEvent(new DragEvent("drop", { bubbles: true, cancelable: true, clientY: grows()[1].getBoundingClientRect().top + 1, dataTransfer: dt }));
+  check("Р8: бросок на своё же место порядок не трогает", calls.length === 0, JSON.stringify(calls));
+  handleOf(order[1]).dispatchEvent(new DragEvent("dragend", { bubbles: true }));
+  gantt.render(go, om, { mode: "epicPeople" });
+  check("Р8: без обработчика порядка (и на «По людям») ручек нет", !go.querySelector(".drag-handle") && !document.querySelector("#g2 .drag-handle"));
+  go.remove();
+
+  // Хранение: эпик, убранный из выбора, выпадает из порядка; экспорт и импорт конфигурации.
+  const syncMod = await import("../src/js/sync.js");
+  const keepEpics = await dbm.all(dbm.STORES.epics);
+  await dbm.putAll(dbm.STORES.epics, [{ key: "ORD-1" }, { key: "ORD-2" }, { key: "ORD-3" }]);
+  await dbm.metaSet(syncMod.EPIC_ORDER_KEY, ["ORD-3", "ORD-1", "ORD-2"]);
+  await syncMod.saveSelection([...keepEpics, { key: "ORD-3" }, { key: "ORD-2" }]);
+  check("Р8: эпик, убранный из выбора, выпадает из порядка", (await dbm.metaGet(syncMod.EPIC_ORDER_KEY)).join() === "ORD-3,ORD-2", JSON.stringify(await dbm.metaGet(syncMod.EPIC_ORDER_KEY)));
+  check("Р8: порядок попадает в экспорт конфигурации", (await exportConfig()).epicOrder.join() === "ORD-3,ORD-2");
+  check("Р8: импорт читает epicOrder (ключи в верхнем регистре, без дублей)", parseConfig(JSON.stringify({ epicOrder: [" ord-2", "ORD-3", "ord-2"] })).epicOrder.join() === "ORD-2,ORD-3");
+  await applyConfig(parseConfig(JSON.stringify({ epicOrder: ["ORD-2", "ORD-9", "ORD-3"] })), { onLog: () => {} });
+  check("Р8: импорт сохраняет порядок, эпики вне выбора отбрасываются", (await dbm.metaGet(syncMod.EPIC_ORDER_KEY)).join() === "ORD-2,ORD-3", JSON.stringify(await dbm.metaGet(syncMod.EPIC_ORDER_KEY)));
+  await dbm.metaSet(syncMod.EPIC_ORDER_KEY, null);
+  await syncMod.saveSelection(keepEpics);
+}
+
+// Р9. Истории не считаются на «По эпикам» и в загрузке людей.
+{
+  const ex = flowlib.excludedTypes({ forecastExcludeTypes: "User Story, user story;Epic Task" });
+  check("Р9: исключённые типы — один набор, без учёта регистра; для JQL — написание из настроек без дублей",
+    ex.join("|") === "user story|user story|epic task" && flowlib.excludedTypeNames({ forecastExcludeTypes: "User Story, user story;Epic Task" }).join("|") === "User Story|Epic Task");
+  const story = { ...mk("S-1", "EP-1", "AAA", "Story Owner", 2, 16, "new"), typeName: "User Story" };
+  const storyOff = { ...mk("S-2", "EP-1", "AAA", "Story Owner", null, 8, "prog"), typeName: "User Story" };
+  const withStories = [...issues, story, storyOff];
+  const opt = { others: [], sprints, epics, boards, mode: "epicPeople", excludeTypes: ["user story"], excludeTypeNames: ["User Story"] };
+  const base = agg.buildModel({ issues, ...opt }).groups.find((g) => g.key === "EP-1");
+  const m9 = agg.buildModel({ issues: withStories, ...opt });
+  const g9 = m9.groups.find((g) => g.key === "EP-1");
+  check("Р9: итог эпика на «По эпикам» без историй — как без них вовсе", g9.count === base.count && g9.sum === base.sum && g9.other === base.other, `${g9.count}/${base.count}`);
+  check("Р9: исполнитель, у которого в эпике только истории, строкой не выводится", !g9.projects.some((p) => p.label === "Story Owner"));
+  check("Р9: история вне спринта в работе не попадает в текущую секцию",
+    ![...g9.cells.values()].some((c) => c.issues.some((i) => i.key.startsWith("S-"))) && !g9.backlog.issues.some((i) => i.key.startsWith("S-")));
+  const gAll = agg.buildModel({ issues: withStories, others: [], sprints, epics, boards, mode: "epicPeople" }).groups.find((g) => g.key === "EP-1");
+  check("Р9: без списка исключений истории считались бы (проверка, что фильтр действительно работает)", gAll.count === base.count + 2);
+  const mPeople = agg.buildModel({ issues: withStories, others: [], sprints, epics, boards, mode: "assignee", excludeTypes: ["user story"] });
+  check("Р9: «По людям» по-прежнему показывает истории", mPeople.groups.some((g) => g.label === "Story Owner"));
+  // Критический путь считается по тем же задачам — без историй.
+  check("Р9: ⚡ критический путь не видит историй", !gantt.criticalPeople(g9, m9).has("story owner"));
+  // Загрузка людей.
+  const loadAll = agg.personLoad(m9, withStories, []);
+  const loadEx = agg.personLoad(m9, withStories, [], ["user story"]);
+  check("Р9: загрузка людей без историй", (loadAll.byName.get("story owner")?.size || 0) > 0 && !loadEx.byName.has("story owner"));
+  // JQL подсказки эпика отсекает истории — число совпадает с выборкой в Jira.
+  const g9box = document.createElement("div");
+  document.body.append(g9box);
+  renderOpen(g9box, m9, { mode: "epicPeople" });
+  [...g9box.querySelectorAll(".g-row.group")].find((r) => r.querySelector(".glabel").textContent.startsWith("EP-1")).querySelector(".glabel").click();
+  const tipLinks = [...document.querySelectorAll(".tooltip .tip-rows a")].map((a) => decodeURIComponent(a.href));
+  check("Р9: ссылки подсказки эпика — с issuetype not in (\"User Story\")", tipLinks.length > 0 && tipLinks.every((h) => h.includes('issuetype not in ("User Story")')), tipLinks[0]);
+  document.querySelector(".tooltip .tip-close")?.click();
+  g9box.remove();
+}
 
 const total = document.createElement("div");
 total.className = failures ? "t-fail" : "t-ok";

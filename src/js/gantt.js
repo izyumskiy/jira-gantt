@@ -90,14 +90,16 @@ export function criticalPeople(g, model) {
     );
   }
 
-  // Вариант 2: ёмкость до срока = рабочие дни × часов в дне.
-  if (g.dueDate) {
-    const days = workdaysUntil(g.dueDate);
+  // Вариант 2: ёмкость до вехи = рабочие дни × часов в дне. Веха — срок исполнения, а если его нет,
+  // плановое завершение (Р7).
+  const until = g.milestone ? g.milestone.date : "";
+  if (until) {
+    const days = workdaysUntil(until);
     if (days != null) {
       const cap = days * (Number(settings.get().hoursPerDay) || 8) * 3600;
       for (const x of stats) {
         if (x.remaining > cap) {
-          add(x.p.key, t("crit.overCapacity", { rem: fmtEstimate(x.remaining), cap: fmtEstimate(cap), due: fmtDue(Date.parse(g.dueDate.length === 10 ? `${g.dueDate}T00:00:00` : g.dueDate)) }));
+          add(x.p.key, t("crit.overCapacity", { rem: fmtEstimate(x.remaining), cap: fmtEstimate(cap), due: fmtDue(dayStart(until)) }));
         }
       }
     }
@@ -253,7 +255,7 @@ function backlogNested(cell, model, rowLabel) {
   return td;
 }
 
-// ---------- веха срока исполнения эпика ----------
+// ---------- веха завершения эпика: срок исполнения или плановое завершение (Р7) ----------
 
 const DAY_MS = 86400000;
 const DUE_SOON_DAYS = 14;
@@ -272,10 +274,12 @@ function fmtDue(ms) {
 }
 
 // Куда ставить веху: индекс колонки, доля по ширине (0..1), край (если срок вне графика), цвет, подписи.
-function dueInfo(g, model) {
-  if (!g.dueDate) return null;
-  const due = dayStart(g.dueDate);
+export function dueInfo(g, model) {
+  const ms = g.milestone;
+  if (!ms) return null;
+  const due = dayStart(ms.date);
   if (due == null) return null;
+  const planned = ms.kind === "planned";
   const dated = model.columns.map((sec, index) => ({ sec, index })).filter(({ sec }) => sec.start != null);
   if (!dated.length) return null;
 
@@ -302,19 +306,26 @@ function dueInfo(g, model) {
   const done = g.status && g.status.id === "done";
   const cls = done ? "due-green" : days <= DUE_SOON_DAYS ? "due-red" : "due-gray";
   const date = fmtDue(due);
+  // У вехи по плановому завершению — свои подписи: «Плановое завершение …» вместо «Срок …».
+  const pre = planned ? "gantt.planned" : "gantt.due";
   let title = done
-    ? t("gantt.dueDone", { date })
+    ? t(`${pre}Done`, { date })
     : days === 0
-      ? t("gantt.dueToday", { date })
+      ? t(`${pre}Today`, { date })
       : days > 0
-        ? t("gantt.dueIn", { date, n: days })
-        : t("gantt.dueOverdue", { date, n: -days });
+        ? t(`${pre}In`, { date, n: days })
+        : t(`${pre}Overdue`, { date, n: -days });
+  // Заполнены обе даты и они различаются — в подсказке и плановое завершение.
+  if (!planned && ms.plannedEnd && dayStart(ms.plannedEnd) != null && dayStart(ms.plannedEnd) !== due) {
+    title += ` · ${t("gantt.alsoPlanned", { date: fmtDue(dayStart(ms.plannedEnd)) })}`;
+  }
   if (edge === "left") title += ` · ${t("gantt.dueBeforeChart")}`;
   if (edge === "right") title += ` · ${t("gantt.dueAfterChart")}`;
   const p = (n) => String(n).padStart(2, "0");
   const short = `${p(new Date(due).getDate())}.${p(new Date(due).getMonth() + 1)}`;
-  const label = edge === "left" ? `◀ ${short}` : edge === "right" ? `${short} ▶` : `◆ ${short}`;
-  return { colIndex, frac, edge, cls, title, label };
+  const mark = planned ? "◇" : "◆";
+  const label = edge === "left" ? `◀ ${short}` : edge === "right" ? `${short} ▶` : `${mark} ${short}`;
+  return { colIndex, frac, edge, cls: cls + (planned ? " due-planned" : ""), title, label, kind: ms.kind };
 }
 
 // Линия вехи в ячейке строки; у строки эпика — ещё и флажок с датой.
@@ -474,6 +485,9 @@ export function render(container, model, opts) {
   table.append(thead);
 
   const tbody = el("tbody");
+  // Ручной порядок эпиков (Р8): ручка ⋮⋮ у строки эпика, перетаскивание и Alt+↑ / Alt+↓.
+  const reorder = epicLike && typeof opts.onReorder === "function";
+  if (reorder) wireReorder(tbody, model, opts.onReorder);
   let lastTeamId = null;
   model.groups.forEach((g, index) => {
     // На вкладке по людям перед первым человеком команды — строка-заголовок команды.
@@ -490,7 +504,9 @@ export function render(container, model, opts) {
 
     const isCollapsed = collapsed[mode].has(g.key);
     const tr = el("tr", "g-row group");
+    if (reorder) tr.dataset.gkey = g.key;
     const name = el("td", "c-name");
+    if (reorder && g.key) name.append(dragHandle(g, model, opts.onReorder, tr));
     const twisty = el("button", "twisty", isCollapsed ? "▸" : "▾");
     twisty.onclick = () => {
       isCollapsed ? collapsed[mode].delete(g.key) : collapsed[mode].add(g.key);
@@ -551,6 +567,7 @@ export function render(container, model, opts) {
     if (isCollapsed) return;
     for (const p of g.projects) {
       const ptr = el("tr", "g-row proj" + (highlightChild && p.key === highlightChild ? " hl" : "") + (p.target ? " epic-target" : ""));
+      if (reorder) ptr.dataset.gkey = g.key; // вложенные строки едут вместе со своим эпиком
       const pname = el("td", "c-name");
       let plabel;
       const isPersonChild = model.childKind === "person";
@@ -588,6 +605,102 @@ export function render(container, model, opts) {
   wrap.append(table);
   container.append(wrap);
   restoreScroll();
+  // После переноса с клавиатуры фокус возвращается на ручку того же эпика — можно жать Alt+↑ дальше.
+  if (focusHandleKey) {
+    const h = [...tbody.querySelectorAll(".drag-handle")].find((x) => x.dataset.key === focusHandleKey);
+    focusHandleKey = null;
+    if (h) h.focus();
+  }
+}
+
+// ---------- ручной порядок эпиков (Р8) ----------
+
+let dragKey = null; // эпик, который сейчас тащат
+let focusHandleKey = null; // чья ручка получит фокус после перерисовки
+
+// Перенос: key встаёт сразу после afterKey (null — в начало). Порядок не менялся — ничего не делаем,
+// иначе простой щелчок по ручке включал бы ручной порядок.
+function requestMove(model, onReorder, key, afterKey) {
+  const keys = model.groups.map((g) => g.key);
+  const i = keys.indexOf(key);
+  const prev = i > 0 ? keys[i - 1] : null;
+  if (i < 0 || afterKey === key || afterKey === prev) return false;
+  onReorder(key, afterKey);
+  return true;
+}
+
+function dragHandle(g, model, onReorder, row) {
+  const h = el("button", "drag-handle", "⋮⋮");
+  h.type = "button";
+  h.draggable = true;
+  h.dataset.key = g.key;
+  h.title = t("order.handle");
+  h.setAttribute("aria-label", t("order.handleAria", { name: g.label }));
+  h.ondragstart = (e) => {
+    dragKey = g.key;
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/plain", g.key);
+    row.classList.add("dragging");
+  };
+  h.ondragend = () => {
+    dragKey = null;
+    row.classList.remove("dragging");
+    clearDropLine(row.parentElement);
+  };
+  // Без мыши: Alt+↑ / Alt+↓ — на одну позицию среди видимых эпиков.
+  h.onkeydown = (e) => {
+    if (!e.altKey || (e.key !== "ArrowUp" && e.key !== "ArrowDown")) return;
+    e.preventDefault();
+    const keys = model.groups.map((x) => x.key);
+    const i = keys.indexOf(g.key);
+    const target = e.key === "ArrowUp" ? (i >= 1 ? (i >= 2 ? keys[i - 2] : null) : undefined) : i < keys.length - 1 ? keys[i + 1] : undefined;
+    if (target === undefined) return; // уже первый / последний
+    focusHandleKey = g.key;
+    if (!requestMove(model, onReorder, g.key, target)) focusHandleKey = null;
+  };
+  return h;
+}
+
+function clearDropLine(tbody) {
+  if (!tbody) return;
+  tbody.querySelectorAll(".drop-before, .drop-after").forEach((r) => r.classList.remove("drop-before", "drop-after"));
+}
+
+// Бросить можно только между эпиками: блок эпика — его строка и вложенные строки исполнителей.
+// Верхняя половина блока — перед эпиком, нижняя — после него.
+function wireReorder(tbody, model, onReorder) {
+  let drop = null;
+  const blockOf = (key) => [...tbody.querySelectorAll("tr[data-gkey]")].filter((r) => r.dataset.gkey === key);
+  tbody.addEventListener("dragover", (e) => {
+    if (!dragKey) return;
+    const row = e.target.closest("tr[data-gkey]");
+    if (!row) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    const key = row.dataset.gkey;
+    const rows = blockOf(key);
+    const top = rows[0].getBoundingClientRect().top;
+    const bottom = rows[rows.length - 1].getBoundingClientRect().bottom;
+    const before = e.clientY < (top + bottom) / 2;
+    const keys = model.groups.map((g) => g.key);
+    const idx = keys.indexOf(key);
+    drop = { afterKey: before ? (idx > 0 ? keys[idx - 1] : null) : key };
+    clearDropLine(tbody);
+    (before ? rows[0] : rows[rows.length - 1]).classList.add(before ? "drop-before" : "drop-after");
+  });
+  tbody.addEventListener("dragleave", (e) => {
+    if (!tbody.contains(e.relatedTarget)) clearDropLine(tbody);
+  });
+  tbody.addEventListener("drop", (e) => {
+    if (!dragKey || !drop) return;
+    e.preventDefault();
+    const key = dragKey;
+    const { afterKey } = drop;
+    dragKey = null;
+    drop = null;
+    clearDropLine(tbody);
+    requestMove(model, onReorder, key, afterKey);
+  });
 }
 
 // Статус эпика — лейбл в стиле Jira: цвет берётся из таблицы статусов.
@@ -916,13 +1029,16 @@ function issuesUrl(jql) {
   return base && jql ? `${base}/issues/?jql=${encodeURIComponent(jql)}` : "";
 }
 
-// JQL всех задач группы: эпика или исполнителя.
-function scopeJql(g, mode) {
+// JQL всех задач группы: эпика или исполнителя. На «По эпикам» исключённые типы (истории) в
+// подсчёты не входят (Р9) — отсекаем их и в JQL, чтобы число в подсказке совпадало с выборкой в Jira.
+function scopeJql(g, mode, model = null) {
   const f = settings.get().fields;
   if (mode !== "assignee") {
     if (!g.key) return "";
     const field = f.epicLink ? `cf[${cfId(f.epicLink)}]` : '"Epic Link"';
-    return `${field} = ${g.key}`;
+    const types = model && model.excludeTypeNames ? model.excludeTypeNames : [];
+    const notTypes = types.length ? ` AND issuetype not in (${types.map((x) => `"${escapeJql(x)}"`).join(", ")})` : "";
+    return `${field} = ${g.key}${notTypes}`;
   }
   if (!g.key) return "assignee is EMPTY";
   return `assignee = "${g.login || g.key}"`;
@@ -1001,7 +1117,7 @@ function showTooltip(anchor, g, mode, model, profile = null) {
   const epicLike = mode !== "assignee";
   closeTooltip();
   tip = el("div", "tooltip");
-  const scope = scopeJql(g, mode);
+  const scope = scopeJql(g, mode, model);
   const headUrl = epicLike ? browseUrl(g.key) : issuesUrl(scope);
 
   const head = el("div", "tip-head");

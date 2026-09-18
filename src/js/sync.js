@@ -39,7 +39,7 @@ export async function backfillHistory({ onProgress = () => {}, today = Date.now(
   // Первая полная неделя истории потока: запрос «resolutiondate >= -Nw» начинается посреди недели.
   const flowStart = flowlib.mondayOf(loadedAt - flowWeeks * 7 * DAY_MS) + 7 * DAY_MS;
   const lastWeek = flowlib.mondayOf(flowlib.mondayOf(today) - 3 * DAY_MS); // последняя полная неделя
-  const excludeTypes = flowlib.parseTypeList(s.forecastExcludeTypes);
+  const excludeTypes = flowlib.excludedTypes(s);
   const records = [];
   for (let i = 0; i < epics.length; i++) {
     onProgress(t("st.backfill", { i: i + 1, n: epics.length }));
@@ -341,6 +341,9 @@ export async function fetchEpics(keys) {
 
 // ---------- выбор эпиков ----------
 
+// Служебный ключ meta: ручной порядок эпиков на «По эпикам» (Р8), список ключей; null — автоматический.
+export const EPIC_ORDER_KEY = "epicOrder";
+
 export async function selectedEpics() {
   return db.all(db.STORES.epics);
 }
@@ -354,6 +357,11 @@ export async function saveSelection(epics) {
   );
   // Сохранённый выбор — значит эпик отмечен: снимаем «скрыт», если он был.
   await db.putAll(db.STORES.epics, epics.map((e) => ({ ...e, hidden: false })));
+  // Эпик, убранный из выбора, выпадает и из ручного порядка «По эпикам» (Р8): вернут — встанет в конец.
+  const order = await db.metaGet(EPIC_ORDER_KEY, null);
+  if (Array.isArray(order) && order.some((k) => !keep.has(k))) {
+    await db.metaSet(EPIC_ORDER_KEY, order.filter((k) => keep.has(k)));
+  }
   await db.clear(db.STORES.others);
   // Задачи снятых эпиков больше не нужны.
   const issues = await db.all(db.STORES.issues);
@@ -824,7 +832,7 @@ export async function sync({ full = false, onProgress = () => {} } = {}) {
       flowRows: flow.rows || (await db.all(db.STORES.flow)),
       tempo: tempo.rows || (await db.all(db.STORES.tempo)),
       profiles: await db.all(db.STORES.people),
-      excludeTypes: flowlib.parseTypeList(s.forecastExcludeTypes),
+      excludeTypes: flowlib.excludedTypes(s),
       weeks: Number(s.flowWeeks) || 52,
       carrySprints: Number(s.summary.carrySprints) || 3,
       today: syncId,
