@@ -8,8 +8,12 @@ import * as agg from "./agg.js";
 import * as flowlib from "./flow.js";
 import * as analytics from "./analytics.js";
 import * as summary from "./summary.js";
+import * as charts from "./trendCharts.js";
 
 const DAY = 86400000;
+
+// Состояние графиков, пока вкладка открыта: какие эпики на графике запаса и какой эпик раскрыт.
+const view = { trendKeys: null, expanded: null };
 
 // ---------- база сравнения ----------
 
@@ -323,12 +327,113 @@ export async function render(container, { mode = "seen", session, onOpenEpic = (
     tr.append(el("td", "tp-num", `${Math.round(summary.donePct(st))}%`));
     tr.onclick = (e) => {
       e.stopPropagation();
-      onOpenEpic(st.epicKey, tr);
+      view.expanded = view.expanded === st.epicKey ? null : st.epicKey;
+      rerenderEpic();
     };
     tbody.append(tr);
+    // Раскрытая строка: как менялся прогноз и сделано против объёма (Б6.2, Б6.3).
+    const detail = el("tr", "sum-detail");
+    detail.dataset.key = st.epicKey;
+    const cell = el("td");
+    cell.colSpan = 7;
+    detail.append(cell);
+    tbody.append(detail);
   }
   table.append(tbody);
   wrap.append(table);
   container.append(wrap);
+
+  const rerenderEpic = () => {
+    for (const d of tbody.querySelectorAll("tr.sum-detail")) {
+      const cell = d.firstChild;
+      cell.textContent = "";
+      d.hidden = d.dataset.key !== view.expanded;
+      if (d.hidden) continue;
+      cell.append(epicCharts(d.dataset.key, data, onOpenEpic));
+    }
+    for (const r of tbody.querySelectorAll("tr.clickable")) r.classList.toggle("open", r.nextSibling?.dataset.key === view.expanded);
+  };
+  rerenderEpic();
+
+  // Тренд запаса по портфелю (Б6.1): по умолчанию жёлтые и красные эпики, не больше 8 линий.
+  container.append(portfolioTrend(data, rows, th));
   return data;
+}
+
+function epicCharts(key, data, onOpenEpic) {
+  const box = el("div", "sum-epic-charts");
+  const points = data.weekly.get(key) || [];
+  const head = el("div", "sum-epic-charts-head");
+  const open = el("button", "link", t("sum.openCard"));
+  open.type = "button";
+  open.onclick = (e) => {
+    e.stopPropagation();
+    onOpenEpic(key, open);
+  };
+  head.append(open);
+  if (points.some((p) => p.restored)) head.append(el("span", "muted small", t("tr.restoredHint")));
+  box.append(head);
+  const fc = charts.forecastChart(points);
+  box.append(el("div", "tr-title", t("tr.forecastTitle")));
+  if (fc) {
+    box.append(charts.legend([
+      { label: t("tr.legend.p85"), cls: "sw-p85" },
+      { label: t("tr.legend.band"), cls: "sw-band" },
+      { label: t("tr.legend.due"), cls: "sw-due" }
+    ]));
+    box.append(fc);
+  } else box.append(el("div", "muted small", t("tr.noData")));
+  const bu = charts.burnupChart(points);
+  box.append(el("div", "tr-title", t("tr.burnupTitle")));
+  if (bu) {
+    box.append(charts.legend([
+      { label: t("tr.legend.total"), cls: "sw-total" },
+      { label: t("tr.legend.done"), cls: "sw-done" }
+    ]));
+    box.append(bu);
+  } else box.append(el("div", "muted small", t("tr.noData")));
+  return box;
+}
+
+function portfolioTrend(data, rows, th) {
+  const box = el("div", "sum-trend-box");
+  box.append(el("h3", "sum-h", t("sum.trend")));
+  const withHistory = rows.filter((st) => (data.weekly.get(st.epicKey) || []).filter((r) => r.buffer != null).length >= 2);
+  if (!withHistory.length) {
+    box.append(el("div", "muted small", t("tr.noData")));
+    return box;
+  }
+  if (!view.trendKeys) {
+    view.trendKeys = withHistory
+      .filter((st) => ["red", "yellow"].includes(summary.colorOf(st, th, data.now)))
+      .slice(0, charts.MAX_LINES)
+      .map((st) => st.epicKey);
+    if (!view.trendKeys.length) view.trendKeys = withHistory.slice(0, 3).map((st) => st.epicKey);
+  }
+  const draw = () => {
+    box.querySelector(".tr-legend")?.remove();
+    box.querySelector("svg")?.remove();
+    box.querySelector(".tr-empty")?.remove();
+    const legendItems = withHistory.map((st) => {
+      const on = view.trendKeys.includes(st.epicKey);
+      return {
+        label: epicLabel(st),
+        color: on ? charts.colorFor(st.epicKey) : null,
+        off: !on,
+        onClick: (e) => {
+          e.stopPropagation();
+          if (on) view.trendKeys = view.trendKeys.filter((k) => k !== st.epicKey);
+          else if (view.trendKeys.length < charts.MAX_LINES) view.trendKeys = [...view.trendKeys, st.epicKey];
+          draw();
+        }
+      };
+    });
+    box.append(charts.legend(legendItems));
+    const svg = charts.bufferChart(charts.bufferSeries(data.weekly, view.trendKeys, (k) => epicLabel(data.current.get(k))));
+    if (svg) box.append(svg);
+    else box.append(el("div", "muted small tr-empty", t("tr.pick")));
+  };
+  box.append(el("div", "muted small", t("sum.trendHint", { n: charts.MAX_LINES })));
+  draw();
+  return box;
 }

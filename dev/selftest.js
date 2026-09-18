@@ -17,6 +17,7 @@ import * as jiraApi from "../src/js/jira.js";
 import * as analytics from "../src/js/analytics.js";
 import * as summary from "../src/js/summary.js";
 import * as summaryView from "../src/js/summaryView.js";
+import * as trendCharts from "../src/js/trendCharts.js";
 import { runForecast, workerAvailable } from "../src/js/forecastClient.js";
 import { classify, isDoneStatus } from "../src/js/status.js";
 import { collectPeople, mergeProfiles, parseSystems, systemsList, teamsList, normName, roleSummary } from "../src/js/team.js";
@@ -1283,12 +1284,16 @@ await settings.save({ infoSystems: [], fields: { plannedStart: "", plannedEnd: "
   const box = document.createElement("div");
   document.body.append(box);
   await summaryView.render(box, { session: { baseSyncId: s1 } });
-  const rowsTxt = [...box.querySelectorAll(".sum-table tbody tr")].map((tr) => tr.textContent);
+  const rowsTxt = [...box.querySelectorAll(".sum-table tbody tr.clickable")].map((tr) => tr.textContent);
   check("Б5: вкладка — шапка, итог по цветам, «Требует внимания», 5 блоков, таблица портфеля",
     !!box.querySelector(".sum-head") && box.querySelectorAll(".sum-total").length >= 2 && box.querySelectorAll(".sum-attention .sig").length >= 1 &&
       box.querySelectorAll("details.sum-group").length === 5 && rowsTxt.length === 2, `${rowsTxt.length}`);
   check("Б5: портфель — от худшего запаса", rowsTxt[0].startsWith("EP-2"), rowsTxt.join(" | "));
   check("Б5: мини-график запаса — линия по недельным записям", !!box.querySelector(".sum-table tbody tr .spark polyline"));
+  box.querySelector(".sum-table tbody tr.clickable").click();
+  const opened = box.querySelector(".sum-table tbody tr.sum-detail:not([hidden])");
+  check("Б6: клик по строке портфеля раскрывает графики эпика", !!opened && opened.dataset.key === "EP-2" && opened.querySelectorAll("svg").length >= 1, opened && opened.innerText.slice(0, 80));
+  check("Б6.1: под таблицей — тренд запаса по жёлтым и красным эпикам", !!box.querySelector(".sum-trend-box svg") && box.querySelectorAll(".sum-trend-box .tr-legend-item:not(.off)").length === 1);
   box.remove();
 
   // Б10: пороги попадают в экспорт и импорт конфигурации
@@ -1300,6 +1305,43 @@ await settings.save({ infoSystems: [], fields: { plannedStart: "", plannedEnd: "
     settings.get().summary.shiftDays === 10 && !("bogus" in settings.get().summary) && settings.get().summary.chanceGreen === 85, JSON.stringify(settings.get().summary));
   await settings.save({ summary: { ...settings.DEFAULTS.summary } });
   await dbm.clearAll();
+}
+
+// Б6. графики тренда
+{
+  const pts = [
+    { week: "2026-06-01", p50: "2026-08-01", p85: "2026-08-10", dueDate: "2026-09-01", buffer: 3, total: 10, done: 2, restored: true },
+    { week: "2026-06-08", p50: "2026-08-10", p85: "2026-08-25", dueDate: "2026-09-01", buffer: 1, total: 12, done: 3, restored: true, approximate: true },
+    { week: "2026-06-15", p50: "2026-08-20", p85: "2026-09-10", dueDate: "2026-09-01", buffer: -1.3, total: 14, done: 5 },
+    { week: "2026-06-22", p50: "2026-08-25", p85: "2026-09-15", dueDate: "2026-09-20", buffer: 0.7, total: 15, done: 7 }
+  ];
+  check("Б6: неделя переноса срока исполнения", [...trendCharts.dueChanges(pts)].join(",") === "2026-06-22");
+  check("Б6: неделя, с которой прогноз позже срока", trendCharts.crossingWeek(pts) === "2026-06-15" && trendCharts.crossingWeek(pts.slice(2)) === null);
+  check("Б6: цвет эпика устойчив и из палитры", trendCharts.colorFor("EP-1") === trendCharts.colorFor("EP-1") && trendCharts.PALETTE.includes(trendCharts.colorFor("EP-7")));
+  const weekly = new Map(Array.from({ length: 10 }, (_, i) => [`E-${i}`, pts]));
+  check("Б6: на графике запаса не больше 8 линий", trendCharts.bufferSeries(weekly, [...weekly.keys()], (k) => k).length === 8);
+
+  const host = document.createElement("div");
+  document.body.append(host);
+  const b = trendCharts.bufferChart(trendCharts.bufferSeries(weekly, ["E-0", "E-1"], (k) => k));
+  host.append(b);
+  check("Б6.1: линии запаса, выделенный ноль, отметка переноса срока, бледная восстановленная часть",
+    b.querySelectorAll("line.tr-line").length === 6 && b.querySelectorAll("line.tr-zero").length === 1 && b.querySelectorAll(".tr-due-mark").length === 2 &&
+      b.querySelectorAll("line.tr-line.restored").length === 2 && b.querySelectorAll("line.tr-line.approx").length === 2,
+    `${b.querySelectorAll("line.tr-line").length} / ${b.querySelectorAll(".tr-due-mark").length}`);
+  check("Б6.1: подсказка на точке — дата, запас и изменение с прошлой точки",
+    [...b.querySelectorAll("circle title")].some((x) => /−2,3|-2.3/.test(x.textContent)), [...b.querySelectorAll("circle title")].map((x) => x.textContent)[2]);
+  const f = trendCharts.forecastChart(pts);
+  host.append(f);
+  check("Б6.2: коридор 50–85%, линия 85%, срок ступенькой, отметка пересечения",
+    !!f.querySelector("polygon.tr-band") && f.querySelectorAll("line.tr-p85").length === 3 && /H .* V /.test(f.querySelector("path.tr-due").getAttribute("d")) && !!f.querySelector("circle.tr-cross"));
+  const bu = trendCharts.burnupChart(pts);
+  check("Б6.3: две накопительные линии — всего и готово", bu.querySelectorAll("line.tr-total").length === 3 && bu.querySelectorAll("line.tr-done").length === 3);
+  check("Б6: деления оси «круглые» и проходят через ноль",
+    trendCharts.niceTicks(-38.4, 3.1).includes(0) && trendCharts.niceTicks(-38.4, 3.1).join(",") === "-30,-20,-10,0" && trendCharts.niceStep(37) === 10 && trendCharts.niceStep(4) === 1,
+    trendCharts.niceTicks(-38.4, 3.1).join(","));
+  check("Б6: одна недельная запись — графика нет", trendCharts.forecastChart(pts.slice(0, 1)) === null && trendCharts.burnupChart(pts.slice(0, 1)) === null);
+  host.remove();
 }
 
 // А1. модуль расчётов: одни и те же числа для списка, карточки и сводки
