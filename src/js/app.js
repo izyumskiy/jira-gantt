@@ -1527,6 +1527,14 @@ async function drawStories() {
         drawStories();
       },
       storyTypesText: s.storyTypes,
+      storyLinkText: s.storyLinkType,
+      // Кнопка из подсказки «у историй нет задач»: выбрать связь задачи с историей.
+      onSetLinkType: async (name) => {
+        await settings.save({ storyLinkType: name });
+        if ($("#storyLinkType")) $("#storyLinkType").value = name;
+        status(t("story.linkSet", { name }));
+        drawStories();
+      },
       // Кнопка из подсказки «историй не найдено»: добавить тип в «Типы историй».
       onAddStoryType: async (name) => {
         const list = String(settings.get().storyTypes || "").split(/[,;\n]/).map((x) => x.trim()).filter(Boolean);

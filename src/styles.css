@@ -15,6 +15,11 @@
   --col-w: 264px;
   --view-bg: #e9f0fb; /* подложка группы ракурсов */
   --view-fg: #2b5aa8;
+  /* Строка проекта на ракурсе «Эпик — история». */
+  --proj-bg: #efedfb;
+  --proj-accent: #6554c0;
+  --proj-accent-dark: #403294;
+  --proj-muted: #5e4db2;
 }
 
 * { box-sizing: border-box; }
@@ -91,7 +96,7 @@ input[type="search"] { min-width: 320px; }
 .tabs { display: flex; gap: 4px; }
 .tab { border-radius: 4px; }
 .tab.active { background: var(--accent-soft); border-color: #b3d4ff; color: var(--accent); font-weight: 600; }
-/* Вкладки-пиктограммы: «Поиск» (лупа), «Сводка» (график), «Настройки» (шестерёнка). */
+/* Вкладки-пиктограммы: «Поиск» (лупа), «Сводка» (график), «Команда» (люди), «Настройки» (шестерёнка). */
 .tab.tab-icon { display: inline-flex; align-items: center; gap: 4px; padding-left: 9px; padding-right: 9px; }
 .tab.tab-icon svg { display: block; }
 /* Ракурсы диаграммы (Р1): пиктограммы одной семьёй на общей подложке, отделённые от соседних вкладок. */
@@ -340,6 +345,34 @@ table.gantt { border-collapse: separate; border-spacing: 0; }
   padding: 3px 8px;
 }
 .gantt thead .c-name { z-index: 6; background: #fafbfc; }
+/* Строки дерева не переносятся: лишнее обрезается у подписи, а не уезжает на вторую строку. */
+.gantt tbody .c-name { white-space: nowrap; overflow: hidden; }
+/* Запас под кнопки и статус рядом с подписью на «Эпик — история». */
+.mode-epicStories .s-epic .glabel { max-width: calc(var(--name-w) - 300px); }
+.mode-epicStories .s-story .plabel { max-width: calc(var(--name-w) - 220px); }
+/* Граница колонки названий двигается: ручка на правом краю заголовка. */
+.col-resizer {
+  position: absolute;
+  top: 0;
+  right: -4px;
+  width: 8px;
+  height: 100%;
+  cursor: col-resize;
+  z-index: 7;
+}
+.col-resizer::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 3px;
+  width: 2px;
+  background: transparent;
+  transition: background .12s;
+}
+.col-resizer:hover::after, .col-resizer:focus-visible::after, .col-resizer.active::after { background: var(--accent); }
+.col-resizer:focus-visible { outline: none; }
+body.col-resizing { cursor: col-resize; user-select: none; }
 
 /* Эпик, отмеченный галочкой на «Поиске», — светло-жёлтой заливкой. */
 .g-row.proj.epic-target > .c-name { background: #fff7d6; }
@@ -357,7 +390,21 @@ table.gantt { border-collapse: separate; border-spacing: 0; }
 .prio-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin: 0 6px 0 3px; vertical-align: -1px; flex: none; }
 /* Ракурс «Эпик — история» (Р5): проект → эпик → история. */
 .indent.indent2 { width: 36px; }
-.s-project > .c-name { font-weight: 700; }
+/* Строка проекта: заливка на всю ширину — от названия до бэклога, акцентная полоса слева. */
+.g-row.s-project > td, .g-row.s-project:hover > td, .gantt .g-row.s-project > td.c-backlog { background: var(--proj-bg); }
+.g-row.s-project > .c-name { font-weight: 700; box-shadow: inset 4px 0 0 var(--proj-accent); }
+.g-row.s-project .s-meta { color: var(--proj-muted); }
+/* Полосы-итоги проекта — «таблетки» в цвете проекта с белыми цифрами; готовое — зелёным. */
+.bar.bar-group.bar-project {
+  background: var(--proj-accent);
+  color: #fff;
+  border-radius: 10px;
+  padding: 3px 10px;
+  box-shadow: 0 1px 2px rgba(9, 30, 66, .25);
+}
+.bar.bar-group.bar-project::before { background: #22a06b; opacity: .9; }
+.bar.bar-group.bar-project .bar-sum { color: rgba(255, 255, 255, .85); }
+.bar.bar-group.bar-project.clickable:hover { outline: 2px solid var(--proj-accent-dark); outline-offset: 1px; }
 .g-row.s-epic { background: var(--panel); }
 .g-row.s-epic > .c-name { font-weight: 600; }
 .s-label { margin-left: 2px; }
@@ -365,6 +412,8 @@ table.gantt { border-collapse: separate; border-spacing: 0; }
 .s-story-link { color: var(--text); text-decoration: none; }
 a.s-story-link:hover { color: var(--accent); text-decoration: underline; }
 .s-foreign { margin-left: 6px; padding: 0 5px; border-radius: 8px; background: #eae6ff; color: #403294; font-size: 10px; white-space: nowrap; }
+.pop-btn.s-progress { margin-left: 6px; padding: 0 6px; border-radius: 8px; border-color: var(--line); font-size: 10px; line-height: 16px; font-weight: 600; color: var(--muted); background: var(--panel); }
+.pop-btn.s-progress.all-done { border-color: #abf5d1; background: #e3fcef; color: #006644; }
 .s-missing { margin-left: 6px; color: var(--danger); font-size: 11px; cursor: help; }
 .pop-btn.s-proj-btn { margin-left: 6px; padding: 0 6px; font-size: 11px; line-height: 18px; font-weight: 400; }
 .pop-btn.s-rename { margin-left: 4px; font-size: 11px; font-weight: 400; }
@@ -414,7 +463,7 @@ a.s-story-link:hover { color: var(--accent); text-decoration: underline; }
   font: inherit;
   font-weight: 600;
   cursor: pointer;
-  max-width: 240px;
+  max-width: calc(var(--name-w) - 200px); /* растёт вместе с колонкой названий */
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -495,7 +544,7 @@ a.s-story-link:hover { color: var(--accent); text-decoration: underline; }
 .g-row.proj.hl .plabel-link { font-weight: 700; }
 .plabel {
   display: inline-block;
-  max-width: 300px;
+  max-width: calc(var(--name-w) - 150px);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -770,6 +819,10 @@ textarea { font: inherit; padding: 5px 8px; border: 1px solid var(--line); borde
     --bar-strong: #2a6fd6;
     --view-bg: #1c2b40;
     --view-fg: #85b8ff;
+    --proj-bg: #2b2750;
+    --proj-accent: #8f7ee7;
+    --proj-accent-dark: #b8acf6;
+    --proj-muted: #b8acf6;
   }
   button { background: #2c333a; }
   button:hover { background: #343b43; }

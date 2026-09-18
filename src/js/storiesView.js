@@ -33,17 +33,22 @@ function twisty(isCollapsed, onToggle) {
   return b;
 }
 
-// Полосы-итоги (проект, эпик): жёлтая полоса на секцию и бэклог.
-function groupCells(node, model, label) {
+// Полосы-итоги (проект, эпик): полоса на секцию и бэклог. extraClass — вид полосы (у проекта свой).
+function groupCells(node, model, label, extraClass = "") {
+  const bar = (cell, title) => {
+    const b = gantt.groupBar(cell, model.maxCell, title);
+    if (extraClass) b.classList.add(extraClass);
+    return b;
+  };
   const out = [];
   for (const sec of model.columns) {
     const td = el("td", "c-cell");
     const cell = node.cells.get(sec.id);
-    if (cell && cell.count) td.append(gantt.groupBar(cell, model.maxCell, `${label} · ${gantt.sectionTitle(sec)}`));
+    if (cell && cell.count) td.append(bar(cell, `${label} · ${gantt.sectionTitle(sec)}`));
     out.push(td);
   }
   const bl = el("td", "c-cell c-backlog");
-  if (node.backlog.count) bl.append(gantt.groupBar(node.backlog, model.maxCell, `${label} · ${t("gantt.backlog")}`));
+  if (node.backlog.count) bl.append(bar(node.backlog, `${label} · ${t("gantt.backlog")}`));
   out.push(bl);
   return out;
 }
@@ -123,10 +128,27 @@ export function render(container, model, opts = {}) {
     }
     container.append(hint);
   }
+  // Истории есть, но ни у одной нет задач по связи из настроек — показываем, какие связи есть у
+  // историй в Jira, и даём выбрать нужную одной кнопкой.
+  if (model.storyTotal && !model.storyTaskTotal) {
+    const hint = el("div", "s-nostories");
+    const types = model.linkTypeCounts || [];
+    hint.append(el("strong", null, t("story.noTasks", { setting: opts.storyLinkText || "—" })), " ");
+    hint.append(types.length ? t("story.noTasksTypes", { types: types.map((x) => `${x.name} (${x.n})`).join(", ") }) : t("story.noLinks"));
+    for (const x of types) {
+      if (!opts.onSetLinkType || x.name === "—") continue;
+      const b = el("button", "primary s-add-type", t("story.useLink", { name: x.name }));
+      b.type = "button";
+      b.onclick = () => opts.onSetLinkType(x.name);
+      hint.append(" ", b);
+    }
+    container.append(hint);
+  }
 
   const wrap = el("div", "gantt-wrap");
   const table = el("table", "gantt mode-epicStories");
-  table.append(gantt.chartHead(model, rerender, { title: t("story.project"), hint: ` / ${t("gantt.epic")} / ${t("story.story")}` }));
+  gantt.applyNameWidth(table, "epicStories");
+  table.append(gantt.chartHead(model, rerender, { title: t("story.project"), hint: ` / ${t("gantt.epic")} / ${t("story.story")}`, widthKey: "epicStories" }));
   const tbody = el("tbody");
   const projectNames = model.projects.filter((p) => p.key !== NO_PROJECT).map((p) => p.name);
 
@@ -139,7 +161,7 @@ export function render(container, model, opts = {}) {
     pname.append(twisty(pc, () => toggle(pKey(p))), prio.icon(p.priority, model.priorities, t), el("span", "s-label", plabel));
     pname.append(el("span", "s-meta", t("story.projectMeta", { e: p.epics.length, s: p.storyCount })));
     if (p.key !== NO_PROJECT && opts.epicsOfProject) pname.append(renameButton(p, opts));
-    ptr.append(pname, ...groupCells(p, model, plabel));
+    ptr.append(pname, ...groupCells(p, model, plabel, "bar-project"));
     const pdue = gantt.dueInfo({ milestone: p.milestone, status: p.status }, model);
     if (pdue) gantt.addDueLine(ptr, pdue, true);
     tbody.append(ptr);
@@ -175,6 +197,18 @@ export function render(container, model, opts = {}) {
         link.title = `${sn.label}\n${hint.join("\n")}`;
         sname.append(el("span", "indent indent2"), prio.icon(sn.priority, model.priorities, t), link);
         if (sn.status && sn.status.name) sname.append(gantt.lozenge(sn.status));
+        // Счётчик по всем задачам истории — и по закрытым в прошлых спринтах, которых нет на шкале.
+        if (sn.all.length) {
+          const doneN = sn.all.filter((i) => i.done).length;
+          const pc = el("button", "pop-btn s-progress" + (doneN === sn.all.length ? " all-done" : ""), t("story.progress", { done: doneN, n: sn.all.length }));
+          pc.type = "button";
+          pc.title = t("story.progressHint");
+          pc.onclick = (ev) => {
+            ev.stopPropagation();
+            gantt.showIssues(ev.currentTarget, sn.label, sn.all);
+          };
+          sname.append(pc);
+        }
         if (sn.foreign) {
           const f = el("span", "s-foreign", t("story.foreignBadge", { n: sn.foreign }));
           f.title = t("story.foreignHint");

@@ -152,6 +152,10 @@ export function buildStoryModel({
     byEpic.get(k).push(i);
   }
   const briefFor = (it) => agg.briefOf(it, agg.estimateOf(it), agg.isDone(it));
+  // Диагностика связей: какие типы связей есть у историй с задачами (не с эпиками и историями).
+  // Если ни у одной истории нет задач по связи из настроек, ракурс покажет этот список.
+  const linkTypeCounts = new Map();
+  let storyTaskTotal = 0;
 
   const buildEpic = (e) => {
     const list = byEpic.get(e.key) || [];
@@ -169,9 +173,13 @@ export function buildStoryModel({
     });
     const inStory = new Set(); // задачи этого эпика, у которых есть история в этом эпике
     for (const s of list.filter(isStory)) {
-      const sn = newNode({ key: s.key, story: s, label: `${s.key} · ${s.summary || ""}`.trim(), priority: s.priority || null, ...statusOf(s), foreign: 0, missing: [], ownSprint: null });
+      const sn = newNode({ key: s.key, story: s, label: `${s.key} · ${s.summary || ""}`.trim(), priority: s.priority || null, ...statusOf(s), foreign: 0, missing: [], ownSprint: null, all: [] });
       const rel = new Map(); // ключ задачи → тип задачи на том конце (для «не загружена»)
-      for (const l of s.links || []) if (okLink(l)) rel.set(l.key, l.typeName || "");
+      for (const l of s.links || []) {
+        const tn = String(l.typeName || "");
+        if (!isEpicType(tn) && !isExcludedType(tn, storyTypes)) linkTypeCounts.set(l.type || "—", (linkTypeCounts.get(l.type || "—") || 0) + 1);
+        if (okLink(l)) rel.set(l.key, l.typeName || "");
+      }
       for (const k of reverse.get(s.key) || []) if (!rel.has(k)) rel.set(k, "");
       for (const [k, typeName] of rel) {
         const it = issueByKey.get(k) || linkedByKey.get(k);
@@ -187,8 +195,12 @@ export function buildStoryModel({
           sn.foreign += 1;
         } else inStory.add(k);
         addIssue(sn, it, brief, ctx);
+        // Все задачи истории, включая закрытые в прошлых спринтах: на шкале их нет (она начинается с
+        // текущего спринта), но в счётчике «готово N из M» и в списке они нужны.
+        sn.all.push(brief);
       }
       sn.missing.sort(numKey);
+      storyTaskTotal += sn.count;
       // История без задач, но со своим спринтом — полоса по спринту самой истории, без оценки.
       if (!sn.count && s.sprintId != null && sectionOfSprint.has(s.sprintId)) {
         sn.ownSprint = { secId: sectionOfSprint.get(s.sprintId), sprintId: s.sprintId, sprintName: s.sprintName || "" };
@@ -256,6 +268,8 @@ export function buildStoryModel({
     childKind: "person",
     excludeTypeNames,
     storyTotal,
+    storyTaskTotal,
+    linkTypeCounts: [...linkTypeCounts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([name, n]) => ({ name, n })),
     // Типы, похожие на истории, — кандидаты для кнопки «Считать историями».
     storyCandidates: [...typeCounts.keys()].filter((n) => /stor|истор/i.test(n) && !isExcludedType(n, storyTypes)),
     typeCounts: [...typeCounts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([name, n]) => ({ name, n }))

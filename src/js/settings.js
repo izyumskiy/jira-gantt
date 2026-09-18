@@ -24,6 +24,7 @@ export const DEFAULTS = {
   storyLinkType: "Relates",
   noteStaleDays: 14,
   storyShowNotes: true, // галочка «Заметки» на ракурсе «Эпик — история» (Р4)
+  nameWidths: {}, // ширина колонки названий, px, по ракурсам: { epicPeople, assignee, epicStories }
   // Пороги «Сводки» (Б10).
   summary: {
     chanceGreen: 85, // шанс успеть, %: не ниже — зелёный
