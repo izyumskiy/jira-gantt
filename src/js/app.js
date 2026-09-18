@@ -17,6 +17,7 @@ import * as autoSync from "./autoSync.js";
 import * as stories from "./stories.js";
 import * as storiesView from "./storiesView.js";
 import * as omg from "./omg.js";
+import { toHtml as markdownToHtml } from "./markdown.js";
 
 const $ = (sel) => document.querySelector(sel);
 const state = {
@@ -1845,12 +1846,80 @@ async function renderAbout() {
     row.append(k, node);
     return row;
   };
-  const v = document.createElement("span");
+  // Номер версии — ссылка: по щелчку окно с release notes (RELEASE_NOTES.md из папки плагина).
+  const v = document.createElement("button");
+  v.type = "button";
+  v.className = "link pop-btn about-version";
   v.textContent = version;
+  v.title = t("about.releaseNotes");
+  v.onclick = (e) => {
+    e.stopPropagation();
+    showReleaseNotes(v).catch(fail);
+  };
   const a = document.createElement("a");
   a.href = `mailto:${AUTHOR.email}`;
   a.textContent = `${AUTHOR.name} · ${AUTHOR.email}`;
   box.append(line(t("about.version"), v), line(t("about.author"), a));
+}
+
+// Release notes — из файла плагина. Путь — от этого модуля (src/js), а не от страницы: так он
+// одинаков и в расширении, и в dev/apptest.html.
+export const RELEASE_NOTES_URL = new URL("../../RELEASE_NOTES.md", import.meta.url).href;
+
+async function showReleaseNotes(anchor) {
+  const box = document.createElement("div");
+  box.className = "tooltip tip-notes";
+  const head = document.createElement("div");
+  head.className = "tip-head";
+  const title = document.createElement("strong");
+  title.textContent = t("about.releaseNotes");
+  const close = document.createElement("button");
+  close.className = "tip-close";
+  close.textContent = "×";
+  close.title = t("tip.close");
+  close.onclick = gantt.closeTooltip;
+  head.append(title, close);
+  const body = document.createElement("div");
+  body.className = "notes-body";
+  body.textContent = t("cmt.loading");
+  box.append(head, body);
+  gantt.openPopover(box, anchor);
+  try {
+    const res = await fetch(RELEASE_NOTES_URL, { cache: "no-store" });
+    if (!res.ok) throw new Error(String(res.status));
+    body.innerHTML = markdownToHtml(await res.text()); // текст экранирован в markdownToHtml
+  } catch (e) {
+    body.textContent = t("about.notesError", { msg: e && e.message ? e.message : String(e) });
+  }
+  gantt.placePopover(box, anchor);
+}
+
+// Окно «О плагине»: по наведению на логотип — подсказкой; по щелчку — закрепляется и не пропадает,
+// когда мышь уходит. Закрывается повторным щелчком, щелчком мимо (кроме открытых из него окон) и Esc.
+function setAboutPinned(on) {
+  $(".brand").classList.toggle("pinned", on);
+  $(".brand-title").setAttribute("aria-expanded", on ? "true" : "false");
+}
+
+function wireAbout() {
+  const titleEl = $(".brand-title");
+  const toggle = () => setAboutPinned(!$(".brand").classList.contains("pinned"));
+  titleEl.onclick = (e) => {
+    e.stopPropagation();
+    toggle();
+  };
+  titleEl.onkeydown = (e) => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      toggle();
+    }
+  };
+  document.addEventListener("click", (e) => {
+    if (!e.target.closest(".brand") && !e.target.closest(".tip-notes")) setAboutPinned(false);
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && $(".brand").classList.contains("pinned") && !document.querySelector(".tip-notes")) setAboutPinned(false);
+  });
 }
 
 // Текущая дата в шапке (дд.мм.гггг); обновляется раз в минуту — вкладка может жить сутками.
@@ -1869,6 +1938,7 @@ async function boot() {
   applyI18n();
   applyTopHeight();
   renderAbout().catch(() => {});
+  wireAbout();
   await db.open();
 
   document.querySelectorAll(".tab").forEach((b) => (b.onclick = () => showTab(b.dataset.tab)));

@@ -115,31 +115,50 @@ function nameCell({ indent = "", twist = null, icon = null, title, actions = [],
 
 // ---------- правая часть: полосы по секциям ----------
 
-// Полоса секции: толщина — уровень (lvl: p — проект, e — эпик, s — история), зелёная часть — доля
-// готового (по оценке, без оценок — по количеству), цифры мелко под полосой. Щелчок — список задач.
-function sectionBar(cell, lvl, title, model) {
-  const b = el("div", `sbar sbar-${lvl} clickable`);
+// Полоса секции. Цвет один (синий): сделанное — насыщенным, остаток — бледным; доля готового — по
+// оценке, без оценок — по количеству. Тип объекта — формой, как на классической диаграмме Ганта:
+//   p — проект: «скобка» итоговой задачи — тонкая полоса с уголками на концах;
+//   e — эпик: сплошной брусок;
+//   s — история: тонкая линия; в первой секции, где у истории есть работа, — точка-начало (start).
+// Цифры «задач · оценка» — мелко под полосой. Щелчок — список задач.
+function sectionBar(cell, lvl, title, model, { start = false } = {}) {
+  const b = el("div", `sbar sbar-${lvl} clickable` + (start ? " sbar-start" : ""));
   const est = cell.issues.reduce((n, i) => n + (i.estimate || 0), 0);
   const doneEst = cell.issues.reduce((n, i) => n + (i.done ? i.estimate || 0 : 0), 0);
   const doneN = cell.issues.filter((i) => i.done).length;
   const share = est > 0 ? doneEst / est : cell.issues.length ? doneN / cell.issues.length : 0;
   const track = el("span", "sbar-track" + (share >= 1 ? " all-done" : ""));
-  const fill = el("i");
+  const fill = el("i", "sbar-fill");
   fill.style.width = `${Math.round(share * 100)}%`;
   track.append(fill);
-  b.append(track, el("span", "sbar-num", `${cell.count} · ${fmtEstimate(cell.sum)}`));
+  const line = el("span", "sbar-line");
+  if (start) line.append(el("i", "sbar-dot" + (share > 0 ? " done" : "")));
+  line.append(track);
+  b.append(line);
+  if (lvl === "p") {
+    // Уголки скобки: левый — цветом сделанного, если в секции что-то готово; правый — если готово всё.
+    const caps = el("span", "sbar-caps");
+    caps.append(el("i", "cap-l" + (share > 0 ? " done" : "")), el("i", "cap-r" + (share >= 1 ? " done" : "")));
+    b.append(caps);
+  }
+  b.append(el("span", "sbar-num", `${cell.count} · ${fmtEstimate(cell.sum)}`));
   const sprints = model && cell.bySprint ? [...cell.bySprint.keys()].map((id) => model.sprintById.get(id)).filter(Boolean).map((s) => `${s.name} · ${model.teamOf(s).name}`) : [];
   b.title = [title, t("gantt.doneShare", { done: doneN, total: cell.issues.length }), ...sprints].join("\n");
   b.onclick = (ev) => gantt.showIssues(ev.currentTarget, title, cell.issues);
   return b;
 }
 
-function barCells(node, model, lvl, label) {
+// start — у истории точка-начало в первой секции, где у неё есть работа.
+function barCells(node, model, lvl, label, { start = false } = {}) {
   const out = [];
+  let first = start;
   for (const sec of model.columns) {
     const td = el("td", "c-cell s-cell");
     const cell = node.cells.get(sec.id);
-    if (cell && cell.count) td.append(sectionBar(cell, lvl, `${label} · ${gantt.sectionTitle(sec)}`, model));
+    if (cell && cell.count) {
+      td.append(sectionBar(cell, lvl, `${label} · ${gantt.sectionTitle(sec)}`, model, { start: first }));
+      first = false;
+    }
     out.push(td);
   }
   const bl = el("td", "c-cell c-backlog s-cell");
@@ -211,6 +230,7 @@ export function render(container, model, opts = {}) {
       rerender();
     }
   });
+  bar.classList.add("s-bar"); // легенда «доля готовых» — тем же синим, что и полосы
   // Галочка «Заметки»: показывает и скрывает строки заметок.
   const nt = el("label", "legend s-notes-toggle");
   const cb = el("input");
@@ -296,7 +316,7 @@ export function render(container, model, opts = {}) {
         status: sn.status,
         progress: progressCell(doneN, sn.all.length, sn.all, sn.label)
       }),
-      ...barCells(sn, model, "s", sn.label)
+      ...barCells(sn, model, "s", sn.label, { start: true })
     );
     // История без задач, но со своим спринтом — штрихованный отрезок по спринту самой истории.
     if (sn.ownSprint) {
@@ -304,7 +324,9 @@ export function render(container, model, opts = {}) {
       const td = str.children[1 + idx];
       if (td) {
         const own = el("div", "sbar sbar-s own-sprint");
-        own.append(el("span", "sbar-track"));
+        const line = el("span", "sbar-line");
+        line.append(el("span", "sbar-track"));
+        own.append(line);
         own.title = t("story.ownSprint", { sprint: sn.ownSprint.sprintName });
         td.append(own);
       }
