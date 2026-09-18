@@ -12,6 +12,13 @@ export function mondayOf(ms) {
   return d.getTime() - shift * DAY;
 }
 
+// Ключ недели: понедельник в локальном времени, «ГГГГ-ММ-ДД».
+export function weekKey(ms) {
+  const d = new Date(mondayOf(ms));
+  const p = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
 export function isoWeekKey(ms) {
   const d = new Date(mondayOf(ms) + 3 * DAY); // четверг определяет номер недели по ISO
   const start = new Date(d.getFullYear(), 0, 4);
@@ -37,9 +44,24 @@ export function fullWeeks(weeks, now = Date.now()) {
   return { from: firstStart, to: lastEnd, starts: keys };
 }
 
+// Типы задач, которые прогноз не считает (по умолчанию User Story): история — контейнер для
+// задач, а не единица работы, и в потоке она удваивала бы то, что уже посчитано её подзадачами.
+// Список из настроек через запятую; сравнение по названию типа без учёта регистра.
+export function parseTypeList(text) {
+  return String(text || "")
+    .split(/[,;\n]/)
+    .map((x) => x.trim().toLowerCase())
+    .filter(Boolean);
+}
+
+export function isExcludedType(typeName, excluded) {
+  return !!typeName && excluded.includes(String(typeName).trim().toLowerCase());
+}
+
 // rows — записи хранилища flow (завершённые задачи с датой), teamOf — функция «человек → команда».
 // epicKey — если задан, у каждой команды дополнительно считается ряд «задачи эпика по неделям».
-export function buildFlow({ rows, teamOf, weeks = 16, now = Date.now(), epicKey = "" }) {
+// excludeTypes — типы задач (в нижнем регистре), которые в поток не попадают.
+export function buildFlow({ rows, teamOf, weeks = 16, now = Date.now(), epicKey = "", excludeTypes = [] }) {
   const win = fullWeeks(weeks, now);
   const index = new Map(win.starts.map((ms, i) => [ms, i]));
   const teams = new Map();
@@ -47,6 +69,7 @@ export function buildFlow({ rows, teamOf, weeks = 16, now = Date.now(), epicKey 
 
   for (const r of rows) {
     if (!r.resolved) continue;
+    if (isExcludedType(r.typeName, excludeTypes)) continue;
     const ms = mondayOf(Date.parse(r.resolved));
     const slot = index.get(ms);
     if (slot === undefined) continue; // вне окна полных недель
@@ -124,7 +147,37 @@ export function forecastDelivery({ teams, runs = 10000, now = Date.now(), rnd = 
     dates: { p50: date(weeks.p50), p85: date(weeks.p85), p95: date(weeks.p95) },
     last,
     teams: usable,
-    overflow
+    overflow,
+    durations // отсортированные сроки прогонов в неделях — для шанса успеть к сроку
+  };
+}
+
+// Шанс успеть и запас до срока исполнения (dueMs — конец дня срока). Шанс — доля прогонов,
+// закончившихся не позже срока; запас — срок минус прогноз 85%, в неделях (меньше нуля — опаздываем).
+export function dueOutlook(fc, dueMs, now = Date.now()) {
+  if (!fc || !Number.isFinite(dueMs)) return { chance: null, buffer: null };
+  const inTime = fc.durations.filter((w) => now + w * 7 * DAY <= dueMs).length;
+  return {
+    chance: inTime / fc.durations.length,
+    buffer: Math.round(((dueMs - fc.dates.p85.getTime()) / (7 * DAY)) * 10) / 10
+  };
+}
+
+// Генератор случайных чисел с зерном (mulberry32 от хеша строки): одинаковое зерно — одинаковые
+// прогоны. Нужен, чтобы прогноз менялся только от данных, а не от случая.
+export function seededRandom(seed) {
+  let h = 1779033703 ^ String(seed).length;
+  for (const ch of String(seed)) {
+    h = Math.imul(h ^ ch.charCodeAt(0), 3432918353);
+    h = (h << 13) | (h >>> 19);
+  }
+  let a = h >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
 }
 
@@ -175,4 +228,29 @@ export function forecastShare(s) {
   if (s.recent && s.recent.share) return s.recent.share;
   if (s.active && s.active.share) return s.active.share;
   return s.share;
+}
+
+// Прогноз по выбранным командам. Остаток задач эпика целиком делят выбранные команды —
+// пропорционально их вкладу в эпик (кого сняли, тот больше не работает над остатком). История
+// каждой команды — недели текущего периода работы выбранных команд над эпиком: от самой ранней
+// недели с их завершениями до конца окна, но не короче FORECAST_OK_WEEKS (иначе пара недель
+// случайного всплеска решала бы срок). Доля потока — самая свежая оценка (forecastShare).
+export function forecastForTeams({ teams, shares, epicKey, remaining, runs = 10000, now = Date.now(), rnd = Math.random }) {
+  if (!teams.length || !remaining) return { reason: "none" };
+  const epicDone = teams.reduce((n, x) => n + (x.byEpic.get(epicKey) || 0), 0);
+  if (!epicDone) return { reason: "none" };
+  const to = teams[0].perWeek.length - 1;
+  const froms = teams.map((x) => shares.get(x.team.id)?.active?.from).filter((v) => v != null);
+  const start = froms.length ? Math.min(...froms) : 0;
+  const from = Math.max(0, Math.min(start, to - FORECAST_OK_WEEKS + 1));
+  const history = { from, to, weeks: to - from + 1 };
+  if (history.weeks < FORECAST_MIN_WEEKS) return { reason: "short", weeks: history.weeks, history };
+  const input = teams.map((x) => ({
+    team: x.team,
+    perWeek: x.perWeek.slice(from, to + 1),
+    share: forecastShare(shares.get(x.team.id)),
+    remaining: (remaining * (x.byEpic.get(epicKey) || 0)) / epicDone
+  }));
+  const fc = forecastDelivery({ teams: input, runs, now, rnd });
+  return fc ? { fc, history } : { reason: "none", history };
 }

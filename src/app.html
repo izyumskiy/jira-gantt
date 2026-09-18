@@ -13,11 +13,19 @@
       </div>
 
       <nav class="tabs">
-        <button class="tab active" data-tab="search" data-i18n="tab.search"></button>
+        <!-- «Поиск», «Сводка» и «Настройки» — пиктограммами, чтобы экономить место на верхней плашке; подпись — в подсказке -->
+        <button class="tab tab-icon active" data-tab="search" data-i18n-title="tab.search" data-i18n-aria="tab.search">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+        </button>
+        <button class="tab tab-icon" data-tab="summary" data-i18n-title="tab.summary" data-i18n-aria="tab.summary">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="4" y1="20" x2="20" y2="20"></line><rect x="6" y="11" width="3" height="6"></rect><rect x="11" y="7" width="3" height="10"></rect><rect x="16" y="13" width="3" height="4"></rect></svg>
+        </button>
         <button class="tab" data-tab="epicPeople" data-i18n="tab.epicPeople"></button>
         <button class="tab" data-tab="people" data-i18n="tab.people"></button>
         <button class="tab" data-tab="team" data-i18n="tab.team"></button>
-        <button class="tab" data-tab="settings" data-i18n="tab.settings"></button>
+        <button class="tab tab-icon" data-tab="settings" data-i18n-title="tab.settings" data-i18n-aria="tab.settings">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1.08-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+        </button>
         <span id="today" class="today" data-i18n-title="app.today"></span>
       </nav>
 
@@ -68,6 +76,9 @@
       </section>
 
       <!-- Вкладка 2: По эпикам — эпики → исполнители -->
+      <!-- Вкладка «Сводка»: статус портфеля после обновления -->
+      <section class="page hidden" id="page-summary"></section>
+
       <section class="page hidden" id="page-epicPeople">
         <div class="filter-bar">
           <label>
@@ -126,6 +137,11 @@
             <span data-i18n="set.flowWeeks"></span>
             <input id="flowWeeks" type="number" min="4" max="52" step="1" />
             <small class="muted" data-i18n="set.flowWeeksHint"></small>
+          </label>
+          <label class="field">
+            <span data-i18n="set.forecastExcludeTypes"></span>
+            <input id="forecastExcludeTypes" type="text" placeholder="User Story" />
+            <small class="muted" data-i18n="set.forecastExcludeTypesHint"></small>
           </label>
           <div class="row">
             <span class="muted" data-i18n="set.flowDiag"></span>
@@ -188,6 +204,109 @@
           </label>
           <div class="row">
             <button id="btnBoards" data-i18n="set.loadBoards"></button>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3 data-i18n="set.summary"></h3>
+          <small class="muted" data-i18n="set.summaryHint"></small>
+          <div class="sum-settings">
+            <label class="field narrow">
+              <span data-i18n="set.sum.chanceGreen"></span>
+              <input id="sum-chanceGreen" data-sum="chanceGreen" type="number" min="0" step="1" />
+            </label>
+            <label class="field narrow">
+              <span data-i18n="set.sum.chanceYellow"></span>
+              <input id="sum-chanceYellow" data-sum="chanceYellow" type="number" min="0" step="1" />
+            </label>
+            <label class="field narrow">
+              <span data-i18n="set.sum.shiftDays"></span>
+              <input id="sum-shiftDays" data-sum="shiftDays" type="number" min="0" step="1" />
+            </label>
+            <label class="field narrow">
+              <span data-i18n="set.sum.scopePct"></span>
+              <input id="sum-scopePct" data-sum="scopePct" type="number" min="0" step="1" />
+            </label>
+            <label class="field narrow">
+              <span data-i18n="set.sum.scopeAbs"></span>
+              <input id="sum-scopeAbs" data-sum="scopeAbs" type="number" min="0" step="1" />
+            </label>
+            <label class="field narrow">
+              <span data-i18n="set.sum.nearWeeks"></span>
+              <input id="sum-nearWeeks" data-sum="nearWeeks" type="number" min="0" step="1" />
+            </label>
+            <label class="field narrow">
+              <span data-i18n="set.sum.nearDonePct"></span>
+              <input id="sum-nearDonePct" data-sum="nearDonePct" type="number" min="0" step="1" />
+            </label>
+            <label class="field narrow">
+              <span data-i18n="set.sum.stallWeeks"></span>
+              <input id="sum-stallWeeks" data-sum="stallWeeks" type="number" min="0" step="1" />
+            </label>
+            <label class="field narrow">
+              <span data-i18n="set.sum.meltWeeks"></span>
+              <input id="sum-meltWeeks" data-sum="meltWeeks" type="number" min="0" step="1" />
+            </label>
+            <label class="field narrow">
+              <span data-i18n="set.sum.carrySprints"></span>
+              <input id="sum-carrySprints" data-sum="carrySprints" type="number" min="0" step="1" />
+            </label>
+            <label class="field narrow">
+              <span data-i18n="set.sum.idlePct"></span>
+              <input id="sum-idlePct" data-sum="idlePct" type="number" min="0" step="1" />
+            </label>
+            <label class="field narrow">
+              <span data-i18n="set.sum.spreadFlow"></span>
+              <input id="sum-spreadFlow" data-sum="spreadFlow" type="number" min="0" step="0.5" />
+            </label>
+            <label class="field narrow">
+              <span data-i18n="set.sum.spreadWeeks"></span>
+              <input id="sum-spreadWeeks" data-sum="spreadWeeks" type="number" min="0" step="1" />
+            </label>
+            <label class="field narrow">
+              <span data-i18n="set.sum.bottleneckPct"></span>
+              <input id="sum-bottleneckPct" data-sum="bottleneckPct" type="number" min="0" step="1" />
+            </label>
+            <label class="field narrow">
+              <span data-i18n="set.sum.noEstimatePct"></span>
+              <input id="sum-noEstimatePct" data-sum="noEstimatePct" type="number" min="0" step="1" />
+            </label>
+            <label class="field narrow">
+              <span data-i18n="set.sum.attention"></span>
+              <input id="sum-attention" data-sum="attention" type="number" min="0" step="1" />
+            </label>
+            <label class="field narrow">
+              <span data-i18n="set.requestTimeout"></span>
+              <input id="requestTimeoutSec" type="number" min="5" max="300" step="1" />
+            </label>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3 data-i18n="set.auto"></h3>
+          <small class="muted" data-i18n="set.autoHint"></small>
+          <label class="field check">
+            <input id="autoEnabled" type="checkbox" />
+            <span data-i18n="set.autoEnabled"></span>
+          </label>
+          <div class="row auto-days">
+            <label class="check"><input type="checkbox" data-day="1" /><span data-i18n="day.1"></span></label>
+            <label class="check"><input type="checkbox" data-day="2" /><span data-i18n="day.2"></span></label>
+            <label class="check"><input type="checkbox" data-day="3" /><span data-i18n="day.3"></span></label>
+            <label class="check"><input type="checkbox" data-day="4" /><span data-i18n="day.4"></span></label>
+            <label class="check"><input type="checkbox" data-day="5" /><span data-i18n="day.5"></span></label>
+            <label class="check"><input type="checkbox" data-day="6" /><span data-i18n="day.6"></span></label>
+            <label class="check"><input type="checkbox" data-day="7" /><span data-i18n="day.7"></span></label>
+          </div>
+          <div class="row">
+            <label class="field narrow">
+              <span data-i18n="set.autoFrom"></span>
+              <input id="autoFrom" type="time" />
+            </label>
+            <label class="field narrow">
+              <span data-i18n="set.autoTo"></span>
+              <input id="autoTo" type="time" />
+            </label>
           </div>
         </div>
 

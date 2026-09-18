@@ -2,12 +2,18 @@
 import { t } from "./i18n.js";
 import * as settings from "./settings.js";
 
+// kind: "network" — Jira недоступна (нет VPN или сети, таймаут); "auth" — Jira ответила, но не
+// авторизовала; "http" — прочие ошибки ответа. Недоступность прерывает синхронизацию целиком:
+// дальше продолжать бессмысленно, а неполные данные записывать нельзя.
 export class JiraError extends Error {
-  constructor(message, code) {
+  constructor(message, code, kind = "http") {
     super(message);
     this.code = code;
+    this.kind = kind;
   }
 }
+
+export const isUnreachable = (e) => !!e && e.kind === "network";
 
 function baseUrl() {
   const s = settings.get();
@@ -21,13 +27,22 @@ async function once(url, opts, auth) {
   const headers = { Accept: "application/json", "X-Atlassian-Token": "no-check" };
   if (opts.body) headers["Content-Type"] = "application/json";
   if (auth === "pat") headers.Authorization = `Bearer ${settings.get().pat}`;
-  return fetch(url, {
-    method: opts.method || "GET",
-    headers,
-    body: opts.body ? JSON.stringify(opts.body) : undefined,
-    credentials: auth === "pat" ? "omit" : "include",
-    redirect: "follow"
-  });
+  // Без VPN адрес Jira может не отвечать минутами — обрываем по таймауту.
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), (Number(settings.get().requestTimeoutSec) || 30) * 1000);
+  try {
+    const res = await fetch(url, {
+      method: opts.method || "GET",
+      headers,
+      body: opts.body ? JSON.stringify(opts.body) : undefined,
+      credentials: auth === "pat" ? "omit" : "include",
+      redirect: "follow",
+      signal: ctrl.signal
+    });
+    return { res, text: await res.text() };
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 // Ответ считаем неавторизованным и при 401/403, и при редиректе Jira на форму логина.
@@ -41,22 +56,20 @@ export async function request(path, opts = {}) {
   const url = baseUrl() + path;
   let res, text;
   try {
-    res = await once(url, opts, "cookie");
-    text = await res.text();
+    ({ res, text } = await once(url, opts, "cookie"));
   } catch (e) {
-    throw new JiraError(t("err.network"), 0);
+    throw new JiraError(t("err.network"), 0, "network");
   }
 
   if (unauthorized(res, text) && settings.get().pat) {
     try {
-      res = await once(url, opts, "pat");
-      text = await res.text();
+      ({ res, text } = await once(url, opts, "pat"));
     } catch (e) {
-      throw new JiraError(t("err.network"), 0);
+      throw new JiraError(t("err.network"), 0, "network");
     }
   }
 
-  if (unauthorized(res, text)) throw new JiraError(t("err.auth"), res.status || 401);
+  if (unauthorized(res, text)) throw new JiraError(t("err.auth"), res.status || 401, "auth");
   if (!res.ok) {
     let msg = text.slice(0, 300);
     try {

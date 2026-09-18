@@ -1,6 +1,9 @@
 // Дев-проверка чистой логики без Jira и без Chrome: подменяем chrome.storage и гоняем агрегацию.
 globalThis.chrome = {
-  storage: { local: { _d: {}, async get(k) { return { [k]: this._d[k] }; }, async set(o) { Object.assign(this._d, o); } } },
+  storage: {
+    local: { _d: {}, async get(k) { return { [k]: this._d[k] }; }, async set(o) { Object.assign(this._d, o); } },
+    onChanged: { _l: [], addListener(f) { this._l.push(f); } }
+  },
   permissions: { async contains() { return true; }, async request() { return true; } },
   runtime: { getURL: (p) => p }
 };
@@ -9,7 +12,15 @@ import { setLang, applyI18n, t } from "../src/js/i18n.js";
 import * as settings from "../src/js/settings.js";
 import * as agg from "../src/js/agg.js";
 import * as gantt from "../src/js/gantt.js";
-import { parseSprint, datesFromName, checkApis, searchEpics, epicKeysFrom } from "../src/js/sync.js";
+import { parseSprint, datesFromName, checkApis, searchEpics, epicKeysFrom, sync as runSync, backfillHistory } from "../src/js/sync.js";
+import * as jiraApi from "../src/js/jira.js";
+import * as analytics from "../src/js/analytics.js";
+import * as summary from "../src/js/summary.js";
+import * as summaryView from "../src/js/summaryView.js";
+import * as trendCharts from "../src/js/trendCharts.js";
+import * as autoSync from "../src/js/autoSync.js";
+import * as accuracy from "../src/js/accuracy.js";
+import { runForecast, workerAvailable } from "../src/js/forecastClient.js";
 import { classify, isDoneStatus } from "../src/js/status.js";
 import { collectPeople, mergeProfiles, parseSystems, systemsList, teamsList, normName, roleSummary } from "../src/js/team.js";
 import { parseConfig, exportConfig, applyConfig } from "../src/js/configio.js";
@@ -266,6 +277,16 @@ check("подпись секции — диапазон дат", /^\d{2}\.\d{2} 
   const ae = withEpic.teams.find((x) => x.team.id === "t:1");
   check("ряд эпика по неделям не больше общего потока", ae.epicPerWeek.join(",") === "0,0,2" && ae.perWeek.join(",") === "0,1,3",
     `${ae.epicPerWeek.join(",")} / ${ae.perWeek.join(",")}`);
+  // User Story и другие исключённые типы в поток не попадают
+  const withStory = [...rows, { key: "F-8", resolved: day(now, 6), assigneeLogin: "ivan", epicKey: "EP-1", typeName: "User Story" }];
+  const exc = flowlib.parseTypeList(" User Story, Эпик ;");
+  check("список исключаемых типов: регистр и разделители", exc.join("|") === "user story|эпик", exc.join("|"));
+  const noStory = flowlib.buildFlow({ rows: withStory, weeks: 4, now, epicKey: "EP-1", excludeTypes: exc, teamOf: () => teamA });
+  const withStoryFlow = flowlib.buildFlow({ rows: withStory, weeks: 4, now, epicKey: "EP-1", teamOf: () => teamA });
+  check("User Story не входит в поток и в долю эпика",
+    noStory.teams[0].total === withStoryFlow.teams[0].total - 1 && noStory.teams[0].byEpic.get("EP-1") === withStoryFlow.teams[0].byEpic.get("EP-1") - 1,
+    `${noStory.teams[0].total} / ${withStoryFlow.teams[0].total}`);
+  check("isExcludedType: пустой тип не исключается", !flowlib.isExcludedType("", exc) && flowlib.isExcludedType("user STORY", exc));
   check("без epicKey ряд эпика пустой", flowlib.buildFlow({ rows, weeks: 4, now, teamOf: () => teamA }).teams[0].epicPerWeek.every((n) => n === 0));
   // доля за период активности: эпик жил только последнюю неделю (2 из 3), а за всё окно — 2 из 4
   const se = flowlib.epicShare(ae, "EP-1");
@@ -600,6 +621,56 @@ gantt.resetCollapse();
 }
 g3.remove();
 
+// Д1. задачи вне спринта, которые в работе (канбан), — в текущей секции
+{
+  const kb = [
+    mk("K-1", "EP-1", "AAA", "Anna", null, 4, "prog"), // в работе без спринта → текущая секция
+    mk("K-2", "EP-1", "AAA", "Anna", null, 2, "new"), // к выполнению → бэклог, как раньше
+    mk("K-3", "EP-1", "AAA", "Anna", null, 3, "prod"), // On Prod: категория «В работе», но готова
+    { ...mk("K-4", "EP-1", "AAA", "Anna", null, 5, "prog"), statusName: "Анализ" } // нестандартный статус категории «В работе»
+  ];
+  check("isOffSprintWork: в работе без спринта — да, On Prod и к выполнению — нет",
+    agg.isOffSprintWork(kb[0]) && agg.isOffSprintWork(kb[3]) && !agg.isOffSprintWork(kb[1]) && !agg.isOffSprintWork(kb[2]) &&
+    !agg.isOffSprintWork(mk("K-5", "EP-1", "AAA", "Anna", 2, 1, "prog")));
+  const km = agg.buildModel({ issues: kb, sprints, epics, boards, mode: "epicPeople" });
+  const kep = km.groups.find((g) => g.key === "EP-1");
+  const kcur = kep.cells.get(km.currentId);
+  check("в работе без спринта — в текущей секции, отрезком «Вне спринта» (и нестандартный статус тоже)",
+    km.currentId === "sec:0" && kcur?.count === 2 && kcur.bySprint.get(agg.OFF_SPRINT_ID)?.count === 2,
+    JSON.stringify({ cur: km.currentId, n: kcur?.count }));
+  check("к выполнению без спринта — в бэклоге; счётчик «без спринта» без задач в работе",
+    kep.backlog.count === 1 && kep.backlog.issues[0].key === "K-2" && kep.noSprint === 1, `${kep.backlog.count} / ${kep.noSprint}`);
+  check("On Prod без спринта не попадает ни в секцию, ни в бэклог",
+    ![...kcur.issues, ...kep.backlog.issues].some((i) => i.key === "K-3"));
+  check("задачи вне спринта помечены для списка, задачи бэклога — нет",
+    kcur.issues.every((i) => i.offSprint) && !kep.backlog.issues[0].offSprint);
+
+  const kOther = [{ ...mk("K-9", "EP-9", "XXX", "Anna", null, 6, "prog"), epicSummary: "Чужой" }];
+  const kp = agg.buildModel({ issues: kb, others: kOther, sprints, epics, boards, mode: "assignee" });
+  const anna = kp.groups.find((g) => g.key === "anna");
+  check("канбан-задача в чужом эпике — в «Прочих» текущей секции",
+    anna?.otherCells.get(kp.currentId)?.count === 1 && anna.projects.some((pr) => pr.key === "EP-9"), JSON.stringify(anna?.projects.map((pr) => pr.key)));
+  const kload = agg.personLoad(kp, kb, kOther);
+  check("загрузка текущей секции включает задачи вне спринта, по остатку",
+    kload.byName.get("anna")?.get(kp.currentId) === 15 * H, String((kload.byName.get("anna")?.get(kp.currentId) || 0) / H));
+  check("загрузка по остатку: доделанная задача с нулевым остатком не грузит",
+    agg.personLoad(kp, [{ ...mk("K-6", "EP-1", "AAA", "Boris", 2, 8, "prog"), remainingEstimate: 0 }], []).byName.get("boris")?.get(kp.currentId) === 0);
+
+  const gk = document.createElement("div");
+  document.body.append(gk);
+  renderOpen(gk, km, { mode: "epicPeople" });
+  const offBars = [...gk.querySelectorAll(".bar.nested.off-sprint")];
+  check("в ячейке текущей секции — отрезок «Вне спринта»", offBars.length === 1 && offBars[0].textContent.includes(t("gantt.offSprint")),
+    String(offBars.length));
+  offBars[0].click();
+  check("во всплывающем списке у таких задач — пиктограмма «вне спринта» с подсказкой",
+    document.querySelectorAll(".tip-issues .ti-offsprint").length === 2 &&
+      document.querySelector(".tip-issues .ti-offsprint").title === t("gantt.offSprintHint"));
+  document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+  gk.remove();
+  gantt.resetCollapse();
+}
+
 // 4d. загрузчик конфигурации — разбор и экспорт
 const pc = parseConfig(JSON.stringify({ baseUrl: "https://jira.example.local/", fields: { plannedStart: "customfield_10407" }, infoSystems: "1С CRM\nСБИС", epics: [" prj-1 ", "PRJ-2"], people: [{ name: "Иван" }, { bad: 1 }] }));
 check("parseConfig: поля, системы строкой, эпики с обрезкой, люди без имени отброшены",
@@ -678,6 +749,12 @@ await settings.save({ infoSystems: [], fields: { plannedStart: "", plannedEnd: "
   check("проверка API: закрытые Agile и Tempo помечены", !st.agile.ok && !st.tempo.ok && st.limited === true, JSON.stringify({ agile: st.agile.code, tempo: st.tempo.code }));
   await settings.save({ useTempoTeams: false });
   check("выключённый Tempo проверкой не считается ошибкой", (await checkApis()).tempo.skipped === true);
+  window.fetch = async (url) => {
+    const u = String(url);
+    if (u.includes("/rest/tempo-teams")) return json({ errorMessages: ["not installed"] }, 404);
+    return json(u.includes("/rest/agile/") ? { values: [] } : { name: "ivan", issues: [], total: 0 });
+  };
+  check("выключенный Tempo при открытом Agile — не «ограничения API»", (await checkApis()).limited === false);
   await settings.save({ useTempoTeams: true });
   window.fetch = async () => json({ errorMessages: ["denied"] }, 403);
   const denied = await checkApis();
@@ -722,7 +799,10 @@ await settings.save({ infoSystems: [], fields: { plannedStart: "", plannedEnd: "
 // (из-за такого `onkeydown` в поле поиска не набирался ни один символ).
 {
   const sources = await Promise.all(
-    ["app", "gantt", "team", "sync", "agg", "flow", "configio"].map(async (n) => [n, await (await fetch(`../src/js/${n}.js`)).text()])
+    ["app", "gantt", "team", "sync", "agg", "flow", "configio", "analytics", "forecastClient", "jira", "db", "settings"].map(async (n) => [
+      n,
+      await (await fetch(`../src/js/${n}.js`, { cache: "no-store" })).text()
+    ])
   );
   const bad = [];
   for (const [name, code] of sources) {
@@ -731,9 +811,778 @@ await settings.save({ infoSystems: [], fields: { plannedStart: "", plannedEnd: "
     }
   }
   check("обработчики on* не возвращают результат логического выражения", bad.length === 0, bad.join(" | "));
+  // Повторное объявление функции ломает загрузку модуля целиком, а селфтест app.js не импортирует.
+  const dupes = [];
+  for (const [name, code] of sources) {
+    const seen = new Map();
+    for (const m of code.matchAll(/^(?:export\s+)?(?:async\s+)?function\s+([A-Za-z0-9_$]+)\s*\(/gm)) seen.set(m[1], (seen.get(m[1]) || 0) + 1);
+    for (const [fn, n] of seen) if (n > 1) dupes.push(`${name}.js: ${fn} ×${n}`);
+  }
+  check("в модулях нет повторно объявленных функций", dupes.length === 0, dupes.join(" | "));
+}
+
+// 4j. прогноз по выбранным командам (переключатель в карточке эпика, можно несколько)
+{
+  const W = 20;
+  const tf = (id, per, epicFrom, epicPer) => {
+    const perWeek = new Array(W).fill(per);
+    const epicPerWeek = perWeek.map((_, i) => (i >= epicFrom ? epicPer : 0));
+    const done = epicPerWeek.reduce((a, b) => a + b, 0);
+    return { team: { id, name: id }, perWeek, epicPerWeek, total: per * W, byEpic: new Map([["EP-1", done]]) };
+  };
+  const A = tf("A", 10, 15, 5); // 25 задач эпика за последние 5 недель, доля 50%
+  const B = tf("B", 2, 17, 1); // 3 задачи эпика за последние 3 недели, доля 50%
+  const shares = new Map([A, B].map((x) => [x.team.id, flowlib.epicShare(x, "EP-1", { open: true })]));
+  const run = (teams) => flowlib.forecastForTeams({ teams, shares, epicKey: "EP-1", remaining: 28, runs: 50, rnd: () => 0.5 });
+
+  const both = run([A, B]);
+  check("все команды: остаток делится по вкладу в эпик (25 : 3)",
+    both.fc.teams.find((x) => x.team.id === "A").remaining === 25 && both.fc.teams.find((x) => x.team.id === "B").remaining === 3,
+    JSON.stringify(both.fc.teams.map((x) => [x.team.id, x.remaining])));
+  check("история — период работы над эпиком, растянутый до 12 недель", both.history.from === 8 && both.history.weeks === 12, JSON.stringify(both.history));
+  const onlyB = run([B]);
+  check("выбрана одна команда — весь остаток на ней", onlyB.fc.teams.length === 1 && onlyB.fc.teams[0].remaining === 28, JSON.stringify(onlyB.fc.teams.map((x) => x.remaining)));
+  const onlyA = run([A]);
+  check("выбор команды меняет срок: медленная команда одна — дольше", onlyB.fc.weeks.p50 > onlyA.fc.weeks.p50, `${onlyA.fc.weeks.p50} / ${onlyB.fc.weeks.p50}`);
+  check("история прогноза режется по периоду", onlyA.fc.teams[0].perWeek.length === onlyA.history.weeks, String(onlyA.fc.teams[0].perWeek.length));
+  const shortT = { ...tf("C", 3, 0, 1), perWeek: [3, 3, 3], epicPerWeek: [1, 1, 1] };
+  const shortShares = new Map([["C", flowlib.epicShare(shortT, "EP-1", { open: true })]]);
+  check("меньше 5 недель истории — прогноз не строится",
+    flowlib.forecastForTeams({ teams: [shortT], shares: shortShares, epicKey: "EP-1", remaining: 5 }).reason === "short");
+  check("без остатка или без команд — прогноза нет", run([]).reason === "none" &&
+    flowlib.forecastForTeams({ teams: [A], shares, epicKey: "EP-1", remaining: 0 }).reason === "none");
+}
+
+// А5. кэш настроек подтягивает изменения из другой вкладки
+{
+  const before = settings.get().lastSync;
+  for (const f of chrome.storage.onChanged._l) f({ settings: { newValue: { ...settings.get(), lastSync: 123456 } } }, "local");
+  check("А5: изменение настроек в другой вкладке попадает в кэш", settings.get().lastSync === 123456, String(settings.get().lastSync));
+  await settings.save({ hoursPerDay: 8 });
+  check("А5: сохранение формы не откатывает поле, записанное другой вкладкой", settings.get().lastSync === 123456);
+  await settings.save({ lastSync: before });
+}
+
+// А2. синхронизация: сбор в памяти, запись одной транзакцией; обрыв VPN базу не портит
+{
+  const orig = window.fetch;
+  const saved = { fields: { ...settings.get().fields }, useTempoTeams: settings.get().useTempoTeams, flowWeeks: settings.get().flowWeeks, timeout: settings.get().requestTimeoutSec };
+  await settings.save({ fields: { ...saved.fields, epicLink: "customfield_10100", sprint: "customfield_10101", version: 5 }, useTempoTeams: false, flowWeeks: 4 });
+  await dbm.clearAll();
+  await dbm.putAll(dbm.STORES.epics, [{ key: "EP-A", summary: "Эпик А", statusName: "В работе", statusCategory: "indeterminate" }]);
+  await dbm.putAll(dbm.STORES.issues, [{ ...mk("OLD-1", "EP-A", "AAA", "Ivan", null, 1, "prog") }]);
+  await dbm.putAll(dbm.STORES.flow, [{ key: "F-OLD", resolved: new Date().toISOString(), assigneeLogin: "ivan" }]);
+  await dbm.putAll(dbm.STORES.others, [{ ...mk("O-OLD", "EP-X", "XXX", "Ivan", 2, 1, "prog") }]);
+
+  const json = (o, status = 200) => new Response(JSON.stringify(o), { status, headers: { "Content-Type": "application/json" } });
+  const issue = (key) => ({
+    key,
+    fields: {
+      summary: "Новая", project: { key: "AAA", name: "AAA" }, assignee: { name: "ivan", key: "ivan", displayName: "Ivan" },
+      status: { name: "В работе", statusCategory: { key: "indeterminate" } }, issuetype: { name: "Task" },
+      updated: new Date().toISOString(), customfield_10100: "EP-A", customfield_10101: null
+    }
+  });
+  let flowFails = true;
+  window.fetch = async (url, opt = {}) => {
+    const u = String(url);
+    const b = opt.body ? JSON.parse(opt.body) : {};
+    if (u.includes("/rest/api/2/myself")) return json({ name: "ivan" });
+    if (u.includes("/rest/agile/1.0/board")) return json({ values: [], isLast: true });
+    if (u.includes("/rest/api/2/search")) {
+      const jql = b.jql || "";
+      if (jql.includes("resolutiondate >=")) {
+        if (flowFails) throw new TypeError("Failed to fetch"); // VPN отвалился посреди синхронизации
+        return json({ issues: [], total: 0 });
+      }
+      if (jql.includes("cf[10100] in")) return json({ issues: [issue("NEW-1")], total: 1 });
+      if (jql.includes("key in (EP-A)")) return json({ issues: [{ key: "EP-A", fields: { summary: "Эпик А (обновлён)", status: { name: "В работе", statusCategory: { key: "indeterminate" } }, project: { key: "AAA" } } }], total: 1 });
+      return json({ issues: [], total: 0 });
+    }
+    return json({}, 404);
+  };
+
+  let err = null;
+  try { await runSync({ full: true }); } catch (e) { err = e; }
+  const keysOf = async (st) => (await dbm.all(st)).map((x) => x.key).sort().join(",");
+  check("А2: обрыв сети посреди сбора — синхронизация прерывается ошибкой «Jira недоступна»", err && err.kind === "network" && err.message === t("err.network"), err && err.message);
+  check("А2: после обрыва задачи, история потока и чужие задачи не изменились",
+    (await keysOf(dbm.STORES.issues)) === "OLD-1" && (await keysOf(dbm.STORES.flow)) === "F-OLD" && (await keysOf(dbm.STORES.others)) === "O-OLD",
+    `${await keysOf(dbm.STORES.issues)} / ${await keysOf(dbm.STORES.flow)} / ${await keysOf(dbm.STORES.others)}`);
+  check("А2: после обрыва эпик не обновлён", (await dbm.getOne(dbm.STORES.epics, "EP-A")).summary === "Эпик А");
+
+  flowFails = false;
+  err = null;
+  try { await runSync({ full: true }); } catch (e) { err = e; }
+  check("А2: успешная полная синхронизация записывает всё разом",
+    !err && (await keysOf(dbm.STORES.issues)) === "NEW-1" && (await keysOf(dbm.STORES.flow)) === "" && (await keysOf(dbm.STORES.others)) === "" &&
+      (await dbm.getOne(dbm.STORES.epics, "EP-A")).summary === "Эпик А (обновлён)",
+    err ? err.message : `${await keysOf(dbm.STORES.issues)} / ${await keysOf(dbm.STORES.flow)}`);
+
+  // вид ошибки: не авторизован
+  window.fetch = async () => json({ errorMessages: ["denied"] }, 401);
+  err = null;
+  try { await jiraApi.myself(); } catch (e) { err = e; }
+  check("А2: 401 — ошибка вида «не авторизован»", err && err.kind === "auth");
+
+  // таймаут: запрос, который не отвечает, обрывается и считается недоступностью
+  await settings.save({ requestTimeoutSec: 0.05 });
+  window.fetch = (url, opt) => new Promise((_, reject) => opt.signal.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError"))));
+  const t0 = Date.now();
+  err = null;
+  try { await jiraApi.myself(); } catch (e) { err = e; }
+  check("А2: зависший запрос обрывается по таймауту как «Jira недоступна»", err && err.kind === "network" && Date.now() - t0 < 2000, `${err && err.kind} ${Date.now() - t0} мс`);
+
+  window.fetch = orig;
+  await settings.save({ fields: saved.fields, useTempoTeams: saved.useTempoTeams, flowWeeks: saved.flowWeeks, requestTimeoutSec: saved.timeout });
+  await dbm.clearAll();
+}
+
+// Б0. подготовка данных: дата создания, число спринтов, дата завершения эпика, пропавшие задачи
+{
+  check("Б0: дата закрытия — дата завершения, у готовых без неё — дата обновления, у открытых — пусто",
+    agg.closedAt({ ...mk("Z-1", "EP-1", "AAA", "Ivan", 2, 1, "done"), resolved: "2026-05-01", updated: "2026-06-01" }) === "2026-05-01" &&
+      agg.closedAt({ ...mk("Z-2", "EP-1", "AAA", "Ivan", 2, 1, "prod"), resolved: "", updated: "2026-06-02" }) === "2026-06-02" &&
+      agg.closedAt({ ...mk("Z-3", "EP-1", "AAA", "Ivan", 2, 1, "prog"), resolved: "", updated: "2026-06-03" }) === "");
+
+  const orig = window.fetch;
+  const saved = { fields: { ...settings.get().fields }, useTempoTeams: settings.get().useTempoTeams, flowWeeks: settings.get().flowWeeks, lastSync: settings.get().lastSync };
+  await settings.save({ fields: { ...saved.fields, epicLink: "customfield_10100", sprint: "customfield_10101", version: 5 }, useTempoTeams: false, flowWeeks: 4, lastSync: Date.now() - 3600000 });
+  await dbm.clearAll();
+  await dbm.metaSet("issueSchema", 4);
+  await dbm.putAll(dbm.STORES.epics, [{ key: "EP-A", summary: "Эпик А" }]);
+  await dbm.putAll(dbm.STORES.issues, [
+    mk("KEEP-1", "EP-A", "AAA", "Ivan", null, 1, "prog"),
+    mk("GONE-1", "EP-A", "AAA", "Ivan", null, 1, "prog"),
+    mk("ELSE-1", "EP-Z", "AAA", "Ivan", null, 1, "prog")
+  ]);
+  const json = (o, status = 200) => new Response(JSON.stringify(o), { status, headers: { "Content-Type": "application/json" } });
+  const status = { name: "В работе", statusCategory: { key: "indeterminate" } };
+  const fieldsOf = (extra = {}) => ({ summary: "Задача", project: { key: "AAA" }, assignee: { name: "ivan", key: "ivan", displayName: "Ivan" }, status, issuetype: { name: "Task" }, updated: new Date().toISOString(), customfield_10100: "EP-A", ...extra });
+  let keysFail = false;
+  window.fetch = async (url, opt = {}) => {
+    const u = String(url);
+    const b = opt.body ? JSON.parse(opt.body) : {};
+    if (u.includes("/rest/api/2/myself")) return json({ name: "ivan" });
+    if (u.includes("/rest/agile/1.0/board")) return json({ values: [], isLast: true });
+    if (u.includes("/rest/api/2/search")) {
+      const jql = b.jql || "";
+      if (jql.includes("key in (EP-A)")) return json({ issues: [{ key: "EP-A", fields: { summary: "Эпик А", status: { name: "Готово", statusCategory: { key: "done" } }, project: { key: "AAA" }, resolutiondate: "2026-09-01T10:00:00.000+0300" } }], total: 1 });
+      if (jql.includes("in (EP-A)") && jql.includes("updated >=")) {
+        return json({ issues: [{ key: "NEW-1", fields: fieldsOf({ created: "2026-08-01T09:00:00.000+0300", customfield_10101: [{ id: 11, name: "S1", state: "closed" }, { id: 12, name: "S2", state: "closed" }, { id: 13, name: "S3", state: "active" }] }) }], total: 1 });
+      }
+      if (jql.includes("in (EP-A)")) {
+        if (keysFail) return json({ errorMessages: ["bad jql"] }, 400);
+        return json({ issues: [{ key: "KEEP-1" }, { key: "NEW-1" }], total: 2 });
+      }
+      return json({ issues: [], total: 0 });
+    }
+    return json({}, 404);
+  };
+  let res = null;
+  let err = null;
+  try { res = await runSync({ full: false }); } catch (e) { err = e; }
+  const keysNow = (await dbm.all(dbm.STORES.issues)).map((x) => x.key).sort().join(",");
+  check("Б0: «Обновить» удаляет задачи, пропавшие из выбранных эпиков; задачи других эпиков не трогает",
+    !err && keysNow === "ELSE-1,KEEP-1,NEW-1" && res.removed === 1, err ? err.message : `${keysNow} / ${res && res.removed}`);
+  const newIssue = await dbm.getOne(dbm.STORES.issues, "NEW-1");
+  check("Б0: у задачи сохранены дата создания и число спринтов", newIssue?.created?.startsWith("2026-08-01") && newIssue.sprintCount === 3, JSON.stringify({ c: newIssue?.created, n: newIssue?.sprintCount }));
+  check("Б0: у эпика сохранена дата завершения", (await dbm.getOne(dbm.STORES.epics, "EP-A"))?.resolved?.startsWith("2026-09-01"));
+
+  await dbm.putAll(dbm.STORES.issues, [mk("GONE-2", "EP-A", "AAA", "Ivan", null, 1, "prog")]);
+  keysFail = true;
+  err = null;
+  try { res = await runSync({ full: false }); } catch (e) { err = e; }
+  check("Б0: запрос ключей не прошёл — ничего не удаляется", !err && !!(await dbm.getOne(dbm.STORES.issues, "GONE-2")) && res.removed === 0, err ? err.message : String(res && res.removed));
+
+  window.fetch = orig;
+  await settings.save({ fields: saved.fields, useTempoTeams: saved.useTempoTeams, flowWeeks: saved.flowWeeks, lastSync: saved.lastSync });
+  await dbm.clearAll();
+}
+
+// Б1. история: журнал синхронизаций и недельные записи пишутся в той же транзакции, что и данные
+{
+  const DAYMS = 86400000;
+  const orig = window.fetch;
+  const saved = { fields: { ...settings.get().fields }, useTempoTeams: settings.get().useTempoTeams, flowWeeks: settings.get().flowWeeks };
+  await settings.save({ fields: { ...saved.fields, epicLink: "customfield_10100", sprint: "customfield_10101", version: 5 }, useTempoTeams: false, flowWeeks: 20 });
+  await dbm.clearAll();
+  const nowMs = Date.now();
+  await dbm.putAll(dbm.STORES.epics, [{ key: "EP-A", summary: "Эпик А", dueDate: ymd(365) }]);
+  await dbm.putAll(dbm.STORES.syncLog, [
+    { syncId: nowMs - 31 * DAYMS, epicKey: "EP-A", total: 1 },
+    { syncId: nowMs - 20 * DAYMS, epicKey: "EP-A", total: 2 }
+  ]);
+  await dbm.putAll(dbm.STORES.epicWeeks, [
+    { epicKey: "EP-A", week: flowlib.weekKey(nowMs - 110 * 7 * DAYMS), restored: true },
+    { epicKey: "EP-A", week: flowlib.weekKey(nowMs - 10 * 7 * DAYMS), restored: true }
+  ]);
+  const json = (o, status = 200) => new Response(JSON.stringify(o), { status, headers: { "Content-Type": "application/json" } });
+  const st = (done) => (done ? { name: "Готово", statusCategory: { key: "done" } } : { name: "В работе", statusCategory: { key: "indeterminate" } });
+  const person = { name: "ivan", key: "ivan", displayName: "Ivan" };
+  const task = (key, done) => ({ key, fields: { summary: key, project: { key: "AAA" }, assignee: person, status: st(done), issuetype: { name: "Task" }, updated: new Date().toISOString(), created: new Date(nowMs - 100 * DAYMS).toISOString(), customfield_10100: "EP-A", timeoriginalestimate: 3600 } });
+  const flowRows = [];
+  for (let w = 1; w <= 12; w++) for (let i = 0; i < 3; i++) {
+    flowRows.push({ key: `FL-${w}-${i}`, fields: { resolutiondate: new Date(nowMs - w * 7 * DAYMS - 2 * DAYMS).toISOString(), assignee: person, customfield_10100: "EP-A", status: st(true), issuetype: { name: "Task" }, project: { key: "AAA" } } });
+  }
+  window.fetch = async (url, opt = {}) => {
+    const u = String(url);
+    const b = opt.body ? JSON.parse(opt.body) : {};
+    if (u.includes("/rest/api/2/myself")) return json({ name: "ivan" });
+    if (u.includes("/rest/agile/1.0/board")) return json({ values: [], isLast: true });
+    if (u.includes("/rest/api/2/search")) {
+      const jql = b.jql || "";
+      if (jql.includes("resolutiondate >=")) return json({ issues: flowRows, total: flowRows.length });
+      if (jql.includes("key in (EP-A)")) return json({ issues: [{ key: "EP-A", fields: { summary: "Эпик А", status: st(false), project: { key: "AAA" }, duedate: ymd(365) } }], total: 1 });
+      if (jql.includes("in (EP-A)")) return json({ issues: [task("T-1", true), task("T-2", false), task("T-3", false), task("T-4", false)], total: 4 });
+      return json({ issues: [], total: 0 });
+    }
+    return json({}, 404);
+  };
+  let res = null;
+  let err = null;
+  try { res = await runSync({ full: true }); } catch (e) { err = e; }
+  const log = await dbm.all(dbm.STORES.syncLog);
+  const weeksRows = await dbm.all(dbm.STORES.epicWeeks);
+  const cur = log.find((r) => r.syncId === res?.syncId);
+  check("Б1: запись журнала на синхронизацию — со счётчиками и прогнозом",
+    !err && cur && cur.total === 4 && cur.done === 1 && cur.remaining === 3 && !!cur.p85 && cur.chance === 1 && cur.buffer > 0,
+    err ? err.message : JSON.stringify(cur && { total: cur.total, done: cur.done, p85: cur.p85, chance: cur.chance, buffer: cur.buffer, reason: cur.reason }));
+  check("Б1: дата прогноза в истории — местная дата, понедельник (отсчёт от понедельника)",
+    !!cur && new Date(`${cur.p85}T12:00:00`).getDay() === 1, cur && cur.p85);
+  check("Б1: журнал старше 30 дней удалён, 20-дневный остался",
+    !log.some((r) => r.syncId === nowMs - 31 * DAYMS) && log.some((r) => r.syncId === nowMs - 20 * DAYMS), String(log.length));
+  const thisWeek = weeksRows.filter((r) => r.week === flowlib.weekKey(res?.syncId || nowMs));
+  check("Б1: недельная запись текущей недели — настоящая", thisWeek.length === 1 && thisWeek[0].restored === false && thisWeek[0].p85 === cur?.p85);
+  check("Б1: недельные записи старше 104 недель удалены, остальные на месте",
+    !weeksRows.some((r) => r.week === flowlib.weekKey(nowMs - 110 * 7 * DAYMS)) && weeksRows.some((r) => r.week === flowlib.weekKey(nowMs - 10 * 7 * DAYMS)));
+  try { res = await runSync({ full: false }); } catch (e) { err = e; }
+  const weeks2 = (await dbm.all(dbm.STORES.epicWeeks)).filter((r) => r.week === flowlib.weekKey(nowMs));
+  const log2 = await dbm.all(dbm.STORES.syncLog);
+  check("Б1: вторая синхронизация недели — новая запись журнала, недельная перезаписана",
+    weeks2.length === 1 && log2.filter((r) => r.syncId >= nowMs).length === 2, `${weeks2.length} / ${log2.length}`);
+  await sync_saveSelectionCheck();
+  async function sync_saveSelectionCheck() {
+    const { saveSelection } = await import("../src/js/sync.js");
+    await saveSelection([]);
+    check("Б1: удаление эпика из выбора не удаляет его историю", (await dbm.all(dbm.STORES.epicWeeks)).some((r) => r.epicKey === "EP-A"));
+  }
+
+  // Б2. прогноз детерминирован в пределах недели: зерно — ключ эпика, отсчёт — понедельник
+  const rows = flowRows.map((r) => ({ key: r.key, resolved: r.fields.resolutiondate, assigneeKey: "ivan", assigneeLogin: "ivan", assigneeName: "Ivan", epicKey: "EP-A", typeName: "" }));
+  const iss = Array.from({ length: 20 }, (_, i) => mk(`D-${i}`, "EP-A", "AAA", "Ivan", null, 1, "prog"));
+  const flowSt = analytics.epicFlowState({ epic: { key: "EP-A" }, rows, issues: iss, weeks: 20, now: nowMs });
+  const monday = flowlib.mondayOf(nowMs);
+  const tue = await analytics.epicForecast({ epic: { key: "EP-A", dueDate: ymd(365) }, flow: flowSt, today: monday + 1 * DAYMS + 3600000, runs: 3000 });
+  const fri = await analytics.epicForecast({ epic: { key: "EP-A", dueDate: ymd(365) }, flow: flowSt, today: monday + 4 * DAYMS + 3600000, runs: 3000 });
+  check("Б2: во вторник и в пятницу одной недели на тех же данных — те же даты прогноза",
+    tue.fc.dates.p85.getTime() === fri.fc.dates.p85.getTime() && tue.fc.dates.p50.getTime() === fri.fc.dates.p50.getTime() && tue.chance === fri.chance,
+    `${tue.fc.dates.p85.toISOString()} / ${fri.fc.dates.p85.toISOString()}`);
+  const nextWeek = await analytics.epicForecast({ epic: { key: "EP-A" }, flow: flowSt, today: monday + 8 * DAYMS, runs: 3000 });
+  check("Б2: через неделю без изменений данных прогноз сдвигается ровно на неделю",
+    nextWeek.fc.dates.p85.getTime() - tue.fc.dates.p85.getTime() === 7 * DAYMS);
+
+  window.fetch = orig;
+  await settings.save({ fields: saved.fields, useTempoTeams: saved.useTempoTeams, flowWeeks: saved.flowWeeks });
+  await dbm.clearAll();
+}
+
+// Б3. восстановление истории задним числом
+{
+  const DAYMS = 86400000;
+  const WEEK = 7 * DAYMS;
+  const nowMs = Date.now();
+  const flowStart = flowlib.mondayOf(nowMs - 30 * WEEK) + WEEK;
+  const lastWeek = flowlib.mondayOf(flowlib.mondayOf(nowMs) - 3 * DAYMS);
+  const epic = { key: "EP-B", created: new Date(nowMs - 20 * WEEK).toISOString(), resolved: "", dueDate: ymd(200) };
+  const closedTs = (i) => nowMs - (10 - i) * WEEK - DAYMS;
+  const issuesB = Array.from({ length: 10 }, (_, i) => ({
+    ...mk(`B3-${i}`, "EP-B", "AAA", "Ivan", null, 1, i < 6 ? "done" : "prog"),
+    created: new Date(nowMs - 18 * WEEK).toISOString(),
+    resolved: i < 6 ? new Date(closedTs(i)).toISOString() : ""
+  }));
+  // поздно добавленная задача — в объёме только с недели создания
+  issuesB.push({ ...mk("B3-late", "EP-B", "AAA", "Ivan", null, 1, "prog"), created: new Date(nowMs - 3 * WEEK).toISOString(), resolved: "" });
+  const flowRowsB = [];
+  for (let w = 1; w <= 25; w++) for (let i = 0; i < 3; i++) {
+    flowRowsB.push({ key: `FB-${w}-${i}`, resolved: new Date(nowMs - w * WEEK - 2 * DAYMS).toISOString(), assigneeKey: "ivan", assigneeLogin: "ivan", assigneeName: "Ivan", epicKey: w <= 12 && i === 0 ? "EP-B" : "EP-9", typeName: "" });
+  }
+  const skipKey = flowlib.weekKey(nowMs - 5 * WEEK);
+  const recs = await analytics.restoreEpicWeeks({ epic, issues: issuesB, flowRows: flowRowsB, flowStart, lastWeek, skipWeeks: new Set([skipKey]), runs: 500 });
+  const byWeek = new Map(recs.map((r) => [r.week, r]));
+  const firstExpected = flowlib.weekKey(Math.max(flowlib.mondayOf(Date.parse(epic.created)), flowlib.mondayOf(flowStart + 5 * WEEK + 12 * 3600000)));
+  check("Б3: восстановление начинается не раньше создания эпика и 5 недель истории потока",
+    recs.length > 0 && recs.map((r) => r.week).sort()[0] === firstExpected, `${recs.map((r) => r.week).sort()[0]} / ${firstExpected}`);
+  check("Б3: неделя с настоящей записью не восстанавливается", !byWeek.has(skipKey) && recs.every((r) => r.restored === true));
+  check("Б3: текущая неделя не восстанавливается — только прошедшие", !byWeek.has(flowlib.weekKey(nowMs)) && byWeek.has(flowlib.weekKey(lastWeek)));
+  const wk = flowlib.mondayOf(nowMs - 8 * WEEK);
+  const endWk = wk + WEEK;
+  const manualClosed = issuesB.filter((x) => x.resolved && Date.parse(x.resolved) < endWk && Date.parse(x.created) < endWk).length;
+  const manualScope = issuesB.filter((x) => Date.parse(x.created) < endWk).length;
+  const r8 = byWeek.get(flowlib.weekKey(wk));
+  check("Б3: остаток на прошлую неделю совпадает с ручным подсчётом по датам создания и закрытия",
+    r8 && r8.total === manualScope && r8.done === manualClosed && r8.remaining === manualScope - manualClosed,
+    JSON.stringify(r8 && { total: r8.total, done: r8.done, remaining: r8.remaining, manualScope, manualClosed }));
+  const rLast = byWeek.get(flowlib.weekKey(lastWeek));
+  check("Б3: поздно добавленная задача входит в объём только с недели создания", r8.total === 10 && rLast.total === 11, `${r8.total} / ${rLast.total}`);
+  check("Б3: на прошлых неделях есть прогноз, недели с короткой историей помечены ориентировочными",
+    !!r8.p85 && recs.some((r) => r.approximate) && recs.some((r) => !r.approximate));
+  check("Б3: эпик, закрытый позже, на прошлых неделях не «готов»", recs.every((r) => r.statusCategory !== "done"));
+
+  // через хранилище: настоящие записи не перезаписываются, версия восстановления отмечена
+  const saved = { flowWeeks: settings.get().flowWeeks, lastSync: settings.get().lastSync };
+  await settings.save({ flowWeeks: 30, lastSync: nowMs });
+  await dbm.clearAll();
+  await dbm.putAll(dbm.STORES.epics, [epic]);
+  await dbm.putAll(dbm.STORES.issues, issuesB);
+  await dbm.putAll(dbm.STORES.flow, flowRowsB);
+  const realWeek = flowlib.weekKey(nowMs - 4 * WEEK);
+  await dbm.putAll(dbm.STORES.epicWeeks, [{ epicKey: "EP-B", week: realWeek, restored: false, total: 999 }]);
+  const t0 = Date.now();
+  const bf = await backfillHistory({ today: nowMs });
+  const stored = await dbm.all(dbm.STORES.epicWeeks);
+  check("Б3: настоящая запись недели после восстановления не изменилась",
+    stored.find((r) => r.week === realWeek)?.total === 999 && stored.filter((r) => r.restored).length === bf.weeks && bf.weeks > 10, `${bf.weeks} недель за ${Date.now() - t0} мс`);
+  check("Б3: версия восстановления отмечена", (await dbm.metaGet("backfillVersion", 0)) === 1);
+  await settings.save(saved);
+  await dbm.clearAll();
+}
+
+// Б4. правила сигналов: срабатывают на пороге и не срабатывают чуть ниже
+{
+  const DAYMS = 86400000;
+  const now = Date.now();
+  const th = { ...settings.DEFAULTS.summary };
+  const d = (days) => { const x = new Date(now + days * DAYMS); const p2 = (n) => String(n).padStart(2, "0"); return `${x.getFullYear()}-${p2(x.getMonth() + 1)}-${p2(x.getDate())}`; };
+  const stOf = (o = {}) => ({ epicKey: "EP-1", statusName: "В работе", statusCategory: "indeterminate", dueDate: d(90), total: 100, done: 40, remaining: 60, estTotal: 0, estDone: 0, carriedOver: 0, p50: d(40), p85: d(50), chance: 0.95, buffer: 5, reason: "", historyWeeks: 30, teams: [], ...o });
+  const run = (cur, base = null, extra = {}) => summary.computeSignals({ current: new Map(Object.entries(cur)), base: base ? new Map(Object.entries(base)) : null, thresholds: th, now, ...extra });
+  const has = (sigs, type, epicKey) => sigs.some((x) => x.type === type && (!epicKey || x.epicKey === epicKey));
+  const recent = [mk("RC-1", "EP-1", "AAA", "Ivan", 2, 1, "done")].map((i) => ({ ...i, resolved: new Date(now - 2 * DAYMS).toISOString() }));
+
+  check("Б4: цвет — зелёный от 85%, жёлтый от 50%, красный ниже или срок прошёл",
+    summary.colorOf(stOf({ chance: 0.85 }), th, now) === "green" && summary.colorOf(stOf({ chance: 0.84 }), th, now) === "yellow" &&
+      summary.colorOf(stOf({ chance: 0.5 }), th, now) === "yellow" && summary.colorOf(stOf({ chance: 0.49 }), th, now) === "red" &&
+      summary.colorOf(stOf({ dueDate: d(-2) }), th, now) === "red" && summary.colorOf(stOf({ dueDate: "" }), th, now) === "nodue" &&
+      summary.colorOf(stOf({ statusCategory: "done" }), th, now) === "done");
+
+  const base1 = { "EP-1": stOf() };
+  check("Б4: рост объёма на 5 задач — сигнал, на 4 (из 100) — нет",
+    has(run({ "EP-1": stOf({ total: 105, remaining: 65 }) }, base1, { issues: recent }), "scopeUp") && !has(run({ "EP-1": stOf({ total: 104, remaining: 64 }) }, base1, { issues: recent }), "scopeUp"));
+  check("Б4: рост объёма на 10% у маленького эпика", has(run({ "EP-1": stOf({ total: 11 }) }, { "EP-1": stOf({ total: 10 }) }, { issues: recent }), "scopeUp"));
+  check("Б4: сокращение объёма — информация", run({ "EP-1": stOf({ total: 94 }) }, base1, { issues: recent }).some((x) => x.type === "scopeDown" && x.severity === "info"));
+  check("Б4: сдвиг прогноза на 7 дней позже — внимание, на 6 — нет",
+    run({ "EP-1": stOf({ p85: d(57) }) }, base1, { issues: recent }).some((x) => x.type === "shiftLater" && x.severity === "warning" && x.params.days === 7) &&
+      !has(run({ "EP-1": stOf({ p85: d(56) }) }, base1, { issues: recent }), "shiftLater"));
+  check("Б4: прогноз раньше на неделю — информация", run({ "EP-1": stOf({ p85: d(43) }) }, base1, { issues: recent }).some((x) => x.type === "shiftEarlier" && x.severity === "info"));
+  check("Б4: изменён срок исполнения", has(run({ "EP-1": stOf({ dueDate: d(100) }) }, base1, { issues: recent }), "dueChanged"));
+  check("Б4: новые повторные переносы и прогресс", has(run({ "EP-1": stOf({ carriedOver: 2, done: 45 }) }, base1, { issues: recent }), "carryNew") && has(run({ "EP-1": stOf({ done: 45 }) }, base1, { issues: recent }), "progress"));
+  check("Б4: эпик добавлен / завершён", has(run({ "EP-1": stOf(), "EP-2": stOf({ epicKey: "EP-2" }) }, base1, { issues: recent }), "epicAdded", "EP-2") && has(run({ "EP-1": stOf({ statusCategory: "done", statusName: "Готово" }) }, base1), "epicDone"));
+  check("Б4: без базы блока «что изменилось» нет", !run({ "EP-1": stOf({ total: 200 }) }, null, { issues: recent }).some((x) => x.group === "changes"));
+
+  check("Б4: срок прошёл — критично", run({ "EP-1": stOf({ dueDate: d(-3) }) }, null, { issues: recent }).some((x) => x.type === "overdue" && x.severity === "critical" && x.params.days >= 2));
+  check("Б4: шанс 49% — критично, 50% — внимание, 85% — ничего",
+    has(run({ "EP-1": stOf({ chance: 0.49 }) }, null, { issues: recent }), "lowChance") && has(run({ "EP-1": stOf({ chance: 0.5 }) }, null, { issues: recent }), "riskChance") &&
+      !has(run({ "EP-1": stOf({ chance: 0.85 }) }, null, { issues: recent }), "riskChance"));
+  const wk = (b) => ({ buffer: b });
+  check("Б4: запас снижался 3 недели подряд — «запас тает»; с плато — нет",
+    has(run({ "EP-1": stOf() }, null, { issues: recent, weekly: new Map([["EP-1", [wk(5), wk(4), wk(3), wk(2.5)]]]) }), "melting") &&
+      !has(run({ "EP-1": stOf() }, null, { issues: recent, weekly: new Map([["EP-1", [wk(5), wk(4), wk(4), wk(3)]]]) }), "melting"));
+  check("Б4: готово 90% — близко к завершению, 89% при далёком прогнозе — нет",
+    has(run({ "EP-1": stOf({ done: 90, remaining: 10 }) }, null, { issues: recent }), "near") && !has(run({ "EP-1": stOf({ done: 89, remaining: 11 }) }, null, { issues: recent }), "near"));
+  check("Б4: прогноз 85% в пределах 2 недель — близко к завершению", has(run({ "EP-1": stOf({ p85: d(10) }) }, null, { issues: recent }), "near"));
+  check("Б4: 3 недели без закрытий: при 90% — «застрял на финише», при 40% — «застой»",
+    has(run({ "EP-1": stOf({ done: 90, remaining: 10 }) }), "stuckFinish") && has(run({ "EP-1": stOf() }), "stall") && !has(run({ "EP-1": stOf() }, null, { issues: recent }), "stall"));
+  check("Б4: хронические переносы", has(run({ "EP-1": stOf({ carriedOver: 3 }) }, null, { issues: recent }), "chronicCarry"));
+
+  const H = 3600;
+  const loadFix = { capacity: 80 * H, sections: [{ id: "sec:0", caption: "текущий" }, { id: "sec:1", caption: "+1" }], byName: new Map([["ivan", new Map([["sec:0", 100 * H]])], ["olga", new Map([["sec:0", 80 * H]])]]) };
+  const people = [mk("P-1", "EP-1", "AAA", "Ivan", 2, 1, "prog"), mk("P-2", "EP-1", "AAA", "Olga", 2, 1, "prog")];
+  const ov = run({ "EP-1": stOf() }, null, { issues: [...recent, ...people], load: loadFix }).filter((x) => x.type === "overload");
+  check("Б4: перегруз — по имени, только выше 100%", ov.length === 1 && ov[0].person === "Ivan" && ov[0].params.pct === 125, JSON.stringify(ov.map((x) => x.params)));
+
+  const teamQA = { id: "m:QA", name: "QA" };
+  const teamOf = (p) => (["petr", "Petr"].includes(p.name) || p.login === "petr" ? teamQA : null);
+  const idleLoad = { capacity: 80 * H, sections: [{ id: "sec:0", caption: "текущий" }, { id: "sec:1", caption: "+1" }], byName: new Map([["petr", new Map([["sec:0", 20 * H]])]]) };
+  const backlogTask = mk("BL-1", "EP-1", "AAA", "Petr", null, 4, "new");
+  check("Б4: простой рядом с опозданием: команда загружена на 13%, у жёлтого эпика её задачи в бэклоге",
+    run({ "EP-1": stOf({ chance: 0.6 }) }, null, { issues: [...recent, backlogTask], load: idleLoad, teamOf, teamSize: () => 1 }).some((x) => x.type === "idleNearLate" && x.params.team === "QA" && x.params.pct === 13) &&
+      !has(run({ "EP-1": stOf({ chance: 0.95 }) }, null, { issues: [...recent, backlogTask], load: idleLoad, teamOf, teamSize: () => 1 }), "idleNearLate"));
+
+  const flowSpread = [];
+  for (let w = 0; w < 4; w++) for (let e = 0; e < 5; e++) flowSpread.push({ key: `SP-${w}-${e}`, resolved: new Date(now - (w * 7 + 1) * DAYMS).toISOString(), assigneeLogin: "petr", assigneeName: "Petr", epicKey: `EP-S${e}` });
+  check("Б4: распыление: 5 задач в неделю на 5 эпиков (1 на эпик) — сигнал",
+    run({ "EP-1": stOf() }, null, { issues: recent, flowRows: flowSpread, teamOf }).some((x) => x.type === "spread" && x.params.epics === 5 && x.params.perEpic === 1) &&
+      !has(run({ "EP-1": stOf() }, null, { issues: recent, flowRows: flowSpread, teamOf, thresholds: { ...th, spreadFlow: 1 } }), "spread"));
+
+  const tm = (last) => [{ id: "t:1", name: "1C", share: 0.3, last }];
+  check("Б4: узкое место — команда замыкает ≥50% прогонов в двух эпиках",
+    has(run({ "EP-1": stOf({ teams: tm(60) }), "EP-2": stOf({ epicKey: "EP-2", teams: tm(50) }) }, null, { issues: recent }), "bottleneck") &&
+      !has(run({ "EP-1": stOf({ teams: tm(60) }), "EP-2": stOf({ epicKey: "EP-2", teams: tm(49) }) }, null, { issues: recent }), "bottleneck"));
+
+  const firedModel = { columns: [{ id: "sec:0", sprints: [{ id: 2 }] }], groups: [] };
+  const firedIssues = [mk("FI-1", "EP-1", "AAA", "Ivan", 2, 1, "prog"), mk("FI-2", "EP-1", "AAA", "Ivan", null, 1, "new"), mk("FI-3", "EP-1", "AAA", "Ivan", 1, 1, "prog")];
+  check("Б4: задачи у уволенных — критично, закрытые спринты не считаются",
+    run({ "EP-1": stOf() }, null, { issues: [...recent, ...firedIssues], profiles: [{ name: "ivan", status: "fired" }], model: firedModel }).some((x) => x.type === "firedTasks" && x.severity === "critical" && x.params.n === 2));
+  check("Б4: задачи без исполнителя в текущем спринте",
+    run({ "EP-1": stOf() }, null, { issues: [...recent, { ...mk("UA-1", "EP-1", "AAA", null, 2, 1, "prog"), assigneeKey: "" }], model: firedModel }).some((x) => x.type === "unassigned" && x.params.n === 1));
+
+  const q = run({ "EP-1": stOf({ dueDate: "", reason: "short", historyWeeks: 3, p85: "" }) }, null, {
+    issues: [...recent, mk("NE-1", "EP-1", "AAA", "Ivan", 2, 0, "prog"), mk("NE-2", "EP-1", "AAA", "Ivan", 2, 0, "prog")],
+    model: { columns: [], groups: [{ label: "Anna", team: { id: "" } }] },
+    lastSync: now - 10 * DAYMS,
+    apiLimited: true
+  });
+  check("Б4: качество данных — нет срока, нет оценок, мало истории, люди без команды, устаревшие данные, ограничения API",
+    ["noDue", "noEstimate", "shortHistory", "noTeam", "stale", "apiLimited"].every((type) => has(q, type)), q.map((x) => x.type).join(","));
+
+  const many = run({ "EP-1": stOf({ dueDate: d(-5) }), "EP-2": stOf({ epicKey: "EP-2", chance: 0.6 }), "EP-3": stOf({ epicKey: "EP-3", chance: 0.1 }) }, null, { issues: recent });
+  const top = summary.attention(many, 2);
+  check("Б4: «Требует внимания» — сначала критичные, по величине, без информационных, не больше лимита",
+    top.length === 2 && top.every((x) => x.severity === "critical") && summary.attention(many, 10).every((x) => x.severity !== "info"), top.map((x) => x.type).join(","));
+  check("Б4: у сигнала устойчивый ключ", many.every((x) => typeof x.id === "string" && x.id.startsWith(x.type)));
+}
+
+// Б5. вкладка «Сводка»: база сравнения, режим «за 7 дней», отрисовка, тексты; Б10 — пороги в конфигурации
+{
+  const DAYMS = 86400000;
+  const now = Date.now();
+  const d = (days) => { const x = new Date(now + days * DAYMS); const p2 = (n) => String(n).padStart(2, "0"); return `${x.getFullYear()}-${p2(x.getMonth() + 1)}-${p2(x.getDate())}`; };
+  const stOf = (o = {}) => ({ epicKey: "EP-1", summary: "Личный кабинет", epicName: "ЛК", statusName: "В работе", statusCategory: "indeterminate", dueDate: d(90), total: 100, done: 40, remaining: 60, estTotal: 0, estDone: 0, carriedOver: 0, p50: d(40), p85: d(50), chance: 0.95, buffer: 5.5, reason: "", historyWeeks: 30, teams: [], ...o });
+  await dbm.clearAll();
+  const s1 = now - 8 * DAYMS;
+  const s2 = now - 1000;
+  await dbm.putAll(dbm.STORES.epics, [{ key: "EP-1", summary: "Личный кабинет" }, { key: "EP-2", summary: "Биллинг" }]);
+  await dbm.putAll(dbm.STORES.issues, [{ ...mk("S5-1", "EP-1", "AAA", "Ivan", 2, 1, "done"), resolved: new Date(now - DAYMS).toISOString() }, { ...mk("S5-2", "EP-2", "AAA", "Ivan", 2, 1, "done"), resolved: new Date(now - DAYMS).toISOString() }]);
+  await dbm.putAll(dbm.STORES.sprints, sprints);
+  await dbm.putAll(dbm.STORES.syncLog, [
+    { ...stOf(), syncId: s1 },
+    { ...stOf({ epicKey: "EP-2", summary: "Биллинг", epicName: "", chance: 0.3, buffer: -1.5 }), syncId: s1 },
+    { ...stOf({ total: 106, remaining: 66, p85: d(58) }), syncId: s2 },
+    { ...stOf({ epicKey: "EP-2", summary: "Биллинг", epicName: "", chance: 0.3, buffer: -1.5 }), syncId: s2 }
+  ]);
+  await dbm.putAll(dbm.STORES.epicWeeks, [2.5, 1, -0.5, -1.5].map((b, i) => ({ ...stOf({ epicKey: "EP-2", buffer: b }), week: flowlib.weekKey(now - (4 - i) * 7 * DAYMS), restored: true })));
+  await dbm.metaSet("lastSyncId", s2);
+  await dbm.metaSet("seenSyncId", s1);
+  await settings.save({ lastSync: s2 });
+
+  const session = await summaryView.openSession();
+  check("Б5: при открытии база — прошлая отметка, отметка сдвигается на последнюю синхронизацию",
+    session.baseSyncId === s1 && (await dbm.metaGet("seenSyncId")) === s2);
+  const data = await summaryView.loadData({ session, now });
+  check("Б5: изменения — относительно прошлого просмотра", data.signals.some((x) => x.type === "scopeUp" && x.epicKey === "EP-1") && data.signals.some((x) => x.type === "shiftLater"),
+    data.signals.map((x) => x.type).join(","));
+  check("Б5: запас тает — по недельным записям, в том числе восстановленным", data.signals.some((x) => x.type === "melting" && x.epicKey === "EP-2"));
+  const again = await summaryView.loadData({ session: await summaryView.openSession(), now });
+  check("Б5: ушли и вернулись без обновления — «что изменилось» пусто", !again.signals.some((x) => x.group === "changes"));
+  const week = await summaryView.loadData({ mode: "week", session, now });
+  check("Б5: «за 7 дней» — последняя синхронизация не позже недели назад", week.base && week.base.at === s1 && week.signals.some((x) => x.type === "scopeUp"));
+
+  const shift = data.signals.find((x) => x.type === "shiftLater");
+  const txt = summaryView.signalText(shift, data.current);
+  check("Б5: текст сигнала — эпик с Epic Name и даты в виде ДД.ММ.ГГ", txt.includes("EP-1 · ЛК") && /\d\d\.\d\d\.\d\d → \d\d\.\d\d\.\d\d/.test(txt), txt);
+  const low = data.signals.find((x) => x.type === "lowChance");
+  check("Б5: запас со знаком и запятой", summaryView.signalText(low, data.current).includes("−1,5"), summaryView.signalText(low, data.current));
+
+  const box = document.createElement("div");
+  document.body.append(box);
+  await summaryView.render(box, { session: { baseSyncId: s1 } });
+  const rowsTxt = [...box.querySelectorAll(".sum-table tbody tr.clickable")].map((tr) => tr.textContent);
+  check("Б5: вкладка — шапка, итог по цветам, «Требует внимания», 5 блоков, таблица портфеля",
+    !!box.querySelector(".sum-head") && box.querySelectorAll(".sum-total").length >= 2 && box.querySelectorAll(".sum-attention .sig").length >= 1 &&
+      box.querySelectorAll("details.sum-group:not(.sum-accuracy)").length === 5 && rowsTxt.length === 2, `${rowsTxt.length}`);
+  check("Б5: портфель — от худшего запаса", rowsTxt[0].startsWith("EP-2"), rowsTxt.join(" | "));
+  check("Б5: мини-график запаса — линия по недельным записям", !!box.querySelector(".sum-table tbody tr .spark polyline"));
+  box.querySelector(".sum-table tbody tr.clickable").click();
+  const opened = box.querySelector(".sum-table tbody tr.sum-detail:not([hidden])");
+  check("Б6: клик по строке портфеля раскрывает графики эпика", !!opened && opened.dataset.key === "EP-2" && opened.querySelectorAll("svg").length >= 1, opened && opened.innerText.slice(0, 80));
+  check("Б6.1: под таблицей — тренд запаса по жёлтым и красным эпикам", !!box.querySelector(".sum-trend-box svg") && box.querySelectorAll(".sum-trend-box .tr-legend-item:not(.off)").length === 1);
+  box.remove();
+
+  // Б10: пороги попадают в экспорт и импорт конфигурации
+  await settings.save({ summary: { shiftDays: 9 } });
+  const exported = await exportConfig();
+  check("Б10: пороги «Сводки» и таймаут — в экспорте конфигурации", exported.summary.shiftDays === 9 && exported.summary.chanceGreen === 85 && exported.requestTimeoutSec === settings.get().requestTimeoutSec);
+  await applyConfig(parseConfig(JSON.stringify({ summary: { shiftDays: 10, bogus: 5, chanceGreen: "x" } })), { onLog: () => {} });
+  check("Б10: импорт порогов — только известные числовые, остальное по умолчанию",
+    settings.get().summary.shiftDays === 10 && !("bogus" in settings.get().summary) && settings.get().summary.chanceGreen === 85, JSON.stringify(settings.get().summary));
+  await settings.save({ summary: { ...settings.DEFAULTS.summary } });
+  await dbm.clearAll();
+}
+
+// Этап 3: «Принято» (Б5) и счётчик новых сигналов, отчёт в буфер обмена (Б7)
+{
+  const th = { ...settings.DEFAULTS.summary };
+  const sig = (type, rank, params = {}) => ({ id: `${type}|EP-1||`, type, rank, params, severity: "critical" });
+  const acks = { [`lowChance|EP-1||`]: summary.ackOf(sig("lowChance", 60, { chance: 40 })) };
+  check("«Принято»: сигнал скрыт, пока шанс не упадёт ещё на 10 пунктов",
+    summary.isAcked(sig("lowChance", 65, { chance: 35 }), acks, th) && !summary.isAcked(sig("lowChance", 71, { chance: 29 }), acks, th));
+  const acks2 = { [`stall|EP-1||`]: summary.ackOf(sig("stall", 0, { weeks: 3 })) };
+  check("«Принято»: сигнал без величины скрыт, пока не поменялись параметры",
+    summary.isAcked(sig("stall", 0, { weeks: 3 }), acks2, th) && !summary.isAcked(sig("stall", 0, { weeks: 4 }), acks2, th));
+  check("«Принято»: отметки исчезнувших сигналов снимаются", Object.keys(summary.pruneAcks({ ...acks, "gone|X||": { rank: 1 } }, [sig("lowChance", 60)])).join() === "lowChance|EP-1||");
+  check("счётчик: новые «внимание» и «критично», не принятые и не показанные",
+    summary.freshCount([sig("lowChance", 60), { ...sig("stall", 0), id: "stall|EP-2||" }, { ...sig("noDue", 0), id: "noDue|EP-3||", severity: "info" }], acks, ["stall|EP-2||"], th) === 0 &&
+      summary.freshCount([sig("lowChance", 60), { ...sig("stall", 0), id: "stall|EP-2||" }], {}, [], th) === 2);
+
+  const DAYMS = 86400000;
+  const now = Date.now();
+  const d = (days) => { const x = new Date(now + days * DAYMS); const p2 = (n) => String(n).padStart(2, "0"); return `${x.getFullYear()}-${p2(x.getMonth() + 1)}-${p2(x.getDate())}`; };
+  const stOf = (o = {}) => ({ epicKey: "EP-1", summary: "Личный кабинет", epicName: "ЛК", statusName: "В работе", statusCategory: "indeterminate", dueDate: d(90), total: 100, done: 40, remaining: 60, estTotal: 0, estDone: 0, carriedOver: 0, p50: d(40), p85: d(50), chance: 0.95, buffer: 5.5, reason: "", historyWeeks: 30, teams: [], ...o });
+  await dbm.clearAll();
+  const s2 = now - 1000;
+  await dbm.putAll(dbm.STORES.epics, [{ key: "EP-1", summary: "Личный кабинет" }, { key: "EP-2", summary: "Биллинг" }]);
+  await dbm.putAll(dbm.STORES.issues, ["EP-1", "EP-2"].map((k, i) => ({ ...mk(`S3-${i}`, k, "AAA", "Ivan", 2, 1, "done"), resolved: new Date(now - DAYMS).toISOString() })));
+  await dbm.putAll(dbm.STORES.syncLog, [{ ...stOf(), syncId: s2 }, { ...stOf({ epicKey: "EP-2", summary: "Биллинг", epicName: "", chance: 0.3, buffer: -1.5 }), syncId: s2 }]);
+  await dbm.metaSet("lastSyncId", s2);
+  await dbm.metaSet("seenSyncId", s2);
+  await dbm.metaSet("seenSignalIds", []);
+  await settings.save({ lastSync: s2, baseUrl: "https://jira.example.local/" });
+  check("счётчик на вкладке до просмотра — 1 новый сигнал", (await summaryView.badgeCount()) === 1, String(await summaryView.badgeCount()));
+
+  const box = document.createElement("div");
+  document.body.append(box);
+  let refreshed = 0;
+  const draw = () => summaryView.render(box, { session: { baseSyncId: s2 }, onRefresh: () => { refreshed += 1; } });
+  const data = await draw();
+  check("после просмотра счётчик — 0", (await summaryView.badgeCount()) === 0);
+  const md = summaryView.buildReport(data, { format: "md", baseUrl: settings.get().baseUrl });
+  const txt = summaryView.buildReport(data, { format: "text", baseUrl: settings.get().baseUrl });
+  check("отчёт Markdown: заголовок, итог по цветам, «Требует внимания» со ссылкой на эпик",
+    md.startsWith("**") && md.includes(t("sum.color.red", { n: 1 })) && md.includes("[EP-2 · Биллинг](https://jira.example.local/browse/EP-2)") && md.includes(t("rep.critical")), md);
+  check("отчёт текстом: ссылка в скобках, без разметки", !txt.includes("**") && txt.includes("(https://jira.example.local/browse/EP-2)"), txt);
+
+  box.querySelector(".sum-attention .sig .sig-ack").click();
+  await new Promise((r) => setTimeout(r, 50));
+  check("кнопка «Принято» сохраняет отметку и просит перерисовать", refreshed === 1 && Object.keys((await dbm.metaGet("acks", {})) || {}).length === 1);
+  await draw();
+  check("принятый сигнал уходит из «Требует внимания», в блоке — приглушён",
+    box.querySelectorAll(".sum-attention .sig").length === 0 && box.querySelectorAll("details .sig.acked").length === 1 &&
+      !summaryView.buildReport(await summaryView.loadData({ session: { baseSyncId: s2 } }), { format: "text" }).includes(t("rep.critical")));
+  box.querySelector("details .sig.acked .sig-ack").click();
+  await new Promise((r) => setTimeout(r, 50));
+  check("«Вернуть» снимает отметку", Object.keys((await dbm.metaGet("acks", {})) || {}).length === 0);
+  box.remove();
+  await settings.save({ baseUrl: "https://jira.example.local/" });
+  await dbm.clearAll();
+}
+
+// Этап 4: одна синхронизация на все вкладки (А4) и автообновление с учётом VPN (Б8)
+{
+  const at = (dow, hh, mm = 0) => {
+    // ближайший день недели dow (1 = пн … 7 = вс) в hh:mm
+    const d = new Date(2026, 8, 14, hh, mm); // 14.09.2026 — понедельник
+    d.setDate(d.getDate() + (dow - 1));
+    return d.getTime();
+  };
+  const auto = { enabled: true, days: [1, 2, 3, 4, 5], from: "09:00", to: "18:00" };
+  check("Б8: план — выключено / выходной / до окна / после окна / сегодня уже обновлялись / пора",
+    autoSync.planAuto({ auto: { ...auto, enabled: false }, now: at(1, 10) }) === "disabled" &&
+      autoSync.planAuto({ auto, now: at(6, 10) }) === "day" &&
+      autoSync.planAuto({ auto, now: at(1, 8, 59) }) === "window" &&
+      autoSync.planAuto({ auto, now: at(1, 18) }) === "window" &&
+      autoSync.planAuto({ auto, now: at(1, 10), lastSync: at(1, 9, 30) }) === "done" &&
+      autoSync.planAuto({ auto, now: at(2, 10), lastSync: at(1, 17) }) === "run");
+  check("Б8: проба — любой ответ значит «доступна», ошибка сети — нет",
+    (await autoSync.probeJira("https://jira.example.local/", { fetchImpl: async () => new Response("", { status: 401 }) })) === true &&
+      (await autoSync.probeJira("https://jira.example.local", { fetchImpl: async () => { throw new TypeError("Failed to fetch"); } })) === false);
+  const t0 = Date.now();
+  const hung = await autoSync.probeJira("https://jira.example.local", { timeoutMs: 50, fetchImpl: (u, o) => new Promise((_, rej) => o.signal.addEventListener("abort", () => rej(new Error("abort")))) });
+  check("Б8: проба без ответа (нет VPN) обрывается по таймауту", hung === false && Date.now() - t0 < 1000);
+  const day = at(1, 10);
+  let st = {};
+  const r1 = autoSync.decideNotification({ ok: false, kind: "network", state: st, now: day });
+  check("Б8: Jira недоступна — без уведомления, отмечено «недоступна»", !r1.notify && r1.state.lastAttempt === "unreachable");
+  const r2 = autoSync.decideNotification({ ok: false, kind: "auth", state: r1.state, now: day });
+  const r3 = autoSync.decideNotification({ ok: false, kind: "auth", state: r2.state, now: day + 3600000 });
+  const r4 = autoSync.decideNotification({ ok: false, kind: "auth", state: r3.state, now: day + 86400000 });
+  check("Б8: «войдите в Jira» — не чаще раза в день", r2.notify && !r3.notify && r4.notify);
+  check("Б8: успех — уведомление всегда", autoSync.decideNotification({ ok: true, state: r4.state, now: day }).notify === true);
+
+  // А4: пока замок держит другая вкладка, вторая синхронизация не запускается
+  let release;
+  const held = new Promise((r) => (release = r));
+  const holding = navigator.locks.request(autoSync.SYNC_LOCK, () => held);
+  let ran = 0;
+  let busyCalled = 0;
+  const second = await autoSync.withSyncLock(async () => { ran += 1; return 1; }, { onBusy: () => (busyCalled += 1) });
+  check("А4: замок занят — синхронизация не запускается, сообщение «идёт в другой вкладке»", second.busy && ran === 0 && busyCalled === 1);
+  release();
+  await holding;
+  await second.done;
+  const third = await autoSync.withSyncLock(async () => { ran += 1; return 7; });
+  check("А4: после освобождения замка синхронизация идёт", !third.busy && third.result === 7 && ran === 1);
+
+  // сводка: «Jira была недоступна» — сигнал и строка в шапке
+  const unr = summary.computeSignals({ current: new Map(), thresholds: settings.DEFAULTS.summary, unreachableAt: Date.now() });
+  check("Б8: сигнал «Jira была недоступна — проверьте VPN»", unr.some((x) => x.type === "unreachable" && x.severity === "warning"));
+  const saved = { auto: settings.get().autoSync, lastSync: settings.get().lastSync };
+  await dbm.clearAll();
+  await dbm.putAll(dbm.STORES.epics, [{ key: "EP-1", summary: "ЛК" }]);
+  await dbm.putAll(dbm.STORES.syncLog, [{ epicKey: "EP-1", syncId: 111, total: 1, done: 0, remaining: 1, estTotal: 0, estDone: 0, dueDate: "", teams: [], statusCategory: "indeterminate" }]);
+  await dbm.metaSet("lastSyncId", 111);
+  await settings.save({ autoSync: { ...auto }, lastSync: Date.now() - 2 * 86400000 });
+  chrome.storage.local._d.autoSyncState = { lastAttempt: "unreachable", lastAttemptAt: Date.now() };
+  const dataU = await summaryView.loadData({ session: { baseSyncId: null } });
+  check("Б8: сводка знает, что сегодня Jira была недоступна", dataU.unreachableAt > 0 && dataU.signals.some((x) => x.type === "unreachable"));
+  delete chrome.storage.local._d.autoSyncState;
+
+  // конфигурация: расписание — в экспорте, импорт только корректных полей
+  const ex = await exportConfig();
+  check("Б8: расписание автообновления — в экспорте", ex.autoSync && ex.autoSync.enabled === true && ex.autoSync.days.length === 5);
+  await applyConfig(parseConfig(JSON.stringify({ autoSync: { enabled: false, days: [1, 3, 9, "x"], from: "08:30", to: "25:00" } })), { onLog: () => {} });
+  check("Б8: импорт расписания — корректные поля, неверные отброшены",
+    settings.get().autoSync.enabled === false && settings.get().autoSync.days.join() === "1,3" && settings.get().autoSync.from === "08:30" && settings.get().autoSync.to === "18:00",
+    JSON.stringify(settings.get().autoSync));
+  await settings.save({ autoSync: saved.auto, lastSync: saved.lastSync });
+  await dbm.clearAll();
+}
+
+// Б9. точность прогнозов
+{
+  const W = 7 * 86400000;
+  const finish = "2026-06-10";
+  const fin = flowlib.mondayOf(Date.parse(`${finish}T12:00:00`));
+  const wk = (weeksBefore) => flowlib.weekKey(fin - weeksBefore * W + 12 * 3600000);
+  const recA = [
+    { epicKey: "EP-A", week: wk(8), p85: "2026-06-20", statusCategory: "indeterminate", restored: true },
+    { epicKey: "EP-A", week: wk(4), p85: "2026-06-01", statusCategory: "indeterminate" },
+    { epicKey: "EP-A", week: wk(2), p85: "2026-06-10", statusCategory: "indeterminate" },
+    { epicKey: "EP-A", week: wk(0), p85: "", statusCategory: "done", resolved: `${finish}T15:00:00.000+0300`, epicName: "ЛК" }
+  ];
+  // EP-B: даты завершения эпика нет — берётся дата закрытия последней задачи
+  const recB = [
+    { epicKey: "EP-B", week: wk(4), p85: "2026-06-30", statusCategory: "indeterminate" },
+    { epicKey: "EP-B", week: wk(0), statusCategory: "done", resolved: "" }
+  ];
+  const recC = [{ epicKey: "EP-C", week: wk(4), p85: "2026-06-01", statusCategory: "indeterminate" }]; // не завершён
+  const issB = [{ ...mk("B-1", "EP-B", "AAA", "Ivan", 2, 1, "done"), resolved: "2026-06-12T10:00:00" }, { ...mk("B-2", "EP-B", "AAA", "Ivan", 2, 1, "done"), resolved: "2026-06-05T10:00:00" }];
+  const acc = accuracy.forecastAccuracy({ weekly: new Map([["EP-A", recA], ["EP-B", recB], ["EP-C", recC]]), issuesByEpic: new Map([["EP-B", issB]]) });
+  const rowA = acc.rows.find((r) => r.epicKey === "EP-A");
+  check("Б9: прогнозы за 8/4/2 недели сравниваются с фактом (финиш в день прогноза — попал)",
+    rowA.forecasts[8].hit === true && rowA.forecasts[4].hit === false && rowA.forecasts[2].hit === true && rowA.forecasts[8].restored === true);
+  check("Б9: без даты завершения эпика финиш — по последней закрытой задаче", acc.rows.find((r) => r.epicKey === "EP-B")?.finish === "2026-06-12T10:00:00");
+  check("Б9: незавершённые эпики не участвуют, итог — доля попаданий", !acc.rows.some((r) => r.epicKey === "EP-C") && acc.n === 4 && acc.hits === 3 && acc.share === 75,
+    JSON.stringify({ n: acc.n, hits: acc.hits }));
+  check("Б9: по горизонтам", acc.byHorizon[4].n === 2 && acc.byHorizon[4].hits === 1 && acc.byHorizon[8].n === 1);
+  const copies = (recs, n, from = 0) => Array.from({ length: n }, (_, i) => [`E${i + from}`, recs.map((r) => ({ ...r, epicKey: `E${i + from}` }))]);
+  const hitsOnly = recA.filter((r) => r.week !== wk(4)); // за 8 и 2 недели — попадания
+  const missOnly = recA.filter((r) => r.week === wk(4) || r.statusCategory === "done"); // за 4 недели — промах
+  const okCase = accuracy.forecastAccuracy({ weekly: new Map([...copies(hitsOnly, 3), ...copies(missOnly, 1, 3)]) }); // 6 из 7 ≈ 86%
+  const optCase = accuracy.forecastAccuracy({ weekly: new Map(copies(recA, 5)) }); // 10 из 15 ≈ 67%
+  const cauCase = accuracy.forecastAccuracy({ weekly: new Map(copies(hitsOnly, 5)) }); // 10 из 10
+  check("Б9: меньше 5 сравнений — выводов нет; ≈86% — можно верить; 67% — оптимистичен; 100% — перестраховка",
+    acc.verdict === "few" && okCase.verdict === "ok" && optCase.verdict === "optimistic" && cauCase.verdict === "cautious",
+    `${okCase.share} ${okCase.verdict} / ${optCase.share} ${optCase.verdict} / ${cauCase.share} ${cauCase.verdict}`);
+
+  // через вкладку: история удалённого из выбора эпика участвует в проверке
+  await dbm.clearAll();
+  await dbm.putAll(dbm.STORES.epics, [{ key: "EP-X", summary: "Другой" }]);
+  await dbm.putAll(dbm.STORES.syncLog, [{ epicKey: "EP-X", syncId: 222, total: 1, done: 0, remaining: 1, estTotal: 0, estDone: 0, dueDate: "", teams: [], statusCategory: "indeterminate" }]);
+  await dbm.putAll(dbm.STORES.epicWeeks, recA);
+  await dbm.metaSet("lastSyncId", 222);
+  const box = document.createElement("div");
+  document.body.append(box);
+  const data = await summaryView.render(box, { session: { baseSyncId: null } });
+  check("Б9: удалённый из выбора эпик остаётся в проверке точности", data.acc.rows.some((r) => r.epicKey === "EP-A") && !data.current.has("EP-A"));
+  const accBox = box.querySelector("details.sum-accuracy");
+  check("Б9: раздел в «Сводке» свёрнут, в нём таблица с ✓ / ✗", !!accBox && !accBox.open && accBox.querySelectorAll(".acc-table td.acc-hit").length === 2 && accBox.querySelectorAll(".acc-table td.acc-miss").length === 1);
+  box.remove();
+  await dbm.clearAll();
+}
+
+// Б6. графики тренда
+{
+  const pts = [
+    { week: "2026-06-01", p50: "2026-08-01", p85: "2026-08-10", dueDate: "2026-09-01", buffer: 3, total: 10, done: 2, restored: true },
+    { week: "2026-06-08", p50: "2026-08-10", p85: "2026-08-25", dueDate: "2026-09-01", buffer: 1, total: 12, done: 3, restored: true, approximate: true },
+    { week: "2026-06-15", p50: "2026-08-20", p85: "2026-09-10", dueDate: "2026-09-01", buffer: -1.3, total: 14, done: 5 },
+    { week: "2026-06-22", p50: "2026-08-25", p85: "2026-09-15", dueDate: "2026-09-20", buffer: 0.7, total: 15, done: 7 }
+  ];
+  check("Б6: неделя переноса срока исполнения", [...trendCharts.dueChanges(pts)].join(",") === "2026-06-22");
+  check("Б6: неделя, с которой прогноз позже срока", trendCharts.crossingWeek(pts) === "2026-06-15" && trendCharts.crossingWeek(pts.slice(2)) === null);
+  check("Б6: цвет эпика устойчив и из палитры", trendCharts.colorFor("EP-1") === trendCharts.colorFor("EP-1") && trendCharts.PALETTE.includes(trendCharts.colorFor("EP-7")));
+  const weekly = new Map(Array.from({ length: 10 }, (_, i) => [`E-${i}`, pts]));
+  check("Б6: на графике запаса не больше 8 линий", trendCharts.bufferSeries(weekly, [...weekly.keys()], (k) => k).length === 8);
+
+  const host = document.createElement("div");
+  document.body.append(host);
+  const b = trendCharts.bufferChart(trendCharts.bufferSeries(weekly, ["E-0", "E-1"], (k) => k));
+  host.append(b);
+  check("Б6.1: линии запаса, выделенный ноль, отметка переноса срока, бледная восстановленная часть",
+    b.querySelectorAll("line.tr-line").length === 6 && b.querySelectorAll("line.tr-zero").length === 1 && b.querySelectorAll(".tr-due-mark").length === 2 &&
+      b.querySelectorAll("line.tr-line.restored").length === 2 && b.querySelectorAll("line.tr-line.approx").length === 2,
+    `${b.querySelectorAll("line.tr-line").length} / ${b.querySelectorAll(".tr-due-mark").length}`);
+  check("Б6.1: подсказка на точке — дата, запас и изменение с прошлой точки",
+    [...b.querySelectorAll("circle title")].some((x) => /−2,3|-2.3/.test(x.textContent)), [...b.querySelectorAll("circle title")].map((x) => x.textContent)[2]);
+  const f = trendCharts.forecastChart(pts);
+  host.append(f);
+  check("Б6.2: коридор 50–85%, линия 85%, срок ступенькой, отметка пересечения",
+    !!f.querySelector("polygon.tr-band") && f.querySelectorAll("line.tr-p85").length === 3 && /H .* V /.test(f.querySelector("path.tr-due").getAttribute("d")) && !!f.querySelector("circle.tr-cross"));
+  const bu = trendCharts.burnupChart(pts);
+  check("Б6.3: две накопительные линии — всего и готово", bu.querySelectorAll("line.tr-total").length === 3 && bu.querySelectorAll("line.tr-done").length === 3);
+  check("Б6: деления оси «круглые» и проходят через ноль",
+    trendCharts.niceTicks(-38.4, 3.1).includes(0) && trendCharts.niceTicks(-38.4, 3.1).join(",") === "-30,-20,-10,0" && trendCharts.niceStep(37) === 10 && trendCharts.niceStep(4) === 1,
+    trendCharts.niceTicks(-38.4, 3.1).join(","));
+  check("Б6: одна недельная запись — графика нет", trendCharts.forecastChart(pts.slice(0, 1)) === null && trendCharts.burnupChart(pts.slice(0, 1)) === null);
+  host.remove();
+}
+
+// А1. модуль расчётов: одни и те же числа для списка, карточки и сводки
+{
+  const exc = flowlib.parseTypeList("User Story");
+  const iss = [
+    mk("C-1", "EP-1", "AAA", "Ivan", 2, 8, "done"),
+    mk("C-2", "EP-1", "BBB", "Ivan", 2, 4, "prog"),
+    { ...mk("C-3", "EP-1", "AAA", "Ivan", null, 6, "new"), typeName: "User Story", timeSpent: 3600 },
+    { ...mk("C-4", "EP-1", "AAA", "Olga", 3, 2, "prog"), timeSpent: 1800 }
+  ];
+  const c = analytics.epicCounters([{ key: "EP-1", timeSpent: 600 }], iss, { excludeTypes: exc }).get("EP-1");
+  check("А1: счётчики эпика без User Story, а списанное на неё время — в сумме",
+    c.pct.count === 3 && c.pct.doneCount === 1 && c.spent.total === 3 && c.spent.withLogs === 1 && c.spent.issues === 5400 && c.spent.epic === 600 && c.issueKeys.length === 4,
+    JSON.stringify({ count: c.pct.count, done: c.pct.doneCount, spent: c.spent }));
+  check("А1: задачи по проектам", c.pct.projects.get("AAA").count === 2 && c.pct.projects.get("BBB").count === 1);
+
+  const DAYMS = 86400000;
+  const nowMs = Date.now();
+  const rows = [];
+  for (let w = 1; w <= 20; w++) {
+    const resolved = new Date(nowMs - w * 7 * DAYMS - 2 * DAYMS).toISOString();
+    for (let i = 0; i < 10; i++) {
+      rows.push({ key: `R-${w}-${i}`, resolved, assigneeKey: "ivan", assigneeLogin: "ivan", assigneeName: "Ivan", epicKey: w <= 6 && i < 4 ? "EP-1" : "EP-9", typeName: "" });
+    }
+  }
+  const tempoRows = [{ id: 1, name: "1C", members: [{ key: "ivan", login: "ivan", name: "Ivan" }] }];
+  const flow = analytics.epicFlowState({ epic: { key: "EP-1" }, rows, tempo: tempoRows, issues: iss, excludeTypes: exc, weeks: 30, now: nowMs });
+  check("А1: остаток в прогнозе = всего − готово в счётчиках списка", flow.remaining === c.pct.count - c.pct.doneCount, `${flow.remaining}`);
+  check("А1: команда потока — из Tempo", flow.teams.length === 1 && flow.teams[0].team.name === "1C", flow.teams.map((x) => x.team.name).join(","));
+  const manualFlow = analytics.epicFlowState({ epic: { key: "EP-1" }, rows, tempo: tempoRows, profiles: [{ name: "ivan", login: "ivan", team: "Платформа" }], issues: iss, excludeTypes: exc, weeks: 30, now: nowMs });
+  check("А1: ручная команда важнее Tempo и в потоке — как на «По людям»", manualFlow.teams[0].team.name === "Платформа");
+
+  const far = { key: "EP-1", dueDate: ymd(365) };
+  const near = { key: "EP-1", dueDate: ymd(1) };
+  const localFar = await analytics.epicForecast({ epic: far, flow, seed: "EP-1", runs: 2000, now: nowMs });
+  const localNear = await analytics.epicForecast({ epic: near, flow, seed: "EP-1", runs: 2000, now: nowMs });
+  check("А1: шанс успеть и запас: далёкий срок — 100% и запас больше нуля", localFar.chance === 1 && localFar.buffer > 0, `${localFar.chance} / ${localFar.buffer}`);
+  check("А1: срок завтра — шанс 0% и запас меньше нуля", localNear.chance === 0 && localNear.buffer < 0, `${localNear.chance} / ${localNear.buffer}`);
+  check("А1: без срока исполнения шанса и запаса нет", (await analytics.epicForecast({ epic: { key: "EP-1" }, flow, seed: "EP-1", runs: 500, now: nowMs })).chance === null);
+  const again = await analytics.epicForecast({ epic: far, flow, seed: "EP-1", runs: 2000, now: nowMs });
+  check("А1: с одинаковым зерном прогноз одинаковый", JSON.stringify(again.fc.weeks) === JSON.stringify(localFar.fc.weeks));
+
+  // А3. тот же прогноз в фоновом потоке — на эпике покрупнее, чтобы срок был не в одну неделю
+  const bigIssues = Array.from({ length: 40 }, (_, i) => mk(`BIG-${i}`, "EP-1", "AAA", "Ivan", null, 1, "new"));
+  const bigFlow = analytics.epicFlowState({ epic: { key: "EP-1" }, rows, tempo: tempoRows, issues: bigIssues, weeks: 30, now: nowMs });
+  const bigLocal = await analytics.epicForecast({ epic: far, flow: bigFlow, seed: "EP-1", runs: 2000, now: nowMs });
+  const viaWorker = await analytics.epicForecast({ epic: far, flow: bigFlow, seed: "EP-1", runs: 2000, now: nowMs, run: runForecast });
+  check("А3: фоновый поток для прогнозов поднимается", workerAvailable());
+  check("А3: прогноз в фоновом потоке совпадает с расчётом на странице",
+    bigLocal.fc.weeks.p85 > 3 && JSON.stringify(viaWorker.fc.weeks) === JSON.stringify(bigLocal.fc.weeks) &&
+      viaWorker.chance === bigLocal.chance && viaWorker.history.weeks === bigLocal.history.weeks,
+    `${JSON.stringify(viaWorker.fc && viaWorker.fc.weeks)} / ${JSON.stringify(bigLocal.fc.weeks)}`);
+  check("А3: даты прогноза из потока — настоящие даты", viaWorker.fc.dates.p85 instanceof Date);
 }
 
 // 4g. умолчания настроек
+check("прогноз по умолчанию не считает User Story", settings.DEFAULTS.forecastExcludeTypes === "User Story");
 check("окно истории потока по умолчанию — 52 недели", settings.DEFAULTS.flowWeeks === 52, String(settings.DEFAULTS.flowWeeks));
 
 // 5. форматирование оценок

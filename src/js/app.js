@@ -10,6 +10,10 @@ import * as team from "./team.js";
 import { classify, isDoneStatus } from "./status.js";
 import * as configio from "./configio.js";
 import * as flowlib from "./flow.js";
+import * as analytics from "./analytics.js";
+import { runForecast } from "./forecastClient.js";
+import * as summaryView from "./summaryView.js";
+import * as autoSync from "./autoSync.js";
 
 const $ = (sel) => document.querySelector(sel);
 const state = {
@@ -20,6 +24,9 @@ const state = {
   personFilter: null, // «По эпикам»: { key, name } человека, чьи эпики раскрыты
   epicFilter: null, // «По людям»: { key, name } эпика, чьи люди раскрыты
   issuesByEpic: new Map(), // ключ эпика → ключи его задач (для расчёта долей команд)
+  activeTab: "search",
+  summarySession: null, // база сравнения «Сводки» на время, пока вкладка открыта
+  summaryMode: "seen", // "seen" — с последнего просмотра, "week" — за 7 дней
   shareCache: new Map() // ключ эпика → посчитанные доли участия команд
 };
 
@@ -45,12 +52,63 @@ function fail(e) {
 
 function showTab(name) {
   applyTopHeight(); // содержимое верхней панели меняется — её высота тоже
+  const from = state.activeTab;
+  state.activeTab = name;
+  if (name === "summary" && from !== "summary") state.summarySession = null; // новая сессия просмотра
   document.querySelectorAll(".tab").forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
   document.querySelectorAll(".page").forEach((p) => p.classList.add("hidden"));
   $(`#page-${name}`).classList.remove("hidden");
   if (name === "people") drawGantt("assignee", $("#page-people"));
   if (name === "epicPeople") drawGantt("epicPeople", $("#page-epicPeople"));
   if (name === "team") team.render($("#page-team"), { notify: (m) => status(m) }).catch(fail);
+  if (name === "summary") drawSummary().catch(fail);
+}
+
+// «Сводка»: база фиксируется при открытии вкладки; пока вкладка на экране, отметка просмотра
+// сдвигается после каждой синхронизации, а база остаётся прежней.
+async function drawSummary() {
+  if (!state.summarySession) state.summarySession = await summaryView.openSession();
+  else await summaryView.markSeen();
+  await summaryView.render($("#page-summary"), {
+    mode: state.summaryMode,
+    session: state.summarySession,
+    onOpenEpic: (key, anchor) => openEpicCard(key, anchor).catch(fail),
+    onMode: (m) => {
+      state.summaryMode = m;
+      drawSummary().catch(fail);
+    },
+    onRefresh: () => drawSummary().catch(fail)
+  });
+  setSummaryBadge(0);
+}
+
+// Счётчик новых сигналов на вкладке «Сводка» (Б7).
+function setSummaryBadge(n) {
+  const tab = document.querySelector('.tab[data-tab="summary"]');
+  if (!tab) return;
+  tab.querySelector(".tab-badge")?.remove();
+  if (n > 0) {
+    const b = document.createElement("span");
+    b.className = "tab-badge";
+    b.textContent = String(n);
+    b.title = t("sum.badgeHint", { n });
+    tab.append(b);
+  }
+}
+
+async function refreshSummaryBadge() {
+  if (state.activeTab === "summary") return; // сводка на экране — всё уже показано
+  setSummaryBadge(await summaryView.badgeCount());
+}
+
+// Карточка эпика (как по «+» в списке) — из «Сводки».
+async function openEpicCard(key, anchor) {
+  const epic = (await db.all(db.STORES.epics)).find((e) => e.key === key);
+  if (!epic) return;
+  const c = analytics
+    .epicCounters([epic], await db.all(db.STORES.issues), { excludeTypes: flowlib.parseTypeList(settings.get().forecastExcludeTypes) })
+    .get(key);
+  showEpicInfo(anchor, epic, c.spent, c.pct);
 }
 
 // Перерисовать активную вкладку с диаграммой (после синка, смены языка, фильтров).
@@ -60,6 +118,7 @@ function redrawActive() {
   if (active === "people") drawGantt("assignee", $("#page-people"));
   if (active === "epicPeople") drawGantt("epicPeople", $("#page-epicPeople"));
   if (active === "team") team.render($("#page-team"), { notify: (m) => status(m) }).catch(fail);
+  if (active === "summary") drawSummary().catch(fail);
 }
 
 // ---------- поиск эпиков ----------
@@ -551,136 +610,161 @@ async function computeTeamShares(epic) {
   return result;
 }
 
-// Поток команд и доля эпика в нём: считается из локальной истории завершений, без запросов.
+// Поток команд и доля эпика: считается из локальной истории завершений, без запросов.
+// Переключатель команд (можно выбрать несколько) пересчитывает таблицу, гистограмму и прогноз.
 async function renderEpicFlow(box, epic, onDone = () => {}) {
   box.textContent = "";
-  box.append(Object.assign(document.createElement("div"), { className: "tip-sub", textContent: t("flow.title") }));
-  const [rows, tempo, issues] = await Promise.all([db.all(db.STORES.flow), db.all(db.STORES.tempo), db.all(db.STORES.issues)]);
+  const div = (className, textContent = "") => Object.assign(document.createElement("div"), { className, textContent });
+  box.append(div("tip-sub", t("flow.title")));
+  const [rows, tempo, issues, profiles] = await Promise.all([
+    db.all(db.STORES.flow),
+    db.all(db.STORES.tempo),
+    db.all(db.STORES.issues),
+    db.all(db.STORES.people)
+  ]);
   if (!rows.length) {
-    box.append(Object.assign(document.createElement("div"), { className: "muted", textContent: t("flow.none") }));
+    box.append(div("muted", t("flow.none")));
     onDone();
     return;
   }
-  const index = agg.buildTempoIndex(tempo);
-  const model = flowlib.buildFlow({
+  // Прогноз считает задачи без исключённых типов (User Story и т.п.) — и в истории, и в остатке.
+  const flow = analytics.epicFlowState({
+    epic,
     rows,
-    teamOf: (p) => index.of(p),
-    weeks: Number(settings.get().flowWeeks) || 52,
-    epicKey: epic.key
+    tempo,
+    profiles,
+    issues,
+    excludeTypes: flowlib.parseTypeList(settings.get().forecastExcludeTypes),
+    weeks: Number(settings.get().flowWeeks) || 52
   });
-  const teams = model.teams.filter((x) => (x.byEpic.get(epic.key) || 0) > 0);
-  // незакрытый эпик всё ещё в работе — его период активности тянется до конца окна
-  const remaining = issues.filter((i) => i.epicKey === epic.key && !agg.isDone(i)).length;
-  const open = remaining > 0;
-  const shares = new Map(teams.map((x) => [x.team.id, flowlib.epicShare(x, epic.key, { open })]));
-  renderForecast(box, epic, model, teams, remaining, shares).catch(() => {});
-  if (!teams.length) {
-    box.append(Object.assign(document.createElement("div"), { className: "muted", textContent: t("share.none") }));
-  } else {
-    const tbl = document.createElement("table");
-    tbl.className = "tip-table share-table";
-    for (const x of teams) {
-      const s = shares.get(x.team.id);
-      const act = s.active || s;
-      const pct = Math.round(act.share * 100);
-      const tr = document.createElement("tr");
-      const name = document.createElement("td");
-      name.className = "tp-name";
-      const dot = document.createElement("i");
-      dot.className = `dot ${x.team.color >= 0 ? `tc-${x.team.color}` : "tc-none"}`;
-      name.append(dot, document.createTextNode(x.team.name || t("share.noTeam")));
-      const flowCell = document.createElement("td");
-      flowCell.className = "tp-num";
-      flowCell.textContent = `${x.median} / нед.`;
-      const pctCell = document.createElement("td");
-      pctCell.className = "tp-num share-pct";
-      const bar = document.createElement("span");
-      bar.className = "ipct-bar";
-      bar.style.setProperty("--pct", `${Math.min(100, pct)}%`);
-      const num = document.createElement("span");
-      num.className = "ipct-num";
-      num.textContent = `${pct}%`;
-      pctCell.append(bar, num);
-      tr.title = t("flow.rowHint", {
-        team: x.team.name || t("share.noTeam"),
-        median: x.median,
-        max: x.max,
-        done: act.done,
-        total: act.total,
-        weeks: act.weeks,
-        pct,
-        rw: s.recent ? s.recent.weeks : 0,
-        rpct: s.recent ? Math.round(s.recent.share * 100) : 0,
-        apct: Math.round(s.share * 100),
-        adone: s.done,
-        atotal: s.total
-      });
-      tr.append(name, flowCell, pctCell);
-      tbl.append(tr);
-    }
-    box.append(tbl);
-  }
-  const spans = teams.map((x) => shares.get(x.team.id).active).filter(Boolean);
-  const span = spans.length
-    ? { from: Math.min(...spans.map((a) => a.from)), to: Math.max(...spans.map((a) => a.to)) }
-    : null;
-  if (teams.length) {
-    renderFlowChart(box, model, teams, span, onDone);
-    if (span) {
-      const sum = teams.reduce(
-        (acc, x) => {
-          const a = shares.get(x.team.id).active;
-          return a ? { done: acc.done + a.done, total: acc.total + a.total } : acc;
-        },
-        { done: 0, total: 0 }
-      );
-      box.append(
-        Object.assign(document.createElement("div"), {
-          className: "muted small",
-          textContent: t("flow.spanNote", {
-            from: fmtDay(new Date(model.starts[span.from]).toISOString()),
-            to: fmtDay(new Date(model.starts[span.to] + 6 * 86400000).toISOString()),
-            n: span.to - span.from + 1,
-            pct: sum.total ? Math.round((sum.done / sum.total) * 100) : 0
-          })
-        })
-      );
-    }
-  }
-  const note = document.createElement("div");
-  note.className = model.weeksCount < 5 ? "cmt-error small" : "muted small";
-  note.textContent =
+  const { model, teams, shares } = flow;
+
+  const windowNote = div(
+    model.weeksCount < 5 ? "cmt-error small" : "muted small",
     t("flow.window", { from: fmtDay(new Date(model.from).toISOString()), to: fmtDay(new Date(model.to).toISOString()), n: model.weeksCount }) +
-    (model.weeksCount < 12 ? ` · ${t("flow.short", { n: model.weeksCount })}` : "");
-  box.append(note);
-  onDone();
+      (model.weeksCount < 12 ? ` · ${t("flow.short", { n: model.weeksCount })}` : "")
+  );
+  const fcBox = div("share-block forecast-block");
+
+  if (!teams.length) {
+    box.append(div("muted", t("share.none")), windowNote, fcBox);
+    drawForecast(fcBox, epic, flow, [], onDone).catch(() => {});
+    onDone();
+    return;
+  }
+
+  // Выбранные команды; пустой набор — все.
+  const selected = new Set();
+  const picked = () => (selected.size ? teams.filter((x) => selected.has(x.team.id)) : teams);
+
+  const chips = div("chips flow-teams");
+  const options = [{ id: "", name: t("flow.all") }, ...teams.map((x) => ({ id: x.team.id, name: x.team.name || t("share.noTeam") }))];
+  for (const o of options) {
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "chip";
+    chip.dataset.id = o.id;
+    chip.textContent = o.name;
+    chip.onclick = (e) => {
+      e.stopPropagation();
+      // «Все команды» сбрасывает выбор; клик по команде добавляет её или снимает повторным кликом.
+      if (!o.id) selected.clear();
+      else if (selected.has(o.id)) selected.delete(o.id);
+      else selected.add(o.id);
+      redraw();
+    };
+    chips.append(chip);
+  }
+
+  const tbl = document.createElement("table");
+  tbl.className = "tip-table share-table";
+  const rowOf = new Map();
+  for (const x of teams) {
+    const s = shares.get(x.team.id);
+    const act = s.active || s;
+    const pct = Math.round(act.share * 100);
+    const tr = document.createElement("tr");
+    const name = document.createElement("td");
+    name.className = "tp-name";
+    const dot = document.createElement("i");
+    dot.className = `dot ${x.team.color >= 0 ? `tc-${x.team.color}` : "tc-none"}`;
+    name.append(dot, document.createTextNode(x.team.name || t("share.noTeam")));
+    const flowCell = document.createElement("td");
+    flowCell.className = "tp-num";
+    flowCell.textContent = `${x.median} / нед.`;
+    const pctCell = document.createElement("td");
+    pctCell.className = "tp-num share-pct";
+    const bar = document.createElement("span");
+    bar.className = "ipct-bar";
+    bar.style.setProperty("--pct", `${Math.min(100, pct)}%`);
+    const num = document.createElement("span");
+    num.className = "ipct-num";
+    num.textContent = `${pct}%`;
+    pctCell.append(bar, num);
+    tr.title = t("flow.rowHint", {
+      team: x.team.name || t("share.noTeam"),
+      median: x.median,
+      max: x.max,
+      done: act.done,
+      total: act.total,
+      weeks: act.weeks,
+      pct,
+      rw: s.recent ? s.recent.weeks : 0,
+      rpct: s.recent ? Math.round(s.recent.share * 100) : 0,
+      apct: Math.round(s.share * 100),
+      adone: s.done,
+      atotal: s.total
+    });
+    tr.append(name, flowCell, pctCell);
+    tbl.append(tr);
+    rowOf.set(x.team.id, tr);
+  }
+
+  const chart = renderFlowChart(model);
+  const spanNote = div("muted small");
+  box.append(chips, div("muted small", t("flow.pickHint")), tbl, chart.el, spanNote, windowNote, fcBox);
+
+  const redraw = () => {
+    const list = picked();
+    const ids = new Set(list.map((x) => x.team.id));
+    // «Все команды» горит, когда выбор пуст или в нём все команды.
+    const all = !selected.size || selected.size === teams.length;
+    for (const c of chips.children) c.classList.toggle("on", c.dataset.id ? selected.has(c.dataset.id) : all);
+    for (const [id, tr] of rowOf) tr.classList.toggle("off", !ids.has(id));
+    const spans = list.map((x) => shares.get(x.team.id).active).filter(Boolean);
+    const span = spans.length ? { from: Math.min(...spans.map((a) => a.from)), to: Math.max(...spans.map((a) => a.to)) } : null;
+    chart.draw(list, span);
+    spanNote.hidden = !span;
+    if (span) {
+      const sum = spans.reduce((acc, a) => ({ done: acc.done + a.done, total: acc.total + a.total }), { done: 0, total: 0 });
+      spanNote.textContent = t("flow.spanNote", {
+        from: fmtDay(new Date(model.starts[span.from]).toISOString()),
+        to: fmtDay(new Date(model.starts[span.to] + 6 * 86400000).toISOString()),
+        n: span.to - span.from + 1,
+        pct: sum.total ? Math.round((sum.done / sum.total) * 100) : 0
+      });
+    }
+    drawForecast(fcBox, epic, flow, list, onDone).catch(() => {});
+    onDone();
+  };
+  redraw();
 }
 
-// Гистограмма завершённых задач по неделям: столбец — неделя, тёмная часть — задачи эпика.
-// Переключатель выбирает команду или сумму по всем.
-function renderFlowChart(parent, model, teams, span = null, onDone = () => {}) {
-  const wrap = document.createElement("div");
-  wrap.className = "flow-chart";
-  parent.append(wrap);
-  wrap.append(Object.assign(document.createElement("div"), { className: "tip-sub", textContent: t("flow.chart") }));
-
-  const tabs = document.createElement("div");
-  tabs.className = "chips";
-  wrap.append(tabs);
+// Гистограмма завершённых задач по неделям: столбец — неделя, жёлтая часть — задачи эпика.
+// Рисуется суммой по выбранным командам; недели вне периода их работы над эпиком приглушены.
+function renderFlowChart(model) {
+  const el = document.createElement("div");
+  el.className = "flow-chart";
+  el.append(Object.assign(document.createElement("div"), { className: "tip-sub", textContent: t("flow.chart") }));
   const bars = document.createElement("div");
   bars.className = "bars";
-  wrap.append(bars);
   const axis = document.createElement("div");
   axis.className = "bars-axis";
-  wrap.append(axis);
+  el.append(bars, axis);
 
-  const options = [{ id: "", name: t("flow.all") }, ...teams.map((x) => ({ id: x.team.id, name: x.team.name || t("share.noTeam") }))];
-  let current = "";
-
-  const draw = () => {
-    const picked = current ? teams.filter((x) => x.team.id === current) : teams;
-    const total = model.starts.map((_, i) => picked.reduce((n, x) => n + x.perWeek[i], 0));
-    const epicOnly = model.starts.map((_, i) => picked.reduce((n, x) => n + x.epicPerWeek[i], 0));
+  const draw = (list, span) => {
+    const total = model.starts.map((_, i) => list.reduce((n, x) => n + x.perWeek[i], 0));
+    const epicOnly = model.starts.map((_, i) => list.reduce((n, x) => n + x.epicPerWeek[i], 0));
     const max = Math.max(1, ...total);
     bars.textContent = "";
     axis.textContent = "";
@@ -708,87 +792,76 @@ function renderFlowChart(parent, model, teams, span = null, onDone = () => {}) {
       tick.textContent = i % 4 === 0 ? fmtDay(new Date(ms).toISOString()).slice(0, 5) : "";
       axis.append(tick);
     });
-    [...tabs.children].forEach((c) => c.classList.toggle("on", c.dataset.id === current));
-    onDone();
   };
-
-  for (const o of options) {
-    const chip = document.createElement("button");
-    chip.type = "button";
-    chip.className = "chip";
-    chip.dataset.id = o.id;
-    chip.textContent = o.name;
-    chip.onclick = (e) => {
-      e.stopPropagation();
-      current = o.id;
-      draw();
-    };
-    tabs.append(chip);
-  }
-  draw();
+  return { el, draw };
 }
 
-// Прогноз срока эпика: остаток задач распределяется между командами по их вкладу в эпик,
-// каждая команда симулируется по своей истории, срок прогона — максимум по командам.
-async function renderForecast(parent, epic, model, teams, remaining, shares) {
-  const box = document.createElement("div");
-  box.className = "share-block forecast-block";
-  box.append(Object.assign(document.createElement("div"), { className: "tip-sub", textContent: t("fc.title") }));
-  parent.append(box);
+// Запас в неделях со знаком: «+1,5» / «−0,8» (в русском — запятая).
+function fmtWeeks(v) {
+  const abs = Math.abs(v).toFixed(1);
+  return `${v > 0 ? "+" : v < 0 ? "−" : ""}${getLang() === "ru" ? abs.replace(".", ",") : abs}`;
+}
 
+// Прогноз срока эпика по выбранным командам: остаток делят только они (пропорционально вкладу в
+// эпик), история каждой — недели периода их работы над эпиком; срок прогона — максимум по командам.
+// Прогоны считаются в фоновом потоке (А3), поэтому рисуем асинхронно.
+let forecastSeq = 0;
+async function drawForecast(box, epic, flow, list, onDone = () => {}) {
+  const token = String(++forecastSeq);
+  box.dataset.token = token;
+  const head = () => {
+    box.textContent = "";
+    box.append(Object.assign(document.createElement("div"), { className: "tip-sub", textContent: t("fc.title") }));
+  };
   const note = (text, error = false) =>
     box.append(Object.assign(document.createElement("div"), { className: error ? "cmt-error small" : "muted small", textContent: text }));
+  head();
+  note(t("fc.loading"));
 
-  if (model.weeksCount < flowlib.FORECAST_MIN_WEEKS) {
-    note(t("fc.short", { n: model.weeksCount, min: flowlib.FORECAST_MIN_WEEKS }), true);
+  const res = await analytics.epicForecast({ epic, flow, teams: list, run: runForecast });
+  if (box.dataset.token !== token) return; // пока считали, выбор команд поменялся
+  head();
+  const model = flow.model;
+  if (res.reason === "short") {
+    note(t("fc.short", { n: res.weeks, min: flowlib.FORECAST_MIN_WEEKS }), true);
+    onDone();
     return;
   }
-  const epicDone = teams.reduce((n, x) => n + (x.byEpic.get(epic.key) || 0), 0);
-  if (!remaining || !epicDone) {
+  if (!res.fc) {
     note(t("fc.none"));
+    onDone();
     return;
   }
-  const input = teams.map((x) => {
-    const done = x.byEpic.get(epic.key) || 0;
-    return {
-      team: x.team,
-      perWeek: x.perWeek,
-      share: flowlib.forecastShare(shares.get(x.team.id)),
-      remaining: (remaining * done) / epicDone
-    };
-  });
-  const fc = flowlib.forecastDelivery({ teams: input });
-  if (!fc) {
-    note(t("fc.none"));
-    return;
-  }
-  box.append(Object.assign(document.createElement("div"), { className: "muted small", textContent: t("fc.remaining", { n: remaining }) }));
+  const { fc, history } = res;
+  note(t("fc.remaining", { n: flow.remaining }));
   const tbl = document.createElement("table");
   tbl.className = "tip-table";
   for (const [p, key] of [[50, "p50"], [85, "p85"], [95, "p95"]]) {
     const tr = document.createElement("tr");
     const cell = document.createElement("td");
     cell.className = "tp-name" + (p === 85 ? " fc-main" : "");
-    cell.textContent = t("fc.line", {
-      pct: p,
-      weeks: fc.weeks[key],
-      date: fmtDay(fc.dates[key].toISOString())
-    });
+    cell.textContent = t("fc.line", { pct: p, weeks: fc.weeks[key], date: fmtDay(fc.dates[key].toISOString()) });
     tr.append(cell);
     tbl.append(tr);
   }
   box.append(tbl);
+  if (res.chance != null) note(t("fc.outlook", { chance: Math.round(res.chance * 100), buffer: fmtWeeks(res.buffer) }));
   if (fc.last.length) {
     const top = fc.last[0];
-    box.append(
-      Object.assign(document.createElement("div"), {
-        className: "muted small",
-        textContent: t("fc.last", { team: top.team.name || t("share.noTeam"), pct: top.pct })
-      })
-    );
+    note(t("fc.last", { team: top.team.name || t("share.noTeam"), pct: top.pct }));
   }
-  if (model.weeksCount < flowlib.FORECAST_OK_WEEKS) note(t("fc.warn", { n: model.weeksCount, ok: flowlib.FORECAST_OK_WEEKS }), true);
+  note(
+    t("fc.basis", {
+      teams: list.map((x) => x.team.name || t("share.noTeam")).join(", "),
+      from: fmtDay(new Date(model.starts[history.from]).toISOString()),
+      to: fmtDay(new Date(model.starts[history.to] + 6 * 86400000).toISOString()),
+      n: history.weeks,
+      ok: flowlib.FORECAST_OK_WEEKS
+    })
+  );
+  if (history.weeks < flowlib.FORECAST_OK_WEEKS) note(t("fc.warn", { n: history.weeks, ok: flowlib.FORECAST_OK_WEEKS }), true);
   note(t("fc.caveat"));
+  onDone();
 }
 
 function renderTeamShares(box, epic, onDone = () => {}) {
@@ -989,34 +1062,13 @@ async function renderStored() {
   const shown = applyFilter(stored);
   renderStatusSummary($("#storedSummary"), shown);
   if (stored.length || hasFilter()) box.append(listHead());
-  // Списано: на сам эпик + на его задачи из выгрузки.
-  state.issuesByEpic = new Map();
-  const spentByEpic = new Map(stored.map((e) => [e.key, { epic: e.timeSpent || 0, issues: 0, withLogs: 0, total: 0 }]));
-  // Доля выполнения: оценки сделанных задач (Готово / On Prod / Cancel) относительно всех.
-  const pctByEpic = new Map(stored.map((e) => [e.key, { done: 0, total: 0, doneCount: 0, count: 0, projects: new Map() }]));
-  for (const i of await db.all(db.STORES.issues)) {
-    const acc = spentByEpic.get(i.epicKey);
-    if (!acc) continue;
-    acc.total += 1;
-    if (i.timeSpent) {
-      acc.issues += i.timeSpent;
-      acc.withLogs += 1;
-    }
-    if (!state.issuesByEpic.has(i.epicKey)) state.issuesByEpic.set(i.epicKey, []);
-    state.issuesByEpic.get(i.epicKey).push(i.key);
-    const p = pctByEpic.get(i.epicKey);
-    const est = agg.estimateOf(i);
-    p.count += 1;
-    p.total += est;
-    // Число задач по проектам Jira — для карточки эпика.
-    const pk = i.projectKey || t("dash");
-    if (!p.projects.has(pk)) p.projects.set(pk, { key: pk, name: i.projectName || pk, count: 0 });
-    p.projects.get(pk).count += 1;
-    if (agg.isDone(i)) {
-      p.doneCount += 1;
-      p.done += est;
-    }
-  }
+  // Списано, готовность и задачи по проектам — из модуля расчётов (те же числа, что в карточке).
+  const counters = analytics.epicCounters(stored, await db.all(db.STORES.issues), {
+    excludeTypes: flowlib.parseTypeList(settings.get().forecastExcludeTypes)
+  });
+  state.issuesByEpic = new Map([...counters].map(([k, c]) => [k, c.issueKeys]));
+  const spentByEpic = new Map([...counters].map(([k, c]) => [k, c.spent]));
+  const pctByEpic = new Map([...counters].map(([k, c]) => [k, c.pct]));
   sortEpics(shown).forEach((e, i) => box.append(epicRow(e, state.selected.has(e.key), i, spentByEpic.get(e.key), pctByEpic.get(e.key))));
   if (!stored.length) {
     const p = document.createElement("div");
@@ -1059,10 +1111,44 @@ async function doSaveSelection() {
 // ---------- синхронизация ----------
 
 let syncing = false;
+// Другие вкладки плагина узнают о синхронизации и перечитывают данные (А4).
+const syncChannel = typeof BroadcastChannel !== "undefined" ? new BroadcastChannel(autoSync.CHANNEL) : null;
+if (syncChannel) {
+  syncChannel.onmessage = (e) => {
+    if (e.data && e.data.type === "synced") afterForeignSync().catch(() => {});
+  };
+}
+
+async function afterForeignSync() {
+  await refreshHeader();
+  state.shareCache.clear();
+  gantt.resetCollapse();
+  redrawActive();
+  refreshSummaryBadge().catch(() => {});
+}
+
+// Итог: { ok: true } | { ok: false, kind: "network" | "auth" | "http" | "busy", message }.
 async function doSync({ full = false } = {}) {
-  if (syncing) return;
+  if (syncing) return { ok: false, kind: "busy" };
   syncing = true;
   $("#btnRefresh").disabled = $("#btnReload").disabled = true;
+  try {
+    // Одна синхронизация на все вкладки: если другая вкладка уже обновляет — ждём её и перечитываем.
+    const locked = await autoSync.withSyncLock(() => runSync(full), { onBusy: () => status(t("st.syncOtherTab")) });
+    if (locked.busy) {
+      await locked.done;
+      await afterForeignSync();
+      hideStatus();
+      return { ok: false, kind: "busy" };
+    }
+    return locked.result;
+  } finally {
+    syncing = false;
+    $("#btnRefresh").disabled = $("#btnReload").disabled = false;
+  }
+}
+
+async function runSync(full) {
   try {
     const result = await sync.sync({ full, onProgress: (m) => status(m) });
     await refreshHeader();
@@ -1102,12 +1188,39 @@ async function doSync({ full = false } = {}) {
     if (lines.length) status(lines.join(" — "), isError ? "error" : "info");
     gantt.resetCollapse();
     redrawActive();
+    refreshSummaryBadge().catch(() => {});
+    if (syncChannel) syncChannel.postMessage({ type: "synced" });
+    return { ok: true };
   } catch (e) {
     fail(e);
-  } finally {
-    syncing = false;
-    $("#btnRefresh").disabled = $("#btnReload").disabled = false;
+    return { ok: false, kind: (e && e.kind) || "http", message: e && e.message ? e.message : String(e) };
   }
+}
+
+// Автообновление (Б8): синхронизация по просьбе фонового скрипта или при открытии страницы,
+// итог — фоновому скрипту для уведомления.
+async function runAutoSync() {
+  const res = await doSync({ full: false });
+  if (res.kind === "busy") return;
+  let text = "";
+  if (res.ok) {
+    const n = await summaryView.badgeCount().catch(() => 0);
+    text = n ? t("auto.done", { n }) : t("auto.doneCalm");
+  } else if (res.kind === "auth") text = t("auto.auth");
+  else if (res.kind !== "network") text = t("auto.error", { msg: res.message || "" });
+  try {
+    await chrome.runtime.sendMessage({ type: "ohmygant-auto-done", ok: res.ok, kind: res.kind, text });
+  } catch {
+    // фонового скрипта нет (dev-страница) — уведомление не нужно
+  }
+}
+
+// Страница открыта вручную, расписание включено, сегодня обновления не было и Jira доступна —
+// обновляемся сразу.
+async function autoSyncOnOpen() {
+  const s = settings.get();
+  if (autoSync.planAuto({ auto: s.autoSync, lastSync: s.lastSync }) !== "run") return;
+  if (await autoSync.probeJira(s.baseUrl)) await runAutoSync();
 }
 
 async function refreshHeader() {
@@ -1235,35 +1348,6 @@ function epicMatchesFilter(epic, filter) {
   return epic.assigneeKey === filter;
 }
 
-const LOAD_SECTIONS = 3;
-
-// Занятость людей по ближайшим секциям (текущая и две следующие) — для окна «кто может подменить».
-// Считаем по всей выгрузке, а не по видимым эпикам: фильтры не должны искажать нагрузку.
-function buildPersonLoad(model, issues, others) {
-  const sections = model.columns.filter((c) => c.start != null).slice(0, LOAD_SECTIONS);
-  const sectionOf = new Map();
-  for (const sec of sections) for (const sp of sec.sprints) sectionOf.set(sp.id, sec.id);
-  const byName = new Map();
-  for (const i of [...issues, ...others]) {
-    if (!i.assigneeName) continue;
-    const secId = sectionOf.get(i.sprintId);
-    if (!secId) continue;
-    const key = team.normName(i.assigneeName);
-    if (!byName.has(key)) byName.set(key, new Map());
-    const row = byName.get(key);
-    row.set(secId, (row.get(secId) || 0) + agg.estimateOf(i));
-  }
-  return {
-    capacity: agg.sprintCapacity(),
-    byName,
-    sections: sections.map((sec, i) => ({
-      id: sec.id,
-      caption: i === 0 ? t("cmp.loadCurrent") : `+${i}`,
-      title: sec.sprints.map((sp) => sp.name).join(", ") || agg.sectionLabel(sec)
-    }))
-  };
-}
-
 async function drawGantt(mode, container) {
   try {
     const [issues, others, sprints, epics, boards, profiles, tempo] = await Promise.all([
@@ -1305,7 +1389,7 @@ async function drawGantt(mode, container) {
       mode,
       timelineIssues: [...issues, ...others]
     });
-    const opts = { mode, profiles, personLoad: buildPersonLoad(model, issues, others) };
+    const opts = { mode, profiles, personLoad: analytics.personLoad(model, issues, others) };
     if (mode === "epicPeople") {
       applyPersonFilter(model);
       renderPersonFilterNote();
@@ -1342,8 +1426,15 @@ function fillSettingsForm() {
   $("#sprintDays").value = s.sprintDays;
   $("#useTempoTeams").checked = !!s.useTempoTeams;
   $("#flowWeeks").value = s.flowWeeks;
+  $("#requestTimeoutSec").value = s.requestTimeoutSec;
+  $("#autoEnabled").checked = !!s.autoSync.enabled;
+  document.querySelectorAll("[data-day]").forEach((cb) => (cb.checked = s.autoSync.days.includes(Number(cb.dataset.day))));
+  $("#autoFrom").value = s.autoSync.from;
+  $("#autoTo").value = s.autoSync.to;
+  document.querySelectorAll("[data-sum]").forEach((inp) => (inp.value = s.summary[inp.dataset.sum]));
   renderFlowDiag().catch(() => {});
   $("#doneStatuses").value = s.doneStatuses;
+  $("#forecastExcludeTypes").value = s.forecastExcludeTypes ?? "";
   $("#infoSystems").value = (s.infoSystems || []).join("\n");
   $("#teamsList").value = (s.teams || []).join("\n");
   $("#lang").value = s.lang;
@@ -1480,7 +1571,22 @@ async function saveSettingsForm() {
     sprintDays: Number($("#sprintDays").value) || 10,
     useTempoTeams: $("#useTempoTeams").checked,
     flowWeeks: Number($("#flowWeeks").value) || 52,
+    requestTimeoutSec: Number($("#requestTimeoutSec").value) || 30,
+    autoSync: {
+      enabled: $("#autoEnabled").checked,
+      days: [...document.querySelectorAll("[data-day]")].filter((cb) => cb.checked).map((cb) => Number(cb.dataset.day)),
+      from: $("#autoFrom").value || "09:00",
+      to: $("#autoTo").value || "18:00"
+    },
+    // Пороги «Сводки»: пустое или нечисловое поле — значение по умолчанию.
+    summary: Object.fromEntries(
+      [...document.querySelectorAll("[data-sum]")].map((inp) => {
+        const v = Number(inp.value);
+        return [inp.dataset.sum, inp.value !== "" && Number.isFinite(v) && v >= 0 ? v : settings.DEFAULTS.summary[inp.dataset.sum]];
+      })
+    ),
     doneStatuses: $("#doneStatuses").value.trim(),
+    forecastExcludeTypes: $("#forecastExcludeTypes").value.trim(),
     infoSystems: team.parseSystems($("#infoSystems").value),
     teams: team.parseSystems($("#teamsList").value),
     fields: {
@@ -1494,6 +1600,8 @@ async function saveSettingsForm() {
   });
   status(t("set.saved"));
   await refreshHeader();
+  // Список исключаемых типов влияет на счётчики «Сохранённых эпиков» — пересчитываем сразу.
+  await renderStored();
 }
 
 async function ensurePermission() {
@@ -1770,6 +1878,20 @@ async function boot() {
   renderResults();
   await refreshHeader();
   if (!s.baseUrl) showTab("settings");
+
+  // Автообновление (Б8): фоновый скрипт открывает страницу с #auto или просит обновиться сообщением.
+  try {
+    chrome.runtime.onMessage.addListener((msg) => {
+      if (msg && msg.type === "ohmygant-auto-sync") runAutoSync().catch(() => {});
+      if (msg && msg.type === "ohmygant-show-summary") showTab("summary");
+    });
+  } catch {
+    // dev-страница без chrome.runtime
+  }
+  if (location.hash === "#summary") showTab("summary");
+  if (location.hash === "#auto") runAutoSync().catch(() => {});
+  else if (s.baseUrl) autoSyncOnOpen().catch(() => {});
+  refreshSummaryBadge().catch(() => {});
 }
 
 boot().catch(fail);

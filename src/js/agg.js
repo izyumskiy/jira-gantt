@@ -61,6 +61,13 @@ export function isDone(issue) {
   return isDoneStatus(issue.statusName, issue.statusCategory);
 }
 
+// Дата закрытия задачи: дата завершения; если задача готова по статусу, а даты нет (On Prod вне
+// категории «Готово» и т.п.), — дата последнего обновления. Незакрытая — "".
+export function closedAt(issue) {
+  if (issue.resolved && isDone(issue)) return issue.resolved;
+  return isDone(issue) ? issue.updated || issue.resolved || "" : "";
+}
+
 // ---------- спринты и время ----------
 
 const DAY = 86400000;
@@ -261,6 +268,7 @@ export function nameFromSprints(names) {
 // потому что в задачах Jira отдаёт то одно, то другое.
 // Ключ сопоставления человека: имя без регистра, лишних пробелов и «ё».
 const normPerson = (v) => String(v || "").trim().replace(/\s+/g, " ").toLowerCase().replace(/ё/g, "е");
+export const normPersonName = normPerson;
 
 // Ручное распределение по командам из вкладки «Команда». Нужно, когда Tempo API закрыт: без него
 // люди разошлись бы по доскам или остались без команды. Профили хранят уже нормализованное имя.
@@ -374,6 +382,16 @@ function addTo(cell, sprintId, est, brief) {
   part.issues.push(brief);
 }
 
+// Отрезок «Вне спринта» внутри ячейки текущей секции.
+export const OFF_SPRINT_ID = "off-sprint";
+
+// Задача вне спринта, но в работе: категория Jira «В работе» и не готова по правилам плагина
+// (On Prod тоже в этой категории, но считается готовой). Канбан-команды (аналитики) спринтами
+// не пользуются — такие задачи показываем в текущей секции, а не в бэклоге.
+export function isOffSprintWork(issue) {
+  return issue.sprintId == null && issue.statusCategory === "indeterminate" && !isDone(issue);
+}
+
 // Краткая карточка задачи для списков.
 function briefOf(issue, est, done) {
   return {
@@ -385,7 +403,8 @@ function briefOf(issue, est, done) {
     sprintName: issue.sprintName || "",
     sprintId: issue.sprintId ?? null,
     estimate: est,
-    done
+    done,
+    offSprint: isOffSprintWork(issue)
   };
 }
 
@@ -410,6 +429,8 @@ export function buildModel({ issues, others = [], sprints, epics, boards = [], t
   }
   const sectionOfSprint = new Map();
   for (const sec of columns) for (const s of sec.sprints) sectionOfSprint.set(s.id, sec.id);
+  // Первая колонка шкалы — всегда секция «текущий» (sec:0): сюда же ложатся задачи вне спринта в работе.
+  const currentId = columns.length ? columns[0].id : null;
 
   const epicById = new Map(epics.map((e) => [e.key, e]));
   const groups = new Map();
@@ -501,6 +522,14 @@ export function buildModel({ issues, others = [], sprints, epics, boards = [], t
     const brief = briefOf(issue, est, done);
     p.issues.push(brief);
     if (issue.sprintId == null) {
+      // В работе без спринта (канбан) — в текущую секцию отдельным отрезком «Вне спринта».
+      if (currentId && isOffSprintWork(issue)) {
+        for (const bag of [g.cells, p.cells]) {
+          if (!bag.has(currentId)) bag.set(currentId, emptyCell());
+          addTo(bag.get(currentId), OFF_SPRINT_ID, est, brief);
+        }
+        continue;
+      }
       // Выполненную задачу вне спринта считать нечего — в бэклог идут только незакрытые.
       if (!done) {
         g.noSprint += 1;
@@ -535,14 +564,19 @@ export function buildModel({ issues, others = [], sprints, epics, boards = [], t
       const oe = g.otherEpics.get(ek);
       oe.count += 1;
       oe.sum += est;
-      if (issue.sprintId == null) continue;
-      const team = teamsInfo.of(sprintById.get(issue.sprintId));
-      if (team.id) g.teamVotes.set(team.id, (g.teamVotes.get(team.id) || 0) + 1);
-      const secId = sectionOfSprint.get(issue.sprintId);
+      // Прочие без спринта учитываем, только если они в работе (канбан) — в текущей секции.
+      const offSprint = !!currentId && isOffSprintWork(issue);
+      if (issue.sprintId == null && !offSprint) continue;
+      if (!offSprint) {
+        const team = teamsInfo.of(sprintById.get(issue.sprintId));
+        if (team.id) g.teamVotes.set(team.id, (g.teamVotes.get(team.id) || 0) + 1);
+      }
+      const secId = offSprint ? currentId : sectionOfSprint.get(issue.sprintId);
       if (!secId) continue;
+      const partId = offSprint ? OFF_SPRINT_ID : issue.sprintId;
       const brief = briefOf(issue, est, isDone(issue));
       if (!g.otherCells.has(secId)) g.otherCells.set(secId, emptyCell());
-      addTo(g.otherCells.get(secId), issue.sprintId, est, brief);
+      addTo(g.otherCells.get(secId), partId, est, brief);
       // Прочие эпики показываем такими же вложенными строками, как целевые.
       if (!g.projects.has(ek)) {
         g.projects.set(ek, {
@@ -562,7 +596,7 @@ export function buildModel({ issues, others = [], sprints, epics, boards = [], t
       op.sum += est;
       op.issues.push(brief);
       if (!op.cells.has(secId)) op.cells.set(secId, emptyCell());
-      addTo(op.cells.get(secId), issue.sprintId, est, brief);
+      addTo(op.cells.get(secId), partId, est, brief);
     }
   }
 
@@ -633,7 +667,7 @@ export function buildModel({ issues, others = [], sprints, epics, boards = [], t
     columns,
     groups: list,
     maxCell: max,
-    currentId: columns.length ? columns[0].id : null,
+    currentId,
     teams: [...visibleTeams.values()],
     teamOf: teamsInfo.of,
     teamOfSprint: (id) => teamsInfo.of(sprintById.get(id)),
@@ -654,4 +688,35 @@ export function fmtDate(iso) {
 export function sectionLabel(sec) {
   if (sec.id === NO_DATES_ID) return t("gantt.noDates");
   return `${fmtDate(new Date(sec.start).toISOString())} – ${fmtDate(new Date(sec.end - 1).toISOString())}`;
+}
+
+// Занятость людей по ближайшим секциям (текущая и две следующие) — для окна «кто может подменить».
+// Считается по всей выгрузке, а не по видимым эпикам: фильтры не должны искажать нагрузку.
+// Оценка — по остатку, как на вкладке «По людям»; задачи вне спринта в работе — в текущей секции.
+export const LOAD_SECTIONS = 3;
+
+export function personLoad(model, issues, others) {
+  const sections = model.columns.filter((c) => c.start != null).slice(0, LOAD_SECTIONS);
+  const inLoad = new Set(sections.map((sec) => sec.id));
+  const sectionOf = new Map();
+  for (const sec of sections) for (const sp of sec.sprints) sectionOf.set(sp.id, sec.id);
+  const byName = new Map();
+  for (const i of [...issues, ...others]) {
+    if (!i.assigneeName) continue;
+    const secId = isOffSprintWork(i) && inLoad.has(model.currentId) ? model.currentId : sectionOf.get(i.sprintId);
+    if (!secId) continue;
+    const key = normPerson(i.assigneeName);
+    if (!byName.has(key)) byName.set(key, new Map());
+    const row = byName.get(key);
+    row.set(secId, (row.get(secId) || 0) + workEstimateOf(i));
+  }
+  return {
+    capacity: sprintCapacity(),
+    byName,
+    sections: sections.map((sec, i) => ({
+      id: sec.id,
+      caption: i === 0 ? t("cmp.loadCurrent") : `+${i}`,
+      title: sec.sprints.map((sp) => sp.name).join(", ") || sectionLabel(sec)
+    }))
+  };
 }

@@ -3,7 +3,7 @@
 // жёлтую (целевые эпики) и серую (прочие эпики) части пропорционально объёму. Вложенные строки
 // рисуются тонкими голубыми отрезками — по одному на каждый спринт секции.
 import { t } from "./i18n.js";
-import { fmtEstimate, NO_DATES_ID, BACKLOG_ID, sprintCapacity } from "./agg.js";
+import { fmtEstimate, NO_DATES_ID, BACKLOG_ID, OFF_SPRINT_ID, sprintCapacity } from "./agg.js";
 import * as settings from "./settings.js";
 import { cfId, escapeJql, comments as jiraComments, addComment as jiraAddComment, userSearch as jiraUserSearch } from "./jira.js";
 
@@ -225,6 +225,16 @@ function nestedCell(cell, section, model, rowLabel) {
     bar.title = `${s.name} · ${team.name} · ${doneText}`;
     bar.append(el("span", "bar-sprint", s.name), ...numbers(part.count, part.sum));
     bar.onclick = (e) => showIssues(e.currentTarget, `${rowLabel} · ${s.name}`, part.issues);
+    stack.append(bar);
+  }
+  // Задачи вне спринта, которые в работе (канбан), — отдельный отрезок без цвета команды.
+  const off = cell.bySprint.get(OFF_SPRINT_ID);
+  if (off) {
+    const bar = el("div", "bar nested off-sprint clickable");
+    const doneText = applyDone(bar, off.issues);
+    bar.title = `${t("gantt.offSprint")} · ${doneText}`;
+    bar.append(el("span", "bar-sprint", t("gantt.offSprint")), ...numbers(off.count, off.sum));
+    bar.onclick = (e) => showIssues(e.currentTarget, `${rowLabel} · ${t("gantt.offSprint")}`, off.issues);
     stack.append(bar);
   }
   td.append(stack);
@@ -968,6 +978,11 @@ function showIssues(anchor, title, issues) {
     const tr = el("tr", it.done ? "issue-done" : "");
     const keyCell = el("td", "ti-key");
     keyCell.append(maybeLink(it.key, browseUrl(it.key), "tip-link"));
+    if (it.offSprint) {
+      const mark = el("span", "ti-offsprint", "⊘");
+      mark.title = t("gantt.offSprintHint");
+      keyCell.append(mark);
+    }
     const sumCell = el("td", "ti-summary");
     const summaryLink = maybeLink(it.summary || t("dash"), browseUrl(it.key), "ti-summary-link");
     summaryLink.title = it.summary;
