@@ -407,13 +407,16 @@ export function chartBar(model, { withDue = true, onExpand, onCollapse }) {
 // на правом краю заголовка), стрелками с клавиатуры, двойной щелчок — ширина по умолчанию.
 // Ширина запоминается в настройках отдельно для каждого ракурса.
 export const NAME_W_DEFAULT = 456;
+// На «Эпик — история» в колонке названий ещё статус, «готово» и срок — она шире.
+const NAME_W_DEFAULT_BY_KEY = { epicStories: 720 };
+export const nameWidthDefault = (widthKey) => NAME_W_DEFAULT_BY_KEY[widthKey] || NAME_W_DEFAULT;
 export const NAME_W_MIN = 260;
 export const NAME_W_MAX = 1000;
 const clampW = (w) => Math.round(Math.min(NAME_W_MAX, Math.max(NAME_W_MIN, w)));
 
 export function nameWidthOf(widthKey) {
   const w = Number((settings.get().nameWidths || {})[widthKey]);
-  return w > 0 ? clampW(w) : NAME_W_DEFAULT;
+  return w > 0 ? clampW(w) : nameWidthDefault(widthKey);
 }
 
 // Сохранённая ширина — на таблицу ракурса (через --name-w: её читают колонка и подписи).
@@ -466,7 +469,7 @@ function nameResizer(widthKey) {
   };
   h.ondblclick = (e) => {
     e.stopPropagation();
-    set(NAME_W_DEFAULT);
+    set(nameWidthDefault(widthKey));
     saveNameWidth(widthKey, null);
   };
   h.onkeydown = (e) => {
@@ -483,16 +486,46 @@ function nameResizer(widthKey) {
 // Заголовок секции: только имена её спринтов с цветом команды и пометка «текущий».
 // Даты не показываем: период секции — расчётная величина с шагом в календарных днях,
 // с реальными границами спринтов (без выходных) он расходится и только путает.
-export function chartHead(model, rerender, { title, hint = "", widthKey = "" }) {
+// compact — компактная шапка («Эпик — история»): у секции только «Текущий» / «+1» / «+2» и число
+// спринтов, сами спринты — в подсказке и по щелчку. nameHead — своё содержимое заголовка колонки
+// названий (вместо title/hint).
+export function chartHead(model, rerender, { title, hint = "", widthKey = "", compact = false, nameHead = null }) {
   const thead = el("thead");
   const hr = el("tr");
   const th0 = el("th", "c-name");
-  th0.append(el("span", null, title));
-  if (hint) th0.append(el("span", "th-hint", hint));
+  if (nameHead) th0.append(nameHead);
+  else {
+    th0.append(el("span", null, title));
+    if (hint) th0.append(el("span", "th-hint", hint));
+  }
   if (widthKey) th0.append(nameResizer(widthKey));
   hr.append(th0);
-  for (const sec of model.columns) {
-    const th = el("th", "c-sprint" + (sec.id === model.currentId ? " current" : ""));
+  model.columns.forEach((sec, index) => {
+    const th = el("th", "c-sprint" + (sec.id === model.currentId ? " current" : "") + (compact ? " compact" : ""));
+    if (compact && !expandedHeaders.has(sec.id)) {
+      const caption = sec.id === NO_DATES_ID ? t("gantt.noDates") : sec.id === model.currentId ? t("gantt.current") : `+${index}`;
+      th.append(el("div", "sp-name", caption));
+      const dots = el("div", "sp-dots");
+      for (const s of sec.sprints) dots.append(dot(model.teamOf(s)));
+      dots.append(el("span", "sp-count", t("gantt.sprintsN", { n: sec.sprints.length })));
+      th.append(dots);
+      th.classList.add("expandable");
+      th.title = `${sec.sprints.map((s) => `${s.name} · ${model.teamOf(s).name}`).join("\n")}\n${t("gantt.headerShow")}`;
+      th.onclick = () => {
+        expandedHeaders.add(sec.id);
+        rerender();
+      };
+      hr.append(th);
+      return;
+    }
+    if (compact) {
+      th.classList.add("expandable");
+      th.title = t("gantt.headerHide");
+      th.onclick = () => {
+        expandedHeaders.delete(sec.id);
+        rerender();
+      };
+    }
     if (sec.id === NO_DATES_ID) th.append(el("div", "sp-name", t("gantt.noDates")));
     if (sec.id === model.currentId) th.append(el("div", "sp-name", t("gantt.current")));
     const list = el("div", "sp-list");
@@ -505,7 +538,7 @@ export function chartHead(model, rerender, { title, hint = "", widthKey = "" }) 
       list.append(item);
     }
     th.append(list);
-    if (sec.sprints.length > HEADER_SPRINTS) {
+    if (!compact && sec.sprints.length > HEADER_SPRINTS) {
       // Длинный список спринтов не должен вытеснять таблицу: остаток — за строкой «ещё N».
       const hidden = sec.sprints.length - HEADER_SPRINTS;
       th.append(el("div", "sp-more", expanded ? t("gantt.headerLess") : t("gantt.headerMore", { n: hidden })));
@@ -517,7 +550,7 @@ export function chartHead(model, rerender, { title, hint = "", widthKey = "" }) 
       };
     }
     hr.append(th);
-  }
+  });
   // Справа от спринтов — «Бэклог»: задачи без спринта и не в статусе «Готово» (на всех вкладках;
   // у человека — по его задачам целевых эпиков, «прочие» вне спринтов не загружаются).
   const th = el("th", "c-sprint backlog");
@@ -1171,7 +1204,7 @@ export function closeTooltip() {
 }
 document.addEventListener("keydown", (e) => e.key === "Escape" && closeTooltip());
 document.addEventListener("click", (e) => {
-  if (tip && !tip.contains(e.target) && !e.target.closest(".glabel") && !e.target.closest(".bar.clickable") && !e.target.closest(".cmp-btn") && !e.target.closest(".cmt-btn") && !e.target.closest(".pop-btn")) closeTooltip();
+  if (tip && !tip.contains(e.target) && !e.target.closest(".glabel") && !e.target.closest(".bar.clickable") && !e.target.closest(".sbar.clickable") && !e.target.closest(".cmp-btn") && !e.target.closest(".cmt-btn") && !e.target.closest(".pop-btn")) closeTooltip();
 });
 
 // Список задач ячейки: ключ со ссылкой в Jira, название, статус, оценка.

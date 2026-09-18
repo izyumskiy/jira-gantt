@@ -16,10 +16,7 @@
   --view-bg: #e9f0fb; /* подложка группы ракурсов */
   --view-fg: #2b5aa8;
   /* Строка проекта на ракурсе «Эпик — история». */
-  --proj-bg: #efedfb;
-  --proj-accent: #6554c0;
-  --proj-accent-dark: #403294;
-  --proj-muted: #5e4db2;
+  --proj-bg: #f4f5f7;
 }
 
 * { box-sizing: border-box; }
@@ -370,8 +367,6 @@ table.gantt { border-collapse: separate; border-spacing: 0; }
 /* Строки дерева не переносятся: лишнее обрезается у подписи, а не уезжает на вторую строку. */
 .gantt tbody .c-name { white-space: nowrap; overflow: hidden; }
 /* Запас под кнопки и статус рядом с подписью на «Эпик — история». */
-.mode-epicStories .s-epic .glabel { max-width: calc(var(--name-w) - 300px); }
-.mode-epicStories .s-story .plabel { max-width: calc(var(--name-w) - 220px); }
 /* Граница колонки названий двигается: ручка на правом краю заголовка. */
 .col-resizer {
   position: absolute;
@@ -412,30 +407,67 @@ body.col-resizing { cursor: col-resize; user-select: none; }
 .prio-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin: 0 6px 0 3px; vertical-align: -1px; flex: none; }
 /* Ракурс «Эпик — история» (Р5): проект → эпик → история. */
 .indent.indent2 { width: 36px; }
-/* Строка проекта: заливка на всю ширину — от названия до бэклога, акцентная полоса слева. */
-.g-row.s-project > td, .g-row.s-project:hover > td, .gantt .g-row.s-project > td.c-backlog { background: var(--proj-bg); }
-.g-row.s-project > .c-name { font-weight: 700; box-shadow: inset 4px 0 0 var(--proj-accent); }
-.g-row.s-project .s-meta { color: var(--proj-muted); }
-/* Полосы-итоги проекта — «таблетки» в цвете проекта с белыми цифрами; готовое — зелёным. */
-.bar.bar-group.bar-project {
-  background: var(--proj-accent);
-  color: #fff;
-  border-radius: 10px;
-  padding: 3px 10px;
-  box-shadow: 0 1px 2px rgba(9, 30, 66, .25);
-}
-.bar.bar-group.bar-project::before { background: #22a06b; opacity: .9; }
-.bar.bar-group.bar-project .bar-sum { color: rgba(255, 255, 255, .85); }
-.bar.bar-group.bar-project.clickable:hover { outline: 2px solid var(--proj-accent-dark); outline-offset: 1px; }
+/* Строка проекта: лёгкая подложка на всю ширину, от названия до бэклога. */
+.g-row.s-project { --row-bg: var(--proj-bg); }
+.g-row.s-project > td, .gantt .g-row.s-project > td.c-backlog { background: var(--proj-bg); }
+.g-row.s-project .s-title { font-weight: 700; }
 .g-row.s-epic { background: var(--panel); }
-.g-row.s-epic > .c-name { font-weight: 600; }
-.s-label { margin-left: 2px; }
-.s-meta { margin-left: 8px; color: var(--muted); font-weight: 400; font-size: 11px; }
+.g-row.s-epic .s-title { font-weight: 600; }
+.g-row:hover { --row-bg: #f4f7fb; }
+.s-meta { color: var(--muted); font-weight: 400; font-size: 11px; }
 .s-story-link { color: var(--text); text-decoration: none; }
 a.s-story-link:hover { color: var(--accent); text-decoration: underline; }
-.s-foreign { margin-left: 6px; padding: 0 5px; border-radius: 8px; background: #eae6ff; color: #403294; font-size: 10px; white-space: nowrap; }
-.pop-btn.s-progress { margin-left: 6px; padding: 0 6px; border-radius: 8px; border-color: var(--line); font-size: 10px; line-height: 16px; font-weight: 600; color: var(--muted); background: var(--panel); }
-.pop-btn.s-progress.all-done { border-color: #abf5d1; background: #e3fcef; color: #006644; }
+.s-key { color: var(--muted); font-weight: 400; }
+.s-foreign { margin-left: 4px; padding: 0 5px; border-radius: 8px; background: #eae6ff; color: #403294; font-size: 10px; white-space: nowrap; flex: none; }
+/* Колонки слева: название | статус | готово | срок — выровнены по всем строкам. */
+.mode-epicStories .c-name { padding-top: 0; padding-bottom: 0; }
+.s-cols { display: flex; align-items: center; gap: 10px; min-height: 30px; }
+.s-title { position: relative; flex: 1; min-width: 0; display: flex; align-items: center; gap: 2px; overflow: hidden; white-space: nowrap; }
+/* Сжимается только текст названия: отступ, стрелка, приоритет и отметки держат размер — иначе при
+   узкой колонке строки съезжают влево по-разному, в зависимости от длины названия. */
+.s-title > * { flex: none; }
+.s-title > .glabel, .s-title > .plabel, .s-title > .s-label { flex: 0 1 auto; min-width: 0; max-width: none; overflow: hidden; text-overflow: ellipsis; }
+.s-title > .s-actions { flex: none; }
+.s-st { flex: 0 0 108px; display: flex; align-items: center; gap: 6px; overflow: hidden; white-space: nowrap; font-size: 12px; font-weight: 400; }
+.s-st-name { overflow: hidden; text-overflow: ellipsis; }
+.s-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: #8993a4; }
+.s-dot-progress { background: #0c66e4; }
+.s-dot-test { background: #e2b203; }
+.s-dot-done { background: #22a06b; }
+.s-dot-new { background: #6e5dc6; }
+.s-pr { flex: 0 0 96px; display: flex; flex-direction: column; justify-content: center; gap: 3px; font-size: 11px; font-weight: 400; color: var(--muted); }
+button.s-pr { border: none; background: none; padding: 2px 0; text-align: left; cursor: pointer; }
+button.s-pr:hover .s-pr-text { color: var(--accent); text-decoration: underline; }
+.s-pr-bar { display: block; height: 4px; border-radius: 2px; background: var(--line); overflow: hidden; }
+.s-pr-bar > i { display: block; height: 100%; background: #22a06b; }
+.s-pr.all-done .s-pr-text { color: #216e4e; }
+.s-due { flex: 0 0 58px; font-size: 12px; font-weight: 400; white-space: nowrap; color: var(--muted); font-variant-numeric: tabular-nums; }
+.s-due-soon { color: var(--danger); font-weight: 600; }
+.s-due-done { color: #216e4e; }
+.s-head .s-st, .s-head .s-pr, .s-head .s-due { font-size: 11px; font-weight: 600; color: var(--muted); }
+/* Действия строки («Проект…», 💬, ✎) — поверх конца названия, только при наведении. */
+.s-actions { position: absolute; right: 0; top: 50%; transform: translateY(-50%); display: none; align-items: center; gap: 4px; padding-left: 10px; background: var(--row-bg, var(--panel)); box-shadow: -10px 0 8px var(--row-bg, var(--panel)); }
+.g-row:hover .s-actions, .s-actions:focus-within { display: inline-flex; }
+.pop-btn.s-act { padding: 0 6px; font-size: 12px; line-height: 18px; }
+.s-donegroup .s-title { color: var(--muted); }
+/* Полосы секций: одна система — толщина показывает уровень, зелёное — готовое, цифры под полосой. */
+.gantt td.s-cell { padding: 4px 6px; }
+.sbar { display: flex; flex-direction: column; gap: 2px; cursor: pointer; }
+.sbar-track { display: block; width: 100%; border-radius: 4px; overflow: hidden; }
+.sbar-track > i { display: block; height: 100%; background: #22a06b; }
+.sbar-p .sbar-track { height: 8px; background: #9f8fef; }
+.sbar-e .sbar-track { height: 6px; background: #f5c04a; }
+.sbar-s .sbar-track { height: 4px; background: #85b8ff; }
+.sbar-num { font-size: 10px; line-height: 12px; color: var(--muted); text-align: right; white-space: nowrap; }
+.sbar:hover .sbar-track { outline: 1px solid var(--accent); outline-offset: 1px; }
+.sbar:hover .sbar-num { color: var(--text); }
+.sbar.own-sprint { cursor: help; }
+.sbar.own-sprint .sbar-track { background: repeating-linear-gradient(135deg, transparent 0 3px, #85b8ff 3px 6px); }
+/* Компактная шапка секций: «Текущий» / «+1» и точки команд; спринты — по щелчку. */
+.gantt th.c-sprint.compact { vertical-align: middle; }
+.sp-dots { display: flex; align-items: center; flex-wrap: wrap; gap: 1px; margin-top: 2px; }
+.sp-dots .dot { width: 7px; height: 7px; margin-right: 1px; }
+.sp-count { margin-left: 4px; font-size: 11px; font-weight: 400; color: var(--muted); }
 .s-missing { margin-left: 6px; color: var(--danger); font-size: 11px; cursor: help; }
 .pop-btn.s-proj-btn { margin-left: 6px; padding: 0 6px; font-size: 11px; line-height: 18px; font-weight: 400; }
 .pop-btn.s-rename { margin-left: 4px; font-size: 11px; font-weight: 400; }
@@ -841,10 +873,7 @@ textarea { font: inherit; padding: 5px 8px; border: 1px solid var(--line); borde
     --bar-strong: #2a6fd6;
     --view-bg: #1c2b40;
     --view-fg: #85b8ff;
-    --proj-bg: #2b2750;
-    --proj-accent: #8f7ee7;
-    --proj-accent-dark: #b8acf6;
-    --proj-muted: #b8acf6;
+    --proj-bg: #2a2f35;
   }
   button { background: #2c333a; }
   button:hover { background: #343b43; }

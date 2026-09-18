@@ -2377,12 +2377,12 @@ check("пиктограмма 💬 есть и на «По эпикам и лю�
   check("Р6: у проекта, эпика и истории — пиктограмма приоритета", rowsOf(".s-project, .s-epic, .s-story").every((r) => r.querySelector(".prio-icon, .prio-dot")));
   const us1Row = rowsOf(".s-story").find((r) => r.dataset.story === "US-1");
   check("Р5: у истории отметка чужих задач и незагруженных", us1Row.querySelector(".s-foreign")?.textContent.includes("2") && us1Row.querySelector(".s-missing")?.textContent.includes("1"));
-  us1Row.querySelector(".bar.clickable").click();
+  us1Row.querySelector(".sbar.clickable").click();
   const tipText = document.querySelector(".tooltip.tip-issues")?.textContent || "";
   check("Р5: в списке задач истории чужие помечены эпиком", tipText.includes(t("story.fromEpic", { key: "EP-Z" })) || tipText.includes(t("story.fromEpic", { key: "E-2" })), tipText.slice(0, 200));
   document.querySelector(".tooltip .tip-close")?.click();
-  check("Р5: у истории без задач — отрезок по её спринту", !!rowsOf(".s-story").find((r) => r.dataset.story === "US-3").querySelector(".bar.own-sprint"));
-  check("Р5: вехи проекта и эпика на строках", !!rowsOf(".s-project")[0].querySelector(".due-flag.due-planned") && !!rowsOf(".s-epic").find((r) => r.dataset.epic === "E-1").querySelector(".due-flag"));
+  check("Р5: у истории без задач — отрезок по её спринту", !!rowsOf(".s-story").find((r) => r.dataset.story === "US-3").querySelector(".sbar.own-sprint"));
+  check("Р5: вехи проекта и эпика — в колонке «Срок» (◇ — плановое завершение), линия вехи — на шкале", /◇ \d{2}\.\d{2}/.test(rowsOf(".s-project")[0].querySelector(".s-due").textContent) && /◆ \d{2}\.\d{2}/.test(rowsOf(".s-epic").find((r) => r.dataset.epic === "E-1").querySelector(".s-due").textContent) && !!rowsOf(".s-epic").find((r) => r.dataset.epic === "E-1").querySelector(".due-line"));
   check("Р5: у эпика — «Проект…» и 💬, у проекта «Без проекта» нет «Переименовать…»",
     rowsOf(".s-epic").every((r) => r.querySelector(".s-proj-btn") && r.querySelector(".cmt-btn")) && !rowsOf(".s-project").at(-1).querySelector(".s-rename") && !!rowsOf(".s-project")[0].querySelector(".s-rename"));
 
@@ -2459,14 +2459,15 @@ check("пиктограмма 💬 есть и на «По эпикам и лю�
   sv.render(box, model, opts);
   box.querySelector(".gantt-bar .link").click(); // развернуть всё
   const noteRows = [...box.querySelectorAll(".s-note")];
-  check("Р4: строки заметок под эпиком и под каждой историей, у проекта — нет", noteRows.map((r) => r.dataset.note).join() === "N-E,N-S1,N-S2" && !box.querySelector(".s-project + .s-note"), noteRows.map((r) => r.dataset.note).join());
+  check("Р4: строка заметки — только там, где заметка есть (эпик, история N-S1); у проекта — нет", noteRows.map((r) => r.dataset.note).join() === "N-E,N-S1" && !box.querySelector(".s-project + .s-note"), noteRows.map((r) => r.dataset.note).join());
   const epicNote = noteRows[0];
   check("Р4: заметка эпика — текст (первые две строки), автор, дата, полный текст при наведении",
     epicNote.querySelector(".s-note-text").textContent.startsWith("Первая строка") && epicNote.querySelector(".s-note-text").title.includes("третья") && epicNote.querySelector(".s-note-who").textContent.includes("Пётр") &&
       getComputedStyle(epicNote.querySelector(".s-note-text")).webkitLineClamp === "2");
   check("Р4: заметка старше порога помечена «заметке N дн.»", epicNote.querySelector(".s-note-stale")?.textContent === t("note.stale", { n: 20 }) && !noteRows[1].querySelector(".s-note-stale"));
-  check("Р4: заметка истории — только у своей истории", noteRows[1].textContent.includes("Заметка истории") && !noteRows[0].textContent.includes("Заметка истории") && !noteRows[2].textContent.includes("Заметка истории"));
-  check("Р4: нет заметки — бледное «Заметки нет · добавить»", noteRows[2].querySelector(".s-note-box.s-note-empty") && noteRows[2].textContent.includes(t("note.none")) && !!noteRows[2].querySelector(".s-note-add"));
+  check("Р4: заметка истории — только у своей истории", noteRows[1].textContent.includes("Заметка истории") && !noteRows[0].textContent.includes("Заметка истории"));
+  const s2Row = box.querySelector('.s-story[data-story="N-S2"]');
+  check("Р4: нет заметки — строки нет, добавить можно ✎ в действиях строки", !!s2Row.querySelector(".s-actions .s-note-add") && s2Row.nextElementSibling?.dataset.note !== "N-S2");
   check("Р4: «История (N)» — только когда есть прежние заметки", epicNote.querySelector(".s-note-hist")?.textContent === t("note.history", { n: 1 }) && !noteRows[1].querySelector(".s-note-hist"));
   epicNote.querySelector(".s-note-hist").click();
   check("Р4: в истории — прежние заметки с автором", document.querySelector(".tooltip.tip-note")?.textContent.includes("Старая") && document.querySelector(".tooltip.tip-note").textContent.includes("Иван"));
@@ -2489,7 +2490,7 @@ check("пиктограмма 💬 есть и на «По эпикам и лю�
   check("Р4: опубликован комментарий (omg comment) в ту же историю; заметка — с автором и датой из ответа Jira",
     JSON.stringify(sent) === JSON.stringify([["N-S1", "(omg comment)\nНовая заметка\nвторая строка"]]) && added[0]?.[0] === "story" && added[0][1] === "N-S1" && added[0][2].author === "Менеджер" && added[0][2].text === "Новая заметка\nвторая строка",
     JSON.stringify([sent, added]));
-  noteRows[2].querySelector(".s-note-add").click();
+  s2Row.querySelector(".s-note-add").click();
   pop = document.querySelector(".tooltip.tip-note");
   pop.querySelector(".s-note-save").click();
   check("Р4: пустую заметку не публикуем", pop.querySelector(".s-note-msg").textContent === t("note.empty") && sent.length === 1);
@@ -2603,8 +2604,10 @@ check("пиктограмма 💬 есть и на «По эпикам и лю�
   const bg = (td) => getComputedStyle(td).backgroundColor;
   check("Проект: ширина колонки ракурса — своя сохранённая (700px)", parseFloat(getComputedStyle(sb.querySelector("table.gantt")).getPropertyValue("--name-w")) === 700);
   check("Проект: строка залита целиком — от названия до бэклога, одним цветом", [...prow.children].every((td) => bg(td) === bg(prow.children[0])) && bg(prow.children[0]) !== bg(sb.querySelector(".s-epic > .c-cell")));
-  const pb = prow.querySelector(".bar");
-  check("Проект: полосы-итоги проекта в своём стиле, у эпика — прежние жёлтые", pb.classList.contains("bar-project") && getComputedStyle(pb).color === "rgb(255, 255, 255)" && !sb.querySelector(".s-epic .bar-project"));
+  const pb = prow.querySelector(".sbar-track");
+  const eb = sb.querySelector(".s-epic .sbar-track");
+  check("Проект: одна система полос — толщина по уровню: проект толще эпика, эпик толще истории",
+    !!pb && !!eb && pb.getBoundingClientRect().height > eb.getBoundingClientRect().height && prow.querySelector(".sbar-p") && !sb.querySelector(".s-epic .sbar-p"));
   sb.remove();
   await settings.save({ nameWidths: {} });
 }
@@ -2639,7 +2642,7 @@ check("пиктограмма 💬 есть и на «По эпикам и лю�
   box.querySelector(".gantt-bar .link").click();
   const row = box.querySelector('.s-story[data-story="K-S"]');
   check("Дефект связей: при верной связи задачи истории в её секциях, подсказки нет",
-    hit.storyTaskTotal === 2 && !box.querySelector(".s-nostories") && row.querySelectorAll(".c-cell .bar").length >= 1, `${hit.storyTaskTotal}`);
+    hit.storyTaskTotal === 2 && !box.querySelector(".s-nostories") && row.querySelectorAll(".c-cell .sbar").length >= 1, `${hit.storyTaskTotal}`);
   const nolinks = stories.buildStoryModel({ ...opt, issues: ISS.map((i) => ({ ...i, links: [] })), linkType: "Relates" });
   sv.render(box, nolinks, { storyLinkText: "Relates" });
   check("Дефект связей: у историй нет связей вовсе — так и сказано", box.querySelector(".s-nostories")?.textContent.includes(t("story.noLinks")));
@@ -2710,6 +2713,54 @@ check("пиктограмма 💬 есть и на «По эпикам и лю�
   settings.MIGRATIONS[2](mg);
   settings.MIGRATIONS[2](mine);
   check("Связи: нетронутое «Relates» поднимается миграцией до «Relates, is subtask of», своё не трогаем", mg.storyLinkType === "Relates, is subtask of" && mine.storyLinkType === "Связано" && settings.SCHEMA === 3);
+}
+
+// Новый вид «Эпик — история»: выровненные колонки, одна система полос, свёрнутые готовые истории.
+{
+  const stories = await import("../src/js/stories.js");
+  const sv = await import("../src/js/storiesView.js");
+  const EPS = [{ key: "R-E", summary: "Эпик", statusName: "В работе", statusCategory: "indeterminate", dueDate: ymd(5) }];
+  const L = (key) => ({ type: "Relates", key, typeName: "Задача" });
+  const ISS = [
+    { ...mk("R-S1", "R-E", "AAA", "Ivan", null, 0, "prog"), typeName: "История", links: [L("R-1")], summary: "Очень длинное название истории, которое точно не поместится в узкую колонку названий" },
+    { ...mk("R-S2", "R-E", "AAA", "Ivan", null, 0, "done"), typeName: "История", links: [L("R-2")] },
+    { ...mk("R-S3", "R-E", "AAA", "Ivan", null, 0, "done"), typeName: "История", links: [] },
+    { ...mk("R-1", "R-E", "AAA", "Ivan", 2, 4, "new"), typeName: "Задача", links: [] },
+    { ...mk("R-2", "R-E", "AAA", "Ivan", 1, 2, "done"), typeName: "Задача", links: [] }
+  ];
+  const m = stories.buildStoryModel({ epics: EPS, issues: ISS, sprints, boards, storyTypes: ["история"], excludeTypes: ["история"], linkType: "Relates" });
+  const box = document.createElement("div");
+  document.body.append(box);
+  sv.resetCollapse();
+  sv.render(box, m, { onNoteAdded: () => {} });
+  box.querySelector(".gantt-bar .link").click();
+  const head = box.querySelector("thead .c-name .s-head");
+  check("Вид: у колонки названий заголовки «Статус», «Готово», «Срок»", !!head && head.textContent.includes(t("story.colStatus")) && head.textContent.includes(t("story.colDone")) && head.textContent.includes(t("story.colDue")));
+  const erow = box.querySelector(".s-epic");
+  check("Вид: у эпика — статус точкой и текстом, «готово N из M», срок в колонке", erow.querySelector(".s-st .s-dot-progress") && erow.querySelector(".s-pr").textContent === t("story.progress", { done: 1, n: 2 }) && /◆/.test(erow.querySelector(".s-due").textContent) && erow.querySelector(".s-due").classList.contains("s-due-soon"));
+  check("Вид: колонки выровнены — «Статус» у всех строк с одного отступа", new Set([...box.querySelectorAll("tbody .s-st")].map((x) => Math.round(x.getBoundingClientRect().left))).size === 1);
+  check("Вид: действия строки спрятаны до наведения", getComputedStyle(erow.querySelector(".s-actions")).display === "none");
+  check("Вид: в полосах истории нет названия спринта — оно в подсказке", !box.querySelector(".s-story .bar-sprint") && box.querySelector('.s-story[data-story="R-S1"] .sbar').title.includes("Sprint 2"));
+  const stories1 = [...box.querySelectorAll(".s-story")].map((r) => r.dataset.story).join();
+  const dg = box.querySelector(".s-donegroup");
+  check("Вид: готовые истории свёрнуты в одну строку «Готовые истории · 2»", stories1 === "R-S1" && dg && dg.textContent.includes(t("story.doneGroup", { n: 2 })) && dg.querySelector(".s-pr").textContent === t("story.progress", { done: 1, n: 1 }));
+  dg.querySelector(".twisty").click();
+  check("Вид: по щелчку готовые истории раскрываются", [...box.querySelectorAll(".s-story")].map((r) => r.dataset.story).join() === "R-S1,R-S2,R-S3");
+  // Узкая колонка: отступы и приоритет не сжимаются — строки не съезжают, сжимается только название.
+  const tblN = box.querySelector("table.gantt");
+  tblN.style.setProperty("--name-w", "300px");
+  const leftOf = (sel) => [...box.querySelectorAll(sel)].map((r) => Math.round(r.querySelector(".s-title .prio-icon, .s-title .prio-dot, .s-title .plabel").getBoundingClientRect().left));
+  const storyLefts = new Set(leftOf(".s-story"));
+  const ind = box.querySelector(".s-story .indent2");
+  check("Вид: при узкой колонке отступы не сжимаются, строки историй выровнены", storyLefts.size === 1 && Math.round(ind.getBoundingClientRect().width) === 36, `${[...storyLefts]} / ${ind.getBoundingClientRect().width}`);
+  tblN.style.removeProperty("--name-w");
+  gantt.applyNameWidth(tblN, "epicStories");
+  const th = box.querySelector("thead th.c-sprint.current");
+  check("Вид: компактная шапка — «Текущий» и число спринтов, без списка", th.textContent.includes(t("gantt.current")) && th.querySelector(".sp-count") && !th.querySelector(".sp-list"));
+  th.click();
+  check("Вид: по щелчку по шапке — список спринтов секции", !!box.querySelector("thead th.c-sprint.current .sp-list .sp-item"));
+  box.querySelector("thead th.c-sprint.current").click();
+  box.remove();
 }
 
 const total = document.createElement("div");
