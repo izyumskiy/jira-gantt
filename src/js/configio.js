@@ -41,6 +41,8 @@ export function parseConfig(text) {
     fields: cfg.fields && typeof cfg.fields === "object" ? cfg.fields : {},
     infoSystems: Array.isArray(cfg.infoSystems) ? cfg.infoSystems : typeof cfg.infoSystems === "string" ? parseSystems(cfg.infoSystems) : [],
     teams: Array.isArray(cfg.teams) ? cfg.teams : typeof cfg.teams === "string" ? parseSystems(cfg.teams) : [],
+    summary: cfg.summary && typeof cfg.summary === "object" ? cfg.summary : null,
+    requestTimeoutSec: Number(cfg.requestTimeoutSec) > 0 ? Number(cfg.requestTimeoutSec) : null,
     epics: Array.isArray(cfg.epics) ? cfg.epics.map((k) => String(k).trim()).filter(Boolean) : [],
     people: Array.isArray(cfg.people) ? cfg.people.filter((p) => p && typeof p === "object" && p.name) : []
   };
@@ -95,7 +97,12 @@ export async function applyConfig(cfg, { onLog = () => {} } = {}) {
   // Конфиг — источник истины: справочники систем и команд берём из него целиком (старые не смешиваем).
   const systems = [...new Set(cfg.infoSystems.map((x) => String(x).trim()).filter(Boolean))];
   const teams = [...new Set(cfg.teams.map((x) => String(x).trim()).filter(Boolean))];
-  await settings.save({ fields, infoSystems: systems, teams });
+  // Пороги «Сводки»: берём только известные числовые ключи, остальное — по умолчанию.
+  const summary = {};
+  for (const [k, v] of Object.entries(cfg.summary || {})) {
+    if (k in settings.DEFAULTS.summary && Number.isFinite(Number(v)) && Number(v) >= 0) summary[k] = Number(v);
+  }
+  await settings.save({ fields, infoSystems: systems, teams, summary, ...(cfg.requestTimeoutSec ? { requestTimeoutSec: cfg.requestTimeoutSec } : {}) });
   log(t("cfg.systemsSet", { n: systems.length }));
   if (teams.length) log(t("cfg.teamsSet", { n: teams.length }));
 
@@ -171,6 +178,8 @@ export async function exportConfig() {
     },
     infoSystems: s.infoSystems || [],
     teams: s.teams || [],
+    summary: { ...s.summary },
+    requestTimeoutSec: s.requestTimeoutSec,
     epics: epics.map((e) => e.key),
     people: rows.map((r) => ({
       name: r.displayName,

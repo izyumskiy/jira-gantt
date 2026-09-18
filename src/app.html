@@ -14,6 +14,7 @@
 
       <nav class="tabs">
         <button class="tab active" data-tab="search" data-i18n="tab.search"></button>
+        <button class="tab" data-tab="summary" data-i18n="tab.summary"></button>
         <button class="tab" data-tab="epicPeople" data-i18n="tab.epicPeople"></button>
         <button class="tab" data-tab="people" data-i18n="tab.people"></button>
         <button class="tab" data-tab="team" data-i18n="tab.team"></button>
@@ -68,6 +69,9 @@
       </section>
 
       <!-- Вкладка 2: По эпикам — эпики → исполнители -->
+      <!-- Вкладка «Сводка»: статус портфеля после обновления -->
+      <section class="page hidden" id="page-summary"></section>
+
       <section class="page hidden" id="page-epicPeople">
         <div class="filter-bar">
           <label>
@@ -193,6 +197,81 @@
           </label>
           <div class="row">
             <button id="btnBoards" data-i18n="set.loadBoards"></button>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3 data-i18n="set.summary"></h3>
+          <small class="muted" data-i18n="set.summaryHint"></small>
+          <div class="sum-settings">
+            <label class="field narrow">
+              <span data-i18n="set.sum.chanceGreen"></span>
+              <input id="sum-chanceGreen" data-sum="chanceGreen" type="number" min="0" step="1" />
+            </label>
+            <label class="field narrow">
+              <span data-i18n="set.sum.chanceYellow"></span>
+              <input id="sum-chanceYellow" data-sum="chanceYellow" type="number" min="0" step="1" />
+            </label>
+            <label class="field narrow">
+              <span data-i18n="set.sum.shiftDays"></span>
+              <input id="sum-shiftDays" data-sum="shiftDays" type="number" min="0" step="1" />
+            </label>
+            <label class="field narrow">
+              <span data-i18n="set.sum.scopePct"></span>
+              <input id="sum-scopePct" data-sum="scopePct" type="number" min="0" step="1" />
+            </label>
+            <label class="field narrow">
+              <span data-i18n="set.sum.scopeAbs"></span>
+              <input id="sum-scopeAbs" data-sum="scopeAbs" type="number" min="0" step="1" />
+            </label>
+            <label class="field narrow">
+              <span data-i18n="set.sum.nearWeeks"></span>
+              <input id="sum-nearWeeks" data-sum="nearWeeks" type="number" min="0" step="1" />
+            </label>
+            <label class="field narrow">
+              <span data-i18n="set.sum.nearDonePct"></span>
+              <input id="sum-nearDonePct" data-sum="nearDonePct" type="number" min="0" step="1" />
+            </label>
+            <label class="field narrow">
+              <span data-i18n="set.sum.stallWeeks"></span>
+              <input id="sum-stallWeeks" data-sum="stallWeeks" type="number" min="0" step="1" />
+            </label>
+            <label class="field narrow">
+              <span data-i18n="set.sum.meltWeeks"></span>
+              <input id="sum-meltWeeks" data-sum="meltWeeks" type="number" min="0" step="1" />
+            </label>
+            <label class="field narrow">
+              <span data-i18n="set.sum.carrySprints"></span>
+              <input id="sum-carrySprints" data-sum="carrySprints" type="number" min="0" step="1" />
+            </label>
+            <label class="field narrow">
+              <span data-i18n="set.sum.idlePct"></span>
+              <input id="sum-idlePct" data-sum="idlePct" type="number" min="0" step="1" />
+            </label>
+            <label class="field narrow">
+              <span data-i18n="set.sum.spreadFlow"></span>
+              <input id="sum-spreadFlow" data-sum="spreadFlow" type="number" min="0" step="0.5" />
+            </label>
+            <label class="field narrow">
+              <span data-i18n="set.sum.spreadWeeks"></span>
+              <input id="sum-spreadWeeks" data-sum="spreadWeeks" type="number" min="0" step="1" />
+            </label>
+            <label class="field narrow">
+              <span data-i18n="set.sum.bottleneckPct"></span>
+              <input id="sum-bottleneckPct" data-sum="bottleneckPct" type="number" min="0" step="1" />
+            </label>
+            <label class="field narrow">
+              <span data-i18n="set.sum.noEstimatePct"></span>
+              <input id="sum-noEstimatePct" data-sum="noEstimatePct" type="number" min="0" step="1" />
+            </label>
+            <label class="field narrow">
+              <span data-i18n="set.sum.attention"></span>
+              <input id="sum-attention" data-sum="attention" type="number" min="0" step="1" />
+            </label>
+            <label class="field narrow">
+              <span data-i18n="set.requestTimeout"></span>
+              <input id="requestTimeoutSec" type="number" min="5" max="300" step="1" />
+            </label>
           </div>
         </div>
 

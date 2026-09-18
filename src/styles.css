@@ -721,3 +721,45 @@ textarea { font: inherit; padding: 5px 8px; border: 1px solid var(--line); borde
   .status { background: #2b2f4a; }
   .status.error { background: #442726; color: #ff9c8f; }
 }
+
+/* ---------- «Сводка» ---------- */
+#page-summary { max-width: 1100px; }
+.sum-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 18px; margin: 0 0 10px; }
+.sum-modes { margin-left: auto; }
+.sum-totals { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 0 0 6px; font-size: 13px; }
+.sum-total { display: inline-flex; align-items: center; gap: 6px; }
+.dot-status { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: #a5adba; flex: none; margin-right: 6px; }
+.dot-status.c-red { background: #de350b; }
+.dot-status.c-yellow { background: #ffab00; }
+.dot-status.c-green { background: #36b37e; }
+.dot-status.c-unknown { background: #c1c7d0; }
+.dot-status.c-nodue { background: transparent; border: 1px solid #a5adba; }
+.dot-status.c-done { background: #6554c0; }
+.sum-h { margin: 16px 0 6px; font-size: 13px; text-transform: uppercase; letter-spacing: .03em; color: var(--muted); }
+.sum-attention { display: flex; flex-direction: column; gap: 2px; }
+.sig { display: flex; gap: 8px; align-items: baseline; padding: 4px 8px; border-radius: 3px; line-height: 1.4; }
+.sig.clickable { cursor: pointer; }
+.sig.clickable:hover { background: var(--hover, #f4f5f7); }
+.sig-icon { width: 12px; flex: none; text-align: center; font-size: 11px; }
+.sig-critical .sig-icon { color: #de350b; }
+.sig-warning .sig-icon { color: #ff8b00; }
+.sig-info .sig-icon { color: var(--muted); }
+.sum-group { margin: 6px 0; border: 1px solid var(--line); border-radius: 4px; padding: 4px 8px; background: var(--panel); }
+.sum-group > summary { cursor: pointer; font-weight: 600; padding: 4px 0; }
+.sum-table-wrap { overflow-x: auto; }
+.sum-table { border-collapse: collapse; width: 100%; font-size: 13px; background: var(--panel); }
+.sum-table th, .sum-table td { padding: 5px 8px; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; }
+.sum-table th { color: var(--muted); font-weight: 600; font-size: 11px; text-transform: uppercase; }
+.sum-table tr.clickable { cursor: pointer; }
+.sum-table tr.clickable:hover td { background: var(--hover, #f4f5f7); }
+.sum-table td.tp-num { text-align: right; font-variant-numeric: tabular-nums; }
+.sum-table td.neg { color: #de350b; font-weight: 600; }
+.sum-epic { max-width: 420px; overflow: hidden; text-overflow: ellipsis; }
+.spark { width: 84px; height: 22px; display: block; }
+.spark-zero { stroke: #c1c7d0; stroke-width: 1; stroke-dasharray: 3 2; }
+.spark-line { fill: none; stroke: #0052cc; stroke-width: 1.5; stroke-linejoin: round; }
+.spark-line.neg { stroke: #de350b; }
+.sum-settings { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 4px 16px; margin-top: 6px; }
+@media (prefers-color-scheme: dark) {
+  .sig.clickable:hover, .sum-table tr.clickable:hover td { background: #2c333a; }
+}

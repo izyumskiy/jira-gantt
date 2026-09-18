@@ -16,6 +16,7 @@ import { parseSprint, datesFromName, checkApis, searchEpics, epicKeysFrom, sync 
 import * as jiraApi from "../src/js/jira.js";
 import * as analytics from "../src/js/analytics.js";
 import * as summary from "../src/js/summary.js";
+import * as summaryView from "../src/js/summaryView.js";
 import { runForecast, workerAvailable } from "../src/js/forecastClient.js";
 import { classify, isDoneStatus } from "../src/js/status.js";
 import { collectPeople, mergeProfiles, parseSystems, systemsList, teamsList, normName, roleSummary } from "../src/js/team.js";
@@ -745,6 +746,12 @@ await settings.save({ infoSystems: [], fields: { plannedStart: "", plannedEnd: "
   check("проверка API: закрытые Agile и Tempo помечены", !st.agile.ok && !st.tempo.ok && st.limited === true, JSON.stringify({ agile: st.agile.code, tempo: st.tempo.code }));
   await settings.save({ useTempoTeams: false });
   check("выключённый Tempo проверкой не считается ошибкой", (await checkApis()).tempo.skipped === true);
+  window.fetch = async (url) => {
+    const u = String(url);
+    if (u.includes("/rest/tempo-teams")) return json({ errorMessages: ["not installed"] }, 404);
+    return json(u.includes("/rest/agile/") ? { values: [] } : { name: "ivan", issues: [], total: 0 });
+  };
+  check("выключенный Tempo при открытом Agile — не «ограничения API»", (await checkApis()).limited === false);
   await settings.save({ useTempoTeams: true });
   window.fetch = async () => json({ errorMessages: ["denied"] }, 403);
   const denied = await checkApis();
@@ -1230,6 +1237,69 @@ await settings.save({ infoSystems: [], fields: { plannedStart: "", plannedEnd: "
   check("Б4: «Требует внимания» — сначала критичные, по величине, без информационных, не больше лимита",
     top.length === 2 && top.every((x) => x.severity === "critical") && summary.attention(many, 10).every((x) => x.severity !== "info"), top.map((x) => x.type).join(","));
   check("Б4: у сигнала устойчивый ключ", many.every((x) => typeof x.id === "string" && x.id.startsWith(x.type)));
+}
+
+// Б5. вкладка «Сводка»: база сравнения, режим «за 7 дней», отрисовка, тексты; Б10 — пороги в конфигурации
+{
+  const DAYMS = 86400000;
+  const now = Date.now();
+  const d = (days) => { const x = new Date(now + days * DAYMS); const p2 = (n) => String(n).padStart(2, "0"); return `${x.getFullYear()}-${p2(x.getMonth() + 1)}-${p2(x.getDate())}`; };
+  const stOf = (o = {}) => ({ epicKey: "EP-1", summary: "Личный кабинет", epicName: "ЛК", statusName: "В работе", statusCategory: "indeterminate", dueDate: d(90), total: 100, done: 40, remaining: 60, estTotal: 0, estDone: 0, carriedOver: 0, p50: d(40), p85: d(50), chance: 0.95, buffer: 5.5, reason: "", historyWeeks: 30, teams: [], ...o });
+  await dbm.clearAll();
+  const s1 = now - 8 * DAYMS;
+  const s2 = now - 1000;
+  await dbm.putAll(dbm.STORES.epics, [{ key: "EP-1", summary: "Личный кабинет" }, { key: "EP-2", summary: "Биллинг" }]);
+  await dbm.putAll(dbm.STORES.issues, [{ ...mk("S5-1", "EP-1", "AAA", "Ivan", 2, 1, "done"), resolved: new Date(now - DAYMS).toISOString() }, { ...mk("S5-2", "EP-2", "AAA", "Ivan", 2, 1, "done"), resolved: new Date(now - DAYMS).toISOString() }]);
+  await dbm.putAll(dbm.STORES.sprints, sprints);
+  await dbm.putAll(dbm.STORES.syncLog, [
+    { ...stOf(), syncId: s1 },
+    { ...stOf({ epicKey: "EP-2", summary: "Биллинг", epicName: "", chance: 0.3, buffer: -1.5 }), syncId: s1 },
+    { ...stOf({ total: 106, remaining: 66, p85: d(58) }), syncId: s2 },
+    { ...stOf({ epicKey: "EP-2", summary: "Биллинг", epicName: "", chance: 0.3, buffer: -1.5 }), syncId: s2 }
+  ]);
+  await dbm.putAll(dbm.STORES.epicWeeks, [2.5, 1, -0.5, -1.5].map((b, i) => ({ ...stOf({ epicKey: "EP-2", buffer: b }), week: flowlib.weekKey(now - (4 - i) * 7 * DAYMS), restored: true })));
+  await dbm.metaSet("lastSyncId", s2);
+  await dbm.metaSet("seenSyncId", s1);
+  await settings.save({ lastSync: s2 });
+
+  const session = await summaryView.openSession();
+  check("Б5: при открытии база — прошлая отметка, отметка сдвигается на последнюю синхронизацию",
+    session.baseSyncId === s1 && (await dbm.metaGet("seenSyncId")) === s2);
+  const data = await summaryView.loadData({ session, now });
+  check("Б5: изменения — относительно прошлого просмотра", data.signals.some((x) => x.type === "scopeUp" && x.epicKey === "EP-1") && data.signals.some((x) => x.type === "shiftLater"),
+    data.signals.map((x) => x.type).join(","));
+  check("Б5: запас тает — по недельным записям, в том числе восстановленным", data.signals.some((x) => x.type === "melting" && x.epicKey === "EP-2"));
+  const again = await summaryView.loadData({ session: await summaryView.openSession(), now });
+  check("Б5: ушли и вернулись без обновления — «что изменилось» пусто", !again.signals.some((x) => x.group === "changes"));
+  const week = await summaryView.loadData({ mode: "week", session, now });
+  check("Б5: «за 7 дней» — последняя синхронизация не позже недели назад", week.base && week.base.at === s1 && week.signals.some((x) => x.type === "scopeUp"));
+
+  const shift = data.signals.find((x) => x.type === "shiftLater");
+  const txt = summaryView.signalText(shift, data.current);
+  check("Б5: текст сигнала — эпик с Epic Name и даты в виде ДД.ММ.ГГ", txt.includes("EP-1 · ЛК") && /\d\d\.\d\d\.\d\d → \d\d\.\d\d\.\d\d/.test(txt), txt);
+  const low = data.signals.find((x) => x.type === "lowChance");
+  check("Б5: запас со знаком и запятой", summaryView.signalText(low, data.current).includes("−1,5"), summaryView.signalText(low, data.current));
+
+  const box = document.createElement("div");
+  document.body.append(box);
+  await summaryView.render(box, { session: { baseSyncId: s1 } });
+  const rowsTxt = [...box.querySelectorAll(".sum-table tbody tr")].map((tr) => tr.textContent);
+  check("Б5: вкладка — шапка, итог по цветам, «Требует внимания», 5 блоков, таблица портфеля",
+    !!box.querySelector(".sum-head") && box.querySelectorAll(".sum-total").length >= 2 && box.querySelectorAll(".sum-attention .sig").length >= 1 &&
+      box.querySelectorAll("details.sum-group").length === 5 && rowsTxt.length === 2, `${rowsTxt.length}`);
+  check("Б5: портфель — от худшего запаса", rowsTxt[0].startsWith("EP-2"), rowsTxt.join(" | "));
+  check("Б5: мини-график запаса — линия по недельным записям", !!box.querySelector(".sum-table tbody tr .spark polyline"));
+  box.remove();
+
+  // Б10: пороги попадают в экспорт и импорт конфигурации
+  await settings.save({ summary: { shiftDays: 9 } });
+  const exported = await exportConfig();
+  check("Б10: пороги «Сводки» и таймаут — в экспорте конфигурации", exported.summary.shiftDays === 9 && exported.summary.chanceGreen === 85 && exported.requestTimeoutSec === settings.get().requestTimeoutSec);
+  await applyConfig(parseConfig(JSON.stringify({ summary: { shiftDays: 10, bogus: 5, chanceGreen: "x" } })), { onLog: () => {} });
+  check("Б10: импорт порогов — только известные числовые, остальное по умолчанию",
+    settings.get().summary.shiftDays === 10 && !("bogus" in settings.get().summary) && settings.get().summary.chanceGreen === 85, JSON.stringify(settings.get().summary));
+  await settings.save({ summary: { ...settings.DEFAULTS.summary } });
+  await dbm.clearAll();
 }
 
 // А1. модуль расчётов: одни и те же числа для списка, карточки и сводки

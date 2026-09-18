@@ -488,7 +488,8 @@ export async function checkApis(onProgress = () => {}) {
     : core.ok
       ? await probe(() => jira.tempoTeams())
       : { ...core };
-  return { core, search, agile, tempo, ok: core.ok && search.ok, limited: !agile.ok || !tempo.ok };
+  // Выключенный в настройках Tempo — не ограничение доступа.
+  return { core, search, agile, tempo, ok: core.ok && search.ok, limited: !agile.ok || (!tempo.ok && !tempo.skipped) };
 }
 
 // Только собирает: { rows, stats }; rows = null — хранилище не трогать.
@@ -845,7 +846,7 @@ export async function sync({ full = false, onProgress = () => {} } = {}) {
   if (flow.rows) ops.push({ store: db.STORES.flow, clear: true, put: flow.rows });
   if (boards) ops.push({ store: db.STORES.boards, put: boards });
   ops.push({ store: db.STORES.sprints, put: [...sprintMap.values()] });
-  ops.push({ store: db.STORES.meta, put: [{ k: "issueSchema", v: ISSUE_SCHEMA }] });
+  ops.push({ store: db.STORES.meta, put: [{ k: "issueSchema", v: ISSUE_SCHEMA }, { k: "lastApiLimited", v: !!apiStats.limited }] });
   if (states) {
     const week = flowlib.weekKey(syncId);
     const list = [...states.values()];

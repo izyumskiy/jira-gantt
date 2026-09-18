@@ -12,6 +12,7 @@ import * as configio from "./configio.js";
 import * as flowlib from "./flow.js";
 import * as analytics from "./analytics.js";
 import { runForecast } from "./forecastClient.js";
+import * as summaryView from "./summaryView.js";
 
 const $ = (sel) => document.querySelector(sel);
 const state = {
@@ -22,6 +23,9 @@ const state = {
   personFilter: null, // «По эпикам»: { key, name } человека, чьи эпики раскрыты
   epicFilter: null, // «По людям»: { key, name } эпика, чьи люди раскрыты
   issuesByEpic: new Map(), // ключ эпика → ключи его задач (для расчёта долей команд)
+  activeTab: "search",
+  summarySession: null, // база сравнения «Сводки» на время, пока вкладка открыта
+  summaryMode: "seen", // "seen" — с последнего просмотра, "week" — за 7 дней
   shareCache: new Map() // ключ эпика → посчитанные доли участия команд
 };
 
@@ -47,12 +51,42 @@ function fail(e) {
 
 function showTab(name) {
   applyTopHeight(); // содержимое верхней панели меняется — её высота тоже
+  const from = state.activeTab;
+  state.activeTab = name;
+  if (name === "summary" && from !== "summary") state.summarySession = null; // новая сессия просмотра
   document.querySelectorAll(".tab").forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
   document.querySelectorAll(".page").forEach((p) => p.classList.add("hidden"));
   $(`#page-${name}`).classList.remove("hidden");
   if (name === "people") drawGantt("assignee", $("#page-people"));
   if (name === "epicPeople") drawGantt("epicPeople", $("#page-epicPeople"));
   if (name === "team") team.render($("#page-team"), { notify: (m) => status(m) }).catch(fail);
+  if (name === "summary") drawSummary().catch(fail);
+}
+
+// «Сводка»: база фиксируется при открытии вкладки; пока вкладка на экране, отметка просмотра
+// сдвигается после каждой синхронизации, а база остаётся прежней.
+async function drawSummary() {
+  if (!state.summarySession) state.summarySession = await summaryView.openSession();
+  else await summaryView.markSeen();
+  await summaryView.render($("#page-summary"), {
+    mode: state.summaryMode,
+    session: state.summarySession,
+    onOpenEpic: (key, anchor) => openEpicCard(key, anchor).catch(fail),
+    onMode: (m) => {
+      state.summaryMode = m;
+      drawSummary().catch(fail);
+    }
+  });
+}
+
+// Карточка эпика (как по «+» в списке) — из «Сводки».
+async function openEpicCard(key, anchor) {
+  const epic = (await db.all(db.STORES.epics)).find((e) => e.key === key);
+  if (!epic) return;
+  const c = analytics
+    .epicCounters([epic], await db.all(db.STORES.issues), { excludeTypes: flowlib.parseTypeList(settings.get().forecastExcludeTypes) })
+    .get(key);
+  showEpicInfo(anchor, epic, c.spent, c.pct);
 }
 
 // Перерисовать активную вкладку с диаграммой (после синка, смены языка, фильтров).
@@ -62,6 +96,7 @@ function redrawActive() {
   if (active === "people") drawGantt("assignee", $("#page-people"));
   if (active === "epicPeople") drawGantt("epicPeople", $("#page-epicPeople"));
   if (active === "team") team.render($("#page-team"), { notify: (m) => status(m) }).catch(fail);
+  if (active === "summary") drawSummary().catch(fail);
 }
 
 // ---------- поиск эпиков ----------
@@ -1308,6 +1343,8 @@ function fillSettingsForm() {
   $("#sprintDays").value = s.sprintDays;
   $("#useTempoTeams").checked = !!s.useTempoTeams;
   $("#flowWeeks").value = s.flowWeeks;
+  $("#requestTimeoutSec").value = s.requestTimeoutSec;
+  document.querySelectorAll("[data-sum]").forEach((inp) => (inp.value = s.summary[inp.dataset.sum]));
   renderFlowDiag().catch(() => {});
   $("#doneStatuses").value = s.doneStatuses;
   $("#forecastExcludeTypes").value = s.forecastExcludeTypes ?? "";
@@ -1447,6 +1484,14 @@ async function saveSettingsForm() {
     sprintDays: Number($("#sprintDays").value) || 10,
     useTempoTeams: $("#useTempoTeams").checked,
     flowWeeks: Number($("#flowWeeks").value) || 52,
+    requestTimeoutSec: Number($("#requestTimeoutSec").value) || 30,
+    // Пороги «Сводки»: пустое или нечисловое поле — значение по умолчанию.
+    summary: Object.fromEntries(
+      [...document.querySelectorAll("[data-sum]")].map((inp) => {
+        const v = Number(inp.value);
+        return [inp.dataset.sum, inp.value !== "" && Number.isFinite(v) && v >= 0 ? v : settings.DEFAULTS.summary[inp.dataset.sum]];
+      })
+    ),
     doneStatuses: $("#doneStatuses").value.trim(),
     forecastExcludeTypes: $("#forecastExcludeTypes").value.trim(),
     infoSystems: team.parseSystems($("#infoSystems").value),
