@@ -2672,6 +2672,17 @@ check("пиктограмма 💬 есть и на «По эпикам и лю�
   box.remove();
 }
 
+// «Обновить» и «Скачать» — одной кнопкой-пиктограммой с меню.
+{
+  const html = await (await fetch("../src/app.html", { cache: "no-store" })).text();
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  const grp = doc.querySelector(".toolbar .sync-btn");
+  check("Синхронизация: одна кнопка ↻ (пиктограмма, подпись в подсказке) и ▾ с меню «Обновить» / «Скачать заново»",
+    !!grp && !!grp.querySelector("#btnRefresh svg") && !grp.querySelector("#btnRefresh").dataset.i18n && grp.querySelector("#btnRefresh").dataset.i18nTitle === "toolbar.refreshHint" &&
+      grp.querySelector("#btnSyncMenu[aria-haspopup='menu']") && grp.querySelector("#syncMenu[hidden] #btnRefreshItem") && grp.querySelector("#syncMenu #btnReload") &&
+      doc.querySelectorAll(".toolbar > button").length === 0);
+}
+
 const total = document.createElement("div");
 total.className = failures ? "t-fail" : "t-ok";
 total.textContent = failures ? `${failures} FAILED` : "ALL PASSED";

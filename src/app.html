@@ -47,8 +47,24 @@
       <div class="toolbar">
         <span id="stats" class="muted"></span>
         <span id="lastSync" class="muted"></span>
-        <button id="btnRefresh" class="primary" data-i18n="toolbar.refresh"></button>
-        <button id="btnReload" data-i18n="toolbar.reload"></button>
+        <!-- Синхронизация — одной кнопкой: ↻ — «Обновить» (Shift+щелчок — «Скачать заново»),
+             ▾ — меню с обоими действиями. -->
+        <span class="sync-btn" role="group" data-i18n-aria="toolbar.sync">
+          <button id="btnRefresh" class="primary sync-main" data-i18n-title="toolbar.refreshHint" data-i18n-aria="toolbar.refresh">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.64-6.36"></path><polyline points="21 3 21 9 15 9"></polyline></svg>
+          </button>
+          <button id="btnSyncMenu" class="primary sync-more" type="button" aria-haspopup="menu" aria-expanded="false" data-i18n-title="toolbar.syncMenu" data-i18n-aria="toolbar.syncMenu">▾</button>
+          <div id="syncMenu" class="sync-menu" role="menu" hidden>
+            <button id="btnRefreshItem" type="button" role="menuitem">
+              <strong data-i18n="toolbar.refresh"></strong>
+              <span class="muted small" data-i18n="toolbar.refreshItem"></span>
+            </button>
+            <button id="btnReload" type="button" role="menuitem">
+              <strong data-i18n="toolbar.reload"></strong>
+              <span class="muted small" data-i18n="toolbar.reloadItem"></span>
+            </button>
+          </div>
+        </span>
         <select id="lang" class="lang" data-i18n-title="lang.label">
           <option value="ru" title="Русский">🇷🇺</option>
           <option value="en" title="English">🇺🇸</option>
