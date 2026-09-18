@@ -22,6 +22,7 @@ export const DEFAULTS = {
   storyTypes: "User Story",
   storyLinkType: "Relates",
   noteStaleDays: 14,
+  storyShowNotes: true, // галочка «Заметки» на ракурсе «Эпик — история» (Р4)
   // Пороги «Сводки» (Б10).
   summary: {
     chanceGreen: 85, // шанс успеть, %: не ниже — зелёный

@@ -2428,6 +2428,90 @@ check("пиктограмма 💬 есть и на «По эпикам и лю�
   box.remove();
 }
 
+// Р4. Заметки (omg comment) к эпику и истории: показ, история, правка.
+{
+  const omgMod = await import("../src/js/omg.js");
+  const stories = await import("../src/js/stories.js");
+  const sv = await import("../src/js/storiesView.js");
+  const ago = (d) => new Date(Date.now() - d * day).toISOString();
+  const rec = { project: null, notes: [{ id: "1", text: "Старая", created: ago(30), author: "Иван" }, { id: "2", text: "Первая строка\nвторая\nтретья", created: ago(20), author: "Пётр" }] };
+  check("Р4: действующая заметка — последняя, история — прежние, новые первыми",
+    omgMod.latestNote(rec).id === "2" && omgMod.noteHistory(rec).map((n) => n.id).join() === "1" && omgMod.latestNote({ notes: [] }) === null && omgMod.noteHistory(null).length === 0);
+  check("Р4: возраст заметки в днях", omgMod.noteAgeDays(rec.notes[1]) === 20 && omgMod.noteAgeDays({ created: "" }) === null);
+  check("Р4: заметка из ответа Jira — автор и дата настоящие",
+    JSON.stringify(omgMod.noteFromComment({ id: 9, body: "(omg comment)\nТекст", created: "2026-09-18T10:00:00Z", author: { displayName: "Анна" } })) === JSON.stringify({ id: "9", text: "Текст", created: "2026-09-18T10:00:00Z", author: "Анна" }) &&
+      omgMod.noteFromComment({ body: "обычный" }) === null && omgMod.noteFromComment(null) === null);
+
+  const EPS = [{ key: "N-E", summary: "Эпик с заметкой", statusName: "В работе", statusCategory: "indeterminate", omg: { project: { name: "Проект", created: ago(1) }, notes: rec.notes } }];
+  const ISS = [
+    { ...mk("N-S1", "N-E", "AAA", "Ivan", 2, 1, "new"), typeName: "User Story", links: [], omg: { project: null, notes: [{ id: "5", text: "Заметка истории", created: ago(2), author: "Ольга" }] } },
+    { ...mk("N-S2", "N-E", "AAA", "Ivan", 2, 1, "new"), typeName: "User Story", links: [] },
+    { ...mk("N-T1", "N-E", "AAA", "Ivan", 2, 3, "new"), typeName: "Task", links: [] }
+  ];
+  const model = stories.buildStoryModel({ epics: EPS, issues: ISS, sprints, boards, storyTypes: ["user story"], excludeTypes: ["user story"], linkType: "Relates" });
+  const box = document.createElement("div");
+  document.body.append(box);
+  const added = [];
+  const toggles = [];
+  const notes = [];
+  const opts = { staleDays: 14, notify: (m, k) => notes.push([m, k]), onToggleNotes: (on) => toggles.push(on), onNoteAdded: async (kind, key, note) => added.push([kind, key, note]) };
+  sv.resetCollapse();
+  sv.render(box, model, opts);
+  box.querySelector(".gantt-bar .link").click(); // развернуть всё
+  const noteRows = [...box.querySelectorAll(".s-note")];
+  check("Р4: строки заметок под эпиком и под каждой историей, у проекта — нет", noteRows.map((r) => r.dataset.note).join() === "N-E,N-S1,N-S2" && !box.querySelector(".s-project + .s-note"), noteRows.map((r) => r.dataset.note).join());
+  const epicNote = noteRows[0];
+  check("Р4: заметка эпика — текст (первые две строки), автор, дата, полный текст при наведении",
+    epicNote.querySelector(".s-note-text").textContent.startsWith("Первая строка") && epicNote.querySelector(".s-note-text").title.includes("третья") && epicNote.querySelector(".s-note-who").textContent.includes("Пётр") &&
+      getComputedStyle(epicNote.querySelector(".s-note-text")).webkitLineClamp === "2");
+  check("Р4: заметка старше порога помечена «заметке N дн.»", epicNote.querySelector(".s-note-stale")?.textContent === t("note.stale", { n: 20 }) && !noteRows[1].querySelector(".s-note-stale"));
+  check("Р4: заметка истории — только у своей истории", noteRows[1].textContent.includes("Заметка истории") && !noteRows[0].textContent.includes("Заметка истории") && !noteRows[2].textContent.includes("Заметка истории"));
+  check("Р4: нет заметки — бледное «Заметки нет · добавить»", noteRows[2].querySelector(".s-note-box.s-note-empty") && noteRows[2].textContent.includes(t("note.none")) && !!noteRows[2].querySelector(".s-note-add"));
+  check("Р4: «История (N)» — только когда есть прежние заметки", epicNote.querySelector(".s-note-hist")?.textContent === t("note.history", { n: 1 }) && !noteRows[1].querySelector(".s-note-hist"));
+  epicNote.querySelector(".s-note-hist").click();
+  check("Р4: в истории — прежние заметки с автором", document.querySelector(".tooltip.tip-note")?.textContent.includes("Старая") && document.querySelector(".tooltip.tip-note").textContent.includes("Иван"));
+  document.querySelector(".tooltip .tip-close").click();
+
+  // Правка: форма с последней заметкой, публикация нового комментария в ту же задачу.
+  const sent = [];
+  let fail = null;
+  sv.api.addComment = async (key, text) => {
+    if (fail) throw fail;
+    sent.push([key, text]);
+    return { id: "77", body: text, created: "2026-09-18T12:00:00.000+0300", author: { displayName: "Менеджер" } };
+  };
+  noteRows[1].querySelector(".s-note-edit").click();
+  let pop = document.querySelector(".tooltip.tip-note");
+  check("Р4: форма заполнена текстом последней заметки и предупреждает о письме", pop.querySelector("textarea").value === "Заметка истории" && pop.textContent.includes(t("note.notifyWarn")));
+  pop.querySelector("textarea").value = "  Новая заметка\nвторая строка  ";
+  pop.querySelector(".s-note-save").click();
+  await new Promise((r) => setTimeout(r, 20));
+  check("Р4: опубликован комментарий (omg comment) в ту же историю; заметка — с автором и датой из ответа Jira",
+    JSON.stringify(sent) === JSON.stringify([["N-S1", "(omg comment)\nНовая заметка\nвторая строка"]]) && added[0]?.[0] === "story" && added[0][1] === "N-S1" && added[0][2].author === "Менеджер" && added[0][2].text === "Новая заметка\nвторая строка",
+    JSON.stringify([sent, added]));
+  noteRows[2].querySelector(".s-note-add").click();
+  pop = document.querySelector(".tooltip.tip-note");
+  pop.querySelector(".s-note-save").click();
+  check("Р4: пустую заметку не публикуем", pop.querySelector(".s-note-msg").textContent === t("note.empty") && sent.length === 1);
+  pop.querySelector("textarea").value = "Текст";
+  fail = Object.assign(new Error("Forbidden"), { code: 403 });
+  pop.querySelector(".s-note-save").click();
+  await new Promise((r) => setTimeout(r, 20));
+  check("Р4: нет права комментировать — понятное сообщение, заметка не добавлена",
+    added.length === 1 && notes.at(-1)?.[1] === "error" && notes.at(-1)[0].includes(t("story.noPermission")), JSON.stringify(notes.at(-1)));
+  fail = null;
+  document.querySelector(".tooltip .tip-close")?.click();
+
+  // Галочка «Заметки».
+  const cbx = box.querySelector(".s-notes-toggle input");
+  check("Р4: галочка «Заметки» на панели, по умолчанию включена", !!cbx && cbx.checked);
+  cbx.checked = false;
+  cbx.dispatchEvent(new Event("change"));
+  sv.render(box, model, { ...opts, showNotes: false });
+  check("Р4: снятая галочка скрывает строки заметок", JSON.stringify(toggles) === "[false]" && !box.querySelector(".s-note") && !box.querySelector(".s-notes-toggle input").checked);
+  box.remove();
+}
+
 const total = document.createElement("div");
 total.className = failures ? "t-fail" : "t-ok";
 total.textContent = failures ? `${failures} FAILED` : "ALL PASSED";

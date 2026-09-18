@@ -1468,6 +1468,15 @@ async function setEpicProject(keys, name) {
   );
 }
 
+// Заметка после публикации в Jira — в запись эпика или истории, не дожидаясь «Обновить».
+async function addLocalNote(kind, key, note) {
+  const store = kind === "epic" ? db.STORES.epics : db.STORES.issues;
+  const rec = await db.getOne(store, key);
+  if (!rec) return;
+  const cur = rec.omg || { project: null, notes: [] };
+  await db.putAll(store, [{ ...rec, omg: { ...cur, notes: [...(cur.notes || []), note] } }]);
+}
+
 async function drawStories() {
   try {
     const [issues, others, linked, sprints, epics, boards, priorities] = await Promise.all([
@@ -1515,6 +1524,18 @@ async function drawStories() {
       epicsOfProject: (key) => epics.filter((e) => keyOf(e) === key),
       onRenamed: async (keys, name) => {
         await setEpicProject(keys, name);
+        drawStories();
+      },
+      // Заметки (Р4): строки заметок, порог «устарела», новая заметка — сразу и локально.
+      showNotes: s.storyShowNotes !== false,
+      staleDays: s.noteStaleDays,
+      onToggleNotes: async (on) => {
+        await settings.save({ storyShowNotes: on });
+        drawStories();
+      },
+      onNoteAdded: async (kind, key, note) => {
+        await addLocalNote(kind, key, note);
+        status(t("note.saved", { key }));
         drawStories();
       }
     });

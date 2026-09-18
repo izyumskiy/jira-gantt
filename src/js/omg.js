@@ -51,3 +51,28 @@ export function projectComment(name) {
 export function noteComment(text) {
   return `${NOTE_TAG}\n${String(text || "").trim()}`;
 }
+
+// ---------- заметки (Р4) ----------
+
+// Действующая заметка — последняя; остальные — история.
+export function latestNote(rec) {
+  const list = rec && Array.isArray(rec.notes) ? rec.notes : [];
+  return list.length ? list[list.length - 1] : null;
+}
+
+// Предыдущие заметки, новые первыми.
+export function noteHistory(rec) {
+  const list = rec && Array.isArray(rec.notes) ? rec.notes : [];
+  return list.slice(0, -1).reverse();
+}
+
+// Сколько полных дней заметке; null — дата неизвестна.
+export function noteAgeDays(note, now = Date.now()) {
+  const c = Date.parse((note && note.created) || "");
+  return c ? Math.max(0, Math.floor((now - c) / 86400000)) : null;
+}
+
+// Заметка из ответа Jira на публикацию комментария (там автор и дата уже настоящие).
+export function noteFromComment(comment) {
+  return comment && typeof comment.body === "string" ? parseComments([comment]).notes[0] || null : null;
+}
