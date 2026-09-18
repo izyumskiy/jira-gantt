@@ -11,6 +11,7 @@ export const DEFAULTS = {
   sprintDays: 10, // длительность спринта в рабочих днях — ёмкость человека на спринт
   useTempoTeams: true, // брать команды людей из Tempo (если дополнение установлено)
   flowWeeks: 52, // окно истории завершённых задач (недель) — основа прогноза по потоку
+  requestTimeoutSec: 30, // таймаут запроса к Jira: без VPN запрос иначе висит больше минуты
   teams: [], // справочник команд для ручного распределения людей (вкладка «Команда»)
   doneStatuses: "", // статусы своего потока, которые считаем завершёнными, через запятую
   forecastExcludeTypes: "User Story", // типы задач, которые прогноз сроков не считает, через запятую
@@ -47,7 +48,26 @@ const MIGRATIONS = [
 
 let cache = null;
 
+// Страница плагина может быть открыта дважды (вкладка пользователя и автообновление). Кэш каждой
+// страницы подтягивает изменения, сделанные другой, — иначе сохранение формы в одной вкладке
+// откатило бы поля, записанные другой (например, время последней синхронизации).
+let listening = false;
+function listen() {
+  if (listening) return;
+  listening = true;
+  try {
+    chrome.storage.onChanged?.addListener((changes, area) => {
+      if (area !== "local" || !changes[KEY] || !changes[KEY].newValue) return;
+      const raw = changes[KEY].newValue;
+      cache = { ...DEFAULTS, ...raw, fields: { ...DEFAULTS.fields, ...(raw.fields || {}) } };
+    });
+  } catch {
+    // окружение без событий хранилища (тесты) — работаем без синхронизации кэша
+  }
+}
+
 export async function load() {
+  listen();
   if (cache) return cache;
   const raw = (await chrome.storage.local.get(KEY))[KEY] || {};
   cache = { ...DEFAULTS, ...raw, fields: { ...DEFAULTS.fields, ...(raw.fields || {}) } };

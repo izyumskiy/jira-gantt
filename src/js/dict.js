@@ -319,6 +319,7 @@ export const DICT = {
     "st.epicsLoading": "Ищем эпики…",
     "st.issuesLoading": "Загружаем задачи: {n}",
     "st.sprintsLoading": "Загружаем спринты…",
+    "st.saving": "Сохраняем данные…",
     "st.done": "Готово",
     "st.schemaUpgrade": "В задачах появились новые поля — выгружаем всё заново…",
     "st.flowLoading": "Загружаем историю завершённых задач: {n}",
@@ -337,7 +338,7 @@ export const DICT = {
     "err.apiCore": "Jira API недоступен: {msg}. Выгрузка невозможна.",
     "err.apiSearch": "Поиск по JQL недоступен (/rest/api/2/search): {msg}. Выгрузка невозможна.",
     "err.http": "Ошибка Jira {code}: {msg}",
-    "err.network": "Не удалось связаться с Jira. Проверьте адрес и выданное разрешение на домен.",
+    "err.network": "Jira недоступна — проверьте VPN и сеть. Если VPN включён, проверьте адрес Jira и разрешение на домен. Данные не изменены.",
     "err.noPermission": "Нет разрешения на домен Jira. Нажмите «Разрешить доступ к домену» в настройках.",
     "err.noEpicField": "Не найдено поле «Epic Link». Нажмите «Определить поля Jira» в настройках."
   },
@@ -661,6 +662,7 @@ export const DICT = {
     "st.epicsLoading": "Searching epics…",
     "st.issuesLoading": "Loading issues: {n}",
     "st.sprintsLoading": "Loading sprints…",
+    "st.saving": "Saving data…",
     "st.done": "Done",
     "st.schemaUpgrade": "Issues gained new fields — downloading everything again…",
     "st.flowLoading": "Loading completed-issue history: {n}",
@@ -679,7 +681,7 @@ export const DICT = {
     "err.apiCore": "The Jira API is unavailable: {msg}. Download is not possible.",
     "err.apiSearch": "JQL search is unavailable (/rest/api/2/search): {msg}. Download is not possible.",
     "err.http": "Jira error {code}: {msg}",
-    "err.network": "Cannot reach Jira. Check the URL and the granted host permission.",
+    "err.network": "Jira is unreachable — check the VPN and the network. If the VPN is on, check the Jira URL and the host permission. Data was not changed.",
     "err.noPermission": "No permission for the Jira domain. Press “Grant access to the domain” in the settings.",
     "err.noEpicField": "The “Epic Link” field was not found. Press “Detect Jira fields” in the settings."
   }

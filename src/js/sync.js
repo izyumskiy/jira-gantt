@@ -1,5 +1,6 @@
 // Загрузка данных из Jira в IndexedDB: эпики, их задачи, спринты.
 import * as jira from "./jira.js";
+import { isUnreachable } from "./jira.js";
 import * as db from "./db.js";
 import * as settings from "./settings.js";
 import { t } from "./i18n.js";
@@ -240,16 +241,15 @@ export async function setHidden(hiddenByKey) {
 
 // Статусы и названия самих эпиков живут отдельно от их задач — обновляем при каждой синхронизации.
 // Локальный флаг hidden при этом сохраняем: из Jira он не приходит.
-async function refreshEpics(keys) {
+// Только собирает: запись — общей транзакцией в конце синхронизации (А2).
+async function collectEpics(keys) {
   const fresh = [];
   for (let i = 0; i < keys.length; i += 50) {
     const chunk = keys.slice(i, i + 50);
     const issues = await jira.search(`key in (${chunk.join(",")})`, epicFieldList());
     fresh.push(...issues.map(mapEpic));
   }
-  if (!fresh.length) return;
-  const existing = new Map((await db.all(db.STORES.epics)).map((e) => [e.key, e]));
-  await db.putAll(db.STORES.epics, fresh.map((e) => ({ ...e, hidden: !!existing.get(e.key)?.hidden })));
+  return fresh;
 }
 
 // Эпики по списку ключей — для загрузчика конфигурации. Несуществующие ключи Jira отбрасывает
@@ -351,10 +351,11 @@ function flowLogins(tempo, issues, others) {
 }
 
 // История завершений за окно: задачи с датой резолюции. Это основа недельного потока команд.
-export async function refreshFlow({ tempo, issues, others, onProgress = () => {} }) {
+// Только собирает: { rows, stats }; rows = null — хранилище не трогать.
+export async function collectFlow({ tempo, issues, others, onProgress = () => {} }) {
   const weeks = Number(settings.get().flowWeeks) || 52;
   const logins = flowLogins(tempo, issues, others);
-  if (!logins.length) return { weeks, logins: 0, issues: 0, skipped: true };
+  if (!logins.length) return { rows: null, stats: { weeks, logins: 0, issues: 0, skipped: true } };
 
   const fields = settings.get().fields;
   const fieldList = ["summary", "project", "status", "issuetype", "resolutiondate", "assignee", fields.epicLink].filter(Boolean);
@@ -379,9 +380,7 @@ export async function refreshFlow({ tempo, issues, others, onProgress = () => {}
       });
     }
   }
-  await db.clear(db.STORES.flow);
-  await db.putAll(db.STORES.flow, out);
-  return { weeks, logins: logins.length, issues: out.length };
+  return { rows: out, stats: { weeks, logins: logins.length, issues: out.length } };
 }
 
 // ---------- команды Tempo ----------
@@ -414,7 +413,7 @@ export async function checkApis(onProgress = () => {}) {
       await fn();
       return { ok: true, code: 0, msg: "" };
     } catch (e) {
-      return { ok: false, code: e && e.code ? e.code : 0, msg: e && e.message ? e.message : String(e) };
+      return { ok: false, code: e && e.code ? e.code : 0, kind: e && e.kind ? e.kind : "http", msg: e && e.message ? e.message : String(e) };
     }
   };
   const core = await probe(() => jira.myself());
@@ -428,8 +427,9 @@ export async function checkApis(onProgress = () => {}) {
   return { core, search, agile, tempo, ok: core.ok && search.ok, limited: !agile.ok || !tempo.ok };
 }
 
-export async function refreshTempoTeams(onProgress = () => {}) {
-  if (!settings.get().useTempoTeams) return { teams: 0, members: 0, skipped: true };
+// Только собирает: { rows, stats }; rows = null — хранилище не трогать.
+export async function collectTempoTeams(onProgress = () => {}) {
+  if (!settings.get().useTempoTeams) return { rows: null, stats: { teams: 0, members: 0, skipped: true } };
   onProgress(t("st.tempoLoading"));
   const teams = await jira.tempoTeams();
   const list = Array.isArray(teams) ? teams : [];
@@ -442,15 +442,14 @@ export async function refreshTempoTeams(onProgress = () => {}) {
           const rows = await jira.tempoTeamMembers(team.id);
           members = (Array.isArray(rows) ? rows : []).map(mapTempoMember).filter(Boolean).filter(isActiveMember);
         } catch (e) {
+          if (isUnreachable(e)) throw e;
           console.warn("[OhMyGant] tempo members failed", team.id, e && e.message ? e.message : e);
         }
         out.push({ id: Number(team.id), name: team.name || `#${team.id}`, members });
       })
     );
   }
-  await db.clear(db.STORES.tempo);
-  await db.putAll(db.STORES.tempo, out);
-  return { teams: out.length, members: out.reduce((n, x) => n + x.members.length, 0) };
+  return { rows: out, stats: { teams: out.length, members: out.reduce((n, x) => n + x.members.length, 0) } };
 }
 
 // ---------- обновление спринтов ----------
@@ -509,6 +508,7 @@ async function refreshSprints(sprintMap) {
       }
       stats.boardsOk += 1;
     } catch (e) {
+      if (isUnreachable(e)) throw e;
       // Доски из поля спринта (rapidViewId) часто чужие или удалённые — 404 для них норма,
       // их спринты добираем поштучно. Об ошибке сообщаем только для доски из настроек.
       if (boardId === configured) stats.boardsFailed.push(`#${boardId}: ${e && e.message ? e.message : e}`);
@@ -530,6 +530,7 @@ async function refreshSprints(sprintMap) {
             stats.agileOk += 1;
           }
         } catch (e) {
+          if (isUnreachable(e)) throw e;
           stats.agileFailed += 1;
           console.warn("[OhMyGant] sprint refresh failed", s.id, s.name, e);
         }
@@ -567,12 +568,23 @@ function jqlDate(ms) {
 const ISSUE_SCHEMA = 3;
 
 // full = true — скачиваем задачи целиком, иначе только изменённые с прошлой синхронизации.
+//
+// Две фазы (А2). Сбор: всё выгружается в память, база не меняется. Запись: все хранилища пишутся
+// одной транзакцией. Сбой на сборе (в том числе отвалившийся VPN) оставляет базу как была.
+// Необязательные источники (чужие задачи, Tempo, история потока, доски) при ошибке ответа Jira
+// пропускаются, но недоступность Jira прерывает всё: иначе записались бы неполные данные.
 export async function sync({ full = false, onProgress = () => {} } = {}) {
   // Сначала проверяем, что нужные API вообще отвечают: иначе пользователь получит неполные данные
   // и не поймёт почему.
   const apiStats = await checkApis(onProgress);
-  if (!apiStats.core.ok) throw new jira.JiraError(t("err.apiCore", { msg: apiStats.core.msg }), apiStats.core.code);
-  if (!apiStats.search.ok) throw new jira.JiraError(t("err.apiSearch", { msg: apiStats.search.msg }), apiStats.search.code);
+  if (!apiStats.core.ok) {
+    if (apiStats.core.kind === "network") throw new jira.JiraError(apiStats.core.msg, 0, "network");
+    throw new jira.JiraError(t("err.apiCore", { msg: apiStats.core.msg }), apiStats.core.code, apiStats.core.kind);
+  }
+  if (!apiStats.search.ok) {
+    if (apiStats.search.kind === "network") throw new jira.JiraError(apiStats.search.msg, 0, "network");
+    throw new jira.JiraError(t("err.apiSearch", { msg: apiStats.search.msg }), apiStats.search.code, apiStats.search.kind);
+  }
   const fields = await ensureFields();
   if (!fields.epicLink) throw new jira.JiraError(t("err.noEpicField"), 0);
   if (!full && (await db.metaGet("issueSchema", 0)) < ISSUE_SCHEMA) {
@@ -583,6 +595,7 @@ export async function sync({ full = false, onProgress = () => {} } = {}) {
   const epics = await db.all(db.STORES.epics);
   if (!epics.length) return { issues: 0, sprints: 0, apiStats };
 
+  // ---------- фаза 1: сбор ----------
   const since = full ? 0 : settings.get().lastSync || 0;
   const fieldList = [
     "summary",
@@ -613,6 +626,7 @@ export async function sync({ full = false, onProgress = () => {} } = {}) {
     try {
       issues = await jira.search(jql, fieldList, (n) => onProgress(t("st.issuesLoading", { n: collected.length + n })));
     } catch (e) {
+      if (isUnreachable(e)) throw e;
       // Запасной вариант — обращение к полю по имени.
       let alt = `"Epic Link" in (${chunk.join(",")})`;
       if (since) alt += ` AND updated >= "${jqlDate(since)}"`;
@@ -620,12 +634,6 @@ export async function sync({ full = false, onProgress = () => {} } = {}) {
       issues = await jira.search(alt, fieldList, (n) => onProgress(t("st.issuesLoading", { n: collected.length + n })));
     }
     collected.push(...issues.map((it) => mapIssue(it, fields)));
-  }
-
-  if (full) {
-    // Полная перезагрузка: старые задачи выбранных эпиков выкидываем.
-    const existing = await db.all(db.STORES.issues);
-    await db.delKeys(db.STORES.issues, existing.map((i) => i.key));
   }
 
   // Спринты из задач — основа; ниже их перекроют свежие данные из Agile API.
@@ -640,7 +648,7 @@ export async function sync({ full = false, onProgress = () => {} } = {}) {
     for (const s of await db.all(db.STORES.sprints)) if (!sprintMap.has(s.id)) sprintMap.set(s.id, s);
   }
 
-  // Задачи людей вне целевых эпиков. Ошибка здесь не должна ронять основную загрузку:
+  // Задачи людей вне целевых эпиков. Ошибка ответа здесь не должна ронять основную загрузку:
   // сообщаем о ней отдельно, а старый снимок оставляем.
   let others = [];
   let othersError = "";
@@ -651,57 +659,80 @@ export async function sync({ full = false, onProgress = () => {} } = {}) {
       delete issue._sprints;
     }
   } catch (e) {
+    if (isUnreachable(e)) throw e;
     othersError = t("err.others", { msg: e && e.message ? e.message : String(e) });
   }
 
+  // Статус эпика — украшение: если запрос не прошёл, оставляем сохранённые данные.
+  let freshEpics = [];
   try {
-    await refreshEpics(keys);
-  } catch {
-    // Статус эпика — украшение: если запрос не прошёл, оставляем сохранённые данные.
+    freshEpics = await collectEpics(keys);
+  } catch (e) {
+    if (isUnreachable(e)) throw e;
   }
 
   // Команды Tempo — необязательный источник: если дополнения нет или нет прав, просто пропускаем.
-  let tempoStats = null;
+  let tempo = { rows: null, stats: null };
   let tempoError = "";
   try {
-    tempoStats = await refreshTempoTeams(onProgress);
+    tempo = await collectTempoTeams(onProgress);
   } catch (e) {
+    if (isUnreachable(e)) throw e;
     tempoError = e && e.message ? e.message : String(e);
     console.warn("[OhMyGant] tempo teams unavailable", tempoError);
   }
 
-  // История потока — основа прогноза сроков; сбой здесь не должен ронять синхронизацию.
-  let flowStats = null;
+  // История потока — основа прогноза сроков; ошибка ответа не должна ронять синхронизацию.
+  let flow = { rows: null, stats: null };
   try {
-    const tempoRows = await db.all(db.STORES.tempo);
-    flowStats = await refreshFlow({ tempo: tempoRows, issues: collected, others, onProgress });
+    const tempoRows = tempo.rows || (await db.all(db.STORES.tempo));
+    flow = await collectFlow({ tempo: tempoRows, issues: collected, others, onProgress });
   } catch (e) {
+    if (isUnreachable(e)) throw e;
     console.warn("[OhMyGant] flow history unavailable", e && e.message ? e.message : e);
-    flowStats = { error: e && e.message ? e.message : String(e) };
+    flow = { rows: null, stats: { error: e && e.message ? e.message : String(e) } };
   }
 
   onProgress(t("st.sprintsLoading"));
   const sprintStats = await refreshSprints(sprintMap);
 
   // Доски нужны, чтобы назвать команду спринта; без них команда подпишется как «#id».
+  let boards = null;
   try {
-    const boards = await jira.boards();
-    await db.putAll(
-      db.STORES.boards,
-      boards.map((b) => ({ id: Number(b.id), name: b.name || `#${b.id}`, type: b.type || "" }))
-    );
-  } catch {
+    boards = (await jira.boards()).map((b) => ({ id: Number(b.id), name: b.name || `#${b.id}`, type: b.type || "" }));
+  } catch (e) {
+    if (isUnreachable(e)) throw e;
     // Agile API может быть недоступен — команды останутся безымянными.
   }
 
-  await db.putAll(db.STORES.issues, collected);
-  if (!othersError) {
-    await db.clear(db.STORES.others);
-    await db.putAll(db.STORES.others, others);
-  }
-  await db.putAll(db.STORES.sprints, [...sprintMap.values()]);
-  await db.metaSet("issueSchema", ISSUE_SCHEMA);
+  // ---------- фаза 2: запись одной транзакцией ----------
+  // Эпики, которые пользователь успел убрать из выбора во время синхронизации, обратно не пишем;
+  // флаг «скрыт» — локальный, из Jira не приходит.
+  const stored = new Map((await db.all(db.STORES.epics)).map((e) => [e.key, e]));
+  const epicsToPut = freshEpics.filter((e) => stored.has(e.key)).map((e) => ({ ...e, hidden: !!stored.get(e.key).hidden }));
+  const ops = [];
+  if (full) ops.push({ store: db.STORES.issues, clear: true });
+  ops.push({ store: db.STORES.issues, put: collected });
+  if (!othersError) ops.push({ store: db.STORES.others, clear: true, put: others });
+  if (epicsToPut.length) ops.push({ store: db.STORES.epics, put: epicsToPut });
+  if (tempo.rows) ops.push({ store: db.STORES.tempo, clear: true, put: tempo.rows });
+  if (flow.rows) ops.push({ store: db.STORES.flow, clear: true, put: flow.rows });
+  if (boards) ops.push({ store: db.STORES.boards, put: boards });
+  ops.push({ store: db.STORES.sprints, put: [...sprintMap.values()] });
+  ops.push({ store: db.STORES.meta, put: [{ k: "issueSchema", v: ISSUE_SCHEMA }] });
+  onProgress(t("st.saving"));
+  await db.commit(ops);
   await settings.save({ lastSync: Date.now() });
   onProgress(t("st.done"));
-  return { issues: collected.length, sprints: sprintMap.size, others: others.length, othersError, sprintStats, tempoStats, tempoError, flowStats, apiStats };
+  return {
+    issues: collected.length,
+    sprints: sprintMap.size,
+    others: others.length,
+    othersError,
+    sprintStats,
+    tempoStats: tempo.stats,
+    tempoError,
+    flowStats: flow.stats,
+    apiStats
+  };
 }

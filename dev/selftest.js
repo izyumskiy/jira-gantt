@@ -1,6 +1,9 @@
 // Дев-проверка чистой логики без Jira и без Chrome: подменяем chrome.storage и гоняем агрегацию.
 globalThis.chrome = {
-  storage: { local: { _d: {}, async get(k) { return { [k]: this._d[k] }; }, async set(o) { Object.assign(this._d, o); } } },
+  storage: {
+    local: { _d: {}, async get(k) { return { [k]: this._d[k] }; }, async set(o) { Object.assign(this._d, o); } },
+    onChanged: { _l: [], addListener(f) { this._l.push(f); } }
+  },
   permissions: { async contains() { return true; }, async request() { return true; } },
   runtime: { getURL: (p) => p }
 };
@@ -9,7 +12,8 @@ import { setLang, applyI18n, t } from "../src/js/i18n.js";
 import * as settings from "../src/js/settings.js";
 import * as agg from "../src/js/agg.js";
 import * as gantt from "../src/js/gantt.js";
-import { parseSprint, datesFromName, checkApis, searchEpics, epicKeysFrom } from "../src/js/sync.js";
+import { parseSprint, datesFromName, checkApis, searchEpics, epicKeysFrom, sync as runSync } from "../src/js/sync.js";
+import * as jiraApi from "../src/js/jira.js";
 import { classify, isDoneStatus } from "../src/js/status.js";
 import { collectPeople, mergeProfiles, parseSystems, systemsList, teamsList, normName, roleSummary } from "../src/js/team.js";
 import { parseConfig, exportConfig, applyConfig } from "../src/js/configio.js";
@@ -823,6 +827,91 @@ await settings.save({ infoSystems: [], fields: { plannedStart: "", plannedEnd: "
     flowlib.forecastForTeams({ teams: [shortT], shares: shortShares, epicKey: "EP-1", remaining: 5 }).reason === "short");
   check("без остатка или без команд — прогноза нет", run([]).reason === "none" &&
     flowlib.forecastForTeams({ teams: [A], shares, epicKey: "EP-1", remaining: 0 }).reason === "none");
+}
+
+// А5. кэш настроек подтягивает изменения из другой вкладки
+{
+  const before = settings.get().lastSync;
+  for (const f of chrome.storage.onChanged._l) f({ settings: { newValue: { ...settings.get(), lastSync: 123456 } } }, "local");
+  check("А5: изменение настроек в другой вкладке попадает в кэш", settings.get().lastSync === 123456, String(settings.get().lastSync));
+  await settings.save({ hoursPerDay: 8 });
+  check("А5: сохранение формы не откатывает поле, записанное другой вкладкой", settings.get().lastSync === 123456);
+  await settings.save({ lastSync: before });
+}
+
+// А2. синхронизация: сбор в памяти, запись одной транзакцией; обрыв VPN базу не портит
+{
+  const orig = window.fetch;
+  const saved = { fields: { ...settings.get().fields }, useTempoTeams: settings.get().useTempoTeams, flowWeeks: settings.get().flowWeeks, timeout: settings.get().requestTimeoutSec };
+  await settings.save({ fields: { ...saved.fields, epicLink: "customfield_10100", sprint: "customfield_10101", version: 5 }, useTempoTeams: false, flowWeeks: 4 });
+  await dbm.clearAll();
+  await dbm.putAll(dbm.STORES.epics, [{ key: "EP-A", summary: "Эпик А", statusName: "В работе", statusCategory: "indeterminate" }]);
+  await dbm.putAll(dbm.STORES.issues, [{ ...mk("OLD-1", "EP-A", "AAA", "Ivan", null, 1, "prog") }]);
+  await dbm.putAll(dbm.STORES.flow, [{ key: "F-OLD", resolved: new Date().toISOString(), assigneeLogin: "ivan" }]);
+  await dbm.putAll(dbm.STORES.others, [{ ...mk("O-OLD", "EP-X", "XXX", "Ivan", 2, 1, "prog") }]);
+
+  const json = (o, status = 200) => new Response(JSON.stringify(o), { status, headers: { "Content-Type": "application/json" } });
+  const issue = (key) => ({
+    key,
+    fields: {
+      summary: "Новая", project: { key: "AAA", name: "AAA" }, assignee: { name: "ivan", key: "ivan", displayName: "Ivan" },
+      status: { name: "В работе", statusCategory: { key: "indeterminate" } }, issuetype: { name: "Task" },
+      updated: new Date().toISOString(), customfield_10100: "EP-A", customfield_10101: null
+    }
+  });
+  let flowFails = true;
+  window.fetch = async (url, opt = {}) => {
+    const u = String(url);
+    const b = opt.body ? JSON.parse(opt.body) : {};
+    if (u.includes("/rest/api/2/myself")) return json({ name: "ivan" });
+    if (u.includes("/rest/agile/1.0/board")) return json({ values: [], isLast: true });
+    if (u.includes("/rest/api/2/search")) {
+      const jql = b.jql || "";
+      if (jql.includes("resolutiondate >=")) {
+        if (flowFails) throw new TypeError("Failed to fetch"); // VPN отвалился посреди синхронизации
+        return json({ issues: [], total: 0 });
+      }
+      if (jql.includes("cf[10100] in")) return json({ issues: [issue("NEW-1")], total: 1 });
+      if (jql.includes("key in (EP-A)")) return json({ issues: [{ key: "EP-A", fields: { summary: "Эпик А (обновлён)", status: { name: "В работе", statusCategory: { key: "indeterminate" } }, project: { key: "AAA" } } }], total: 1 });
+      return json({ issues: [], total: 0 });
+    }
+    return json({}, 404);
+  };
+
+  let err = null;
+  try { await runSync({ full: true }); } catch (e) { err = e; }
+  const keysOf = async (st) => (await dbm.all(st)).map((x) => x.key).sort().join(",");
+  check("А2: обрыв сети посреди сбора — синхронизация прерывается ошибкой «Jira недоступна»", err && err.kind === "network" && err.message === t("err.network"), err && err.message);
+  check("А2: после обрыва задачи, история потока и чужие задачи не изменились",
+    (await keysOf(dbm.STORES.issues)) === "OLD-1" && (await keysOf(dbm.STORES.flow)) === "F-OLD" && (await keysOf(dbm.STORES.others)) === "O-OLD",
+    `${await keysOf(dbm.STORES.issues)} / ${await keysOf(dbm.STORES.flow)} / ${await keysOf(dbm.STORES.others)}`);
+  check("А2: после обрыва эпик не обновлён", (await dbm.getOne(dbm.STORES.epics, "EP-A")).summary === "Эпик А");
+
+  flowFails = false;
+  err = null;
+  try { await runSync({ full: true }); } catch (e) { err = e; }
+  check("А2: успешная полная синхронизация записывает всё разом",
+    !err && (await keysOf(dbm.STORES.issues)) === "NEW-1" && (await keysOf(dbm.STORES.flow)) === "" && (await keysOf(dbm.STORES.others)) === "" &&
+      (await dbm.getOne(dbm.STORES.epics, "EP-A")).summary === "Эпик А (обновлён)",
+    err ? err.message : `${await keysOf(dbm.STORES.issues)} / ${await keysOf(dbm.STORES.flow)}`);
+
+  // вид ошибки: не авторизован
+  window.fetch = async () => json({ errorMessages: ["denied"] }, 401);
+  err = null;
+  try { await jiraApi.myself(); } catch (e) { err = e; }
+  check("А2: 401 — ошибка вида «не авторизован»", err && err.kind === "auth");
+
+  // таймаут: запрос, который не отвечает, обрывается и считается недоступностью
+  await settings.save({ requestTimeoutSec: 0.05 });
+  window.fetch = (url, opt) => new Promise((_, reject) => opt.signal.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError"))));
+  const t0 = Date.now();
+  err = null;
+  try { await jiraApi.myself(); } catch (e) { err = e; }
+  check("А2: зависший запрос обрывается по таймауту как «Jira недоступна»", err && err.kind === "network" && Date.now() - t0 < 2000, `${err && err.kind} ${Date.now() - t0} мс`);
+
+  window.fetch = orig;
+  await settings.save({ fields: saved.fields, useTempoTeams: saved.useTempoTeams, flowWeeks: saved.flowWeeks, requestTimeoutSec: saved.timeout });
+  await dbm.clearAll();
 }
 
 // 4g. умолчания настроек

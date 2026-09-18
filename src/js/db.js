@@ -110,6 +110,26 @@ export async function delKeys(store, keys) {
   });
 }
 
+// Одна транзакция на несколько хранилищ: записано либо всё, либо ничего (синхронизация, А2).
+// ops — по порядку: [{ store, clear?: true, del?: [ключи], put?: [записи] }].
+export async function commit(ops) {
+  const stores = [...new Set(ops.map((o) => o.store))];
+  if (!stores.length) return;
+  const db = await open();
+  await new Promise((resolve, reject) => {
+    const t = db.transaction(stores, "readwrite");
+    for (const op of ops) {
+      const os = t.objectStore(op.store);
+      if (op.clear) os.clear();
+      for (const k of op.del || []) os.delete(k);
+      for (const it of op.put || []) os.put(it);
+    }
+    t.oncomplete = () => resolve();
+    t.onerror = () => reject(t.error);
+    t.onabort = () => reject(t.error);
+  });
+}
+
 export async function clear(store) {
   const db = await open();
   await done(tx(db, store, "readwrite").clear());
