@@ -113,33 +113,82 @@ function nameCell({ indent = "", twist = null, icon = null, title, actions = [],
   return td;
 }
 
+// Направляющие дерева: тонкая вертикальная линия от стрелки проекта (уровень 0) и эпика (уровень 1)
+// вниз по строкам их блока, как направляющие отступов в редакторах кода; без уголков у каждой строки.
+// start — начало линии на строке самого проекта или эпика (от стрелки вниз). hot — ключ блока, чья
+// линия подсвечивается при наведении на строку.
+const GUIDE_X = [12, 30];
+function addGuides(tr, guides, hot) {
+  const td = tr.querySelector(".c-name");
+  for (const g of guides) {
+    const line = el("i", "s-guide" + (g.start ? " s-guide-start" : ""));
+    line.style.left = `${GUIDE_X[g.level]}px`;
+    line.dataset.g = g.key;
+    td.append(line);
+  }
+  if (hot) tr.dataset.hot = hot;
+  return tr;
+}
+
+// Подсветка направляющей блока, в котором сейчас мышь.
+function wireGuideHover(tbody) {
+  let cur = "";
+  const set = (key) => {
+    if (key === cur) return;
+    tbody.querySelectorAll(".s-guide.hot").forEach((g) => g.classList.remove("hot"));
+    cur = key;
+    if (key) tbody.querySelectorAll(".s-guide").forEach((g) => g.dataset.g === key && g.classList.add("hot"));
+  };
+  tbody.addEventListener("mouseover", (e) => set(e.target.closest("tr")?.dataset.hot || ""));
+  tbody.addEventListener("mouseleave", () => set(""));
+}
+
 // ---------- правая часть: полосы по секциям ----------
 
-// Полоса секции: толщина — уровень (lvl: p — проект, e — эпик, s — история), зелёная часть — доля
-// готового (по оценке, без оценок — по количеству), цифры мелко под полосой. Щелчок — список задач.
-function sectionBar(cell, lvl, title, model) {
-  const b = el("div", `sbar sbar-${lvl} clickable`);
+// Полоса секции. Цвет один (синий): сделанное — насыщенным, остаток — бледным; доля готового — по
+// оценке, без оценок — по количеству. Тип объекта — формой, как на классической диаграмме Ганта:
+//   p — проект: «скобка» итоговой задачи — тонкая полоса с уголками на концах;
+//   e — эпик: сплошной брусок;
+//   s — история: тонкая линия; в первой секции, где у истории есть работа, — точка-начало (start).
+// Цифры «задач · оценка» — мелко под полосой. Щелчок — список задач.
+function sectionBar(cell, lvl, title, model, { start = false } = {}) {
+  const b = el("div", `sbar sbar-${lvl} clickable` + (start ? " sbar-start" : ""));
   const est = cell.issues.reduce((n, i) => n + (i.estimate || 0), 0);
   const doneEst = cell.issues.reduce((n, i) => n + (i.done ? i.estimate || 0 : 0), 0);
   const doneN = cell.issues.filter((i) => i.done).length;
   const share = est > 0 ? doneEst / est : cell.issues.length ? doneN / cell.issues.length : 0;
   const track = el("span", "sbar-track" + (share >= 1 ? " all-done" : ""));
-  const fill = el("i");
+  const fill = el("i", "sbar-fill");
   fill.style.width = `${Math.round(share * 100)}%`;
   track.append(fill);
-  b.append(track, el("span", "sbar-num", `${cell.count} · ${fmtEstimate(cell.sum)}`));
+  const line = el("span", "sbar-line");
+  if (start) line.append(el("i", "sbar-dot" + (share > 0 ? " done" : "")));
+  line.append(track);
+  b.append(line);
+  if (lvl === "p") {
+    // Уголки скобки: левый — цветом сделанного, если в секции что-то готово; правый — если готово всё.
+    const caps = el("span", "sbar-caps");
+    caps.append(el("i", "cap-l" + (share > 0 ? " done" : "")), el("i", "cap-r" + (share >= 1 ? " done" : "")));
+    b.append(caps);
+  }
+  b.append(el("span", "sbar-num", `${cell.count} · ${fmtEstimate(cell.sum)}`));
   const sprints = model && cell.bySprint ? [...cell.bySprint.keys()].map((id) => model.sprintById.get(id)).filter(Boolean).map((s) => `${s.name} · ${model.teamOf(s).name}`) : [];
   b.title = [title, t("gantt.doneShare", { done: doneN, total: cell.issues.length }), ...sprints].join("\n");
   b.onclick = (ev) => gantt.showIssues(ev.currentTarget, title, cell.issues);
   return b;
 }
 
-function barCells(node, model, lvl, label) {
+// start — у истории точка-начало в первой секции, где у неё есть работа.
+function barCells(node, model, lvl, label, { start = false } = {}) {
   const out = [];
+  let first = start;
   for (const sec of model.columns) {
     const td = el("td", "c-cell s-cell");
     const cell = node.cells.get(sec.id);
-    if (cell && cell.count) td.append(sectionBar(cell, lvl, `${label} · ${gantt.sectionTitle(sec)}`, model));
+    if (cell && cell.count) {
+      td.append(sectionBar(cell, lvl, `${label} · ${gantt.sectionTitle(sec)}`, model, { start: first }));
+      first = false;
+    }
     out.push(td);
   }
   const bl = el("td", "c-cell c-backlog s-cell");
@@ -211,6 +260,7 @@ export function render(container, model, opts = {}) {
       rerender();
     }
   });
+  bar.classList.add("s-bar"); // легенда «доля готовых» — тем же синим, что и полосы
   // Галочка «Заметки»: показывает и скрывает строки заметок.
   const nt = el("label", "legend s-notes-toggle");
   const cb = el("input");
@@ -265,7 +315,7 @@ export function render(container, model, opts = {}) {
   const projectNames = model.projects.filter((p) => p.key !== NO_PROJECT).map((p) => p.name);
   const noteOf = (rec) => (showNotes ? omg.latestNote(rec) : null);
 
-  const storyRow = (en, sn, edue) => {
+  const storyRow = (en, sn, edue, guides) => {
     const str = el("tr", "g-row s-story" + (sn.status && sn.status.id === "done" ? " s-story-done" : ""));
     str.dataset.story = sn.key;
     const link = gantt.maybeLink("", gantt.browseUrl(sn.key), "plabel s-story-link");
@@ -296,7 +346,7 @@ export function render(container, model, opts = {}) {
         status: sn.status,
         progress: progressCell(doneN, sn.all.length, sn.all, sn.label)
       }),
-      ...barCells(sn, model, "s", sn.label)
+      ...barCells(sn, model, "s", sn.label, { start: true })
     );
     // История без задач, но со своим спринтом — штрихованный отрезок по спринту самой истории.
     if (sn.ownSprint) {
@@ -304,15 +354,17 @@ export function render(container, model, opts = {}) {
       const td = str.children[1 + idx];
       if (td) {
         const own = el("div", "sbar sbar-s own-sprint");
-        own.append(el("span", "sbar-track"));
+        const line = el("span", "sbar-line");
+        line.append(el("span", "sbar-track"));
+        own.append(line);
         own.title = t("story.ownSprint", { sprint: sn.ownSprint.sprintName });
         td.append(own);
       }
     }
     if (edue) gantt.addDueLine(str, edue, false);
-    tbody.append(str);
+    tbody.append(addGuides(str, guides, eKey(en)));
     const note = noteOf(sn.story.omg);
-    if (note) tbody.append(noteRow({ target, note, model, opts, indent: "indent indent2", due: edue }));
+    if (note) tbody.append(addGuides(noteRow({ target, note, model, opts, indent: "indent indent2", due: edue }), guides, eKey(en)));
   };
 
   model.projects.forEach((p) => {
@@ -333,8 +385,9 @@ export function render(container, model, opts = {}) {
       }),
       ...barCells(p, model, "p", plabel)
     );
-    tbody.append(ptr);
+    tbody.append(addGuides(ptr, pc ? [] : [{ level: 0, key: pKey(p), start: true }], pKey(p)));
     if (pc) return;
+    const pg = { level: 0, key: pKey(p) };
 
     p.epics.forEach((en) => {
       const ec = collapsed.has(eKey(en));
@@ -364,15 +417,17 @@ export function render(container, model, opts = {}) {
       );
       const edue = gantt.dueInfo(en, model);
       if (edue) gantt.addDueLine(etr, edue, false);
-      tbody.append(etr);
       // Заметка эпика — его собственная строка: видна и у свёрнутого эпика.
       const enote = noteOf(en.epic.omg);
-      if (enote) tbody.append(noteRow({ target, note: enote, model, opts, indent: "indent", due: edue }));
+      const eg = { level: 1, key: eKey(en) };
+      const epicBlock = !ec || !!enote; // у эпика есть строки ниже — линия эпика нужна
+      tbody.append(addGuides(etr, epicBlock ? [pg, { ...eg, start: true }] : [pg], epicBlock ? eKey(en) : pKey(p)));
+      if (enote) tbody.append(addGuides(noteRow({ target, note: enote, model, opts, indent: "indent", due: edue }), [pg, eg], eKey(en)));
       if (ec) return;
 
       const open = en.stories.filter((sn) => !(sn.status && sn.status.id === "done"));
       const done = en.stories.filter((sn) => sn.status && sn.status.id === "done");
-      for (const sn of open) storyRow(en, sn, edue);
+      for (const sn of open) storyRow(en, sn, edue, [pg, eg]);
       // Готовые истории — одной строкой, раскрываются по щелчку.
       if (done.length) {
         const isOpen = openDone.has(en.key);
@@ -395,8 +450,8 @@ export function render(container, model, opts = {}) {
           ...model.columns.map(() => el("td", "c-cell s-cell")),
           el("td", "c-cell c-backlog s-cell")
         );
-        tbody.append(dtr);
-        if (isOpen) for (const sn of done) storyRow(en, sn, edue);
+        tbody.append(addGuides(dtr, [pg, eg], eKey(en)));
+        if (isOpen) for (const sn of done) storyRow(en, sn, edue, [pg, eg]);
       }
       if (en.noStory.count) {
         const ntr = el("tr", "g-row s-nostory");
@@ -409,10 +464,11 @@ export function render(container, model, opts = {}) {
           ...barCells(en.noStory, model, "s", `${en.label} · ${t("story.noStory")}`)
         );
         if (edue) gantt.addDueLine(ntr, edue, false);
-        tbody.append(ntr);
+        tbody.append(addGuides(ntr, [pg, eg], eKey(en)));
       }
     });
   });
+  wireGuideHover(tbody);
   table.append(tbody);
   wrap.append(table);
   container.append(wrap);

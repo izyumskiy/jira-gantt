@@ -2604,10 +2604,11 @@ check("пиктограмма 💬 есть и на «По эпикам и лю�
   const bg = (td) => getComputedStyle(td).backgroundColor;
   check("Проект: ширина колонки ракурса — своя сохранённая (700px)", parseFloat(getComputedStyle(sb.querySelector("table.gantt")).getPropertyValue("--name-w")) === 700);
   check("Проект: строка залита целиком — от названия до бэклога, одним цветом", [...prow.children].every((td) => bg(td) === bg(prow.children[0])) && bg(prow.children[0]) !== bg(sb.querySelector(".s-epic > .c-cell")));
-  const pb = prow.querySelector(".sbar-track");
-  const eb = sb.querySelector(".s-epic .sbar-track");
-  check("Проект: одна система полос — толщина по уровню: проект толще эпика, эпик толще истории",
-    !!pb && !!eb && pb.getBoundingClientRect().height > eb.getBoundingClientRect().height && prow.querySelector(".sbar-p") && !sb.querySelector(".s-epic .sbar-p"));
+  const pb = prow.querySelector(".sbar-p");
+  const eb = sb.querySelector(".s-epic .sbar-e .sbar-track");
+  check("Проект: форма «скобка» — тонкая полоса с уголками на концах; у эпика — брусок без уголков",
+    !!pb && pb.querySelector(".sbar-caps .cap-l") && pb.querySelector(".sbar-caps .cap-r") && Math.round(pb.querySelector(".sbar-track").getBoundingClientRect().height) === 5 &&
+      !!eb && Math.round(eb.getBoundingClientRect().height) === 12 && !sb.querySelector(".s-epic .sbar-caps"));
   sb.remove();
   await settings.save({ nameWidths: {} });
 }
@@ -2760,6 +2761,117 @@ check("пиктограмма 💬 есть и на «По эпикам и лю�
   th.click();
   check("Вид: по щелчку по шапке — список спринтов секции", !!box.querySelector("thead th.c-sprint.current .sp-list .sp-item"));
   box.querySelector("thead th.c-sprint.current").click();
+  box.remove();
+}
+
+// Release notes в окне «О плагине»: Markdown → HTML.
+{
+  const md = await import("../src/js/markdown.js");
+  const html = md.toHtml([
+    "# Заголовок",
+    "",
+    "Абзац с **жирным**, `кодом` и <script>alert(1)</script>.",
+    "",
+    "- Пункт один",
+    "  продолжение пункта",
+    "- [ссылка](https://example.com) и [файл](RELEASE_NOTES.md)",
+    "  - вложенный",
+    "",
+    "1. Первый",
+    "2. Второй",
+    "",
+    "| Версия | Что |",
+    "|---|---|",
+    "| 1.21.0 | Новый вид |"
+  ].join("\n"));
+  const box = document.createElement("div");
+  box.innerHTML = html;
+  check("Release notes: заголовок, абзац, жирный, код", box.querySelector("h2")?.textContent === "Заголовок" && box.querySelector("p strong")?.textContent === "жирным" && box.querySelector("p code")?.textContent === "кодом");
+  check("Release notes: HTML из текста экранируется, скриптов нет", !box.querySelector("script") && box.querySelector("p").textContent.includes("<script>"));
+  const lis = [...box.querySelectorAll("ul > li")];
+  check("Release notes: список с переносом строк и вложенным пунктом", lis.length === 2 && lis[0].textContent === "Пункт один продолжение пункта" && lis[1].innerHTML.includes("<br>• вложенный"), lis.map((x) => x.innerHTML).join(" | "));
+  check("Release notes: внешняя ссылка — в новой вкладке, файл — текстом", box.querySelector('a[href="https://example.com"][target="_blank"]')?.textContent === "ссылка" && !box.querySelector('a[href="RELEASE_NOTES.md"]') && lis[1].textContent.includes("файл"));
+  check("Release notes: нумерованный список и таблица", box.querySelectorAll("ol > li").length === 2 && box.querySelector("table thead th")?.textContent === "Версия" && box.querySelector("table tbody td")?.textContent === "1.21.0" && box.querySelectorAll("table tbody tr").length === 1);
+  const real = await (await fetch("../RELEASE_NOTES.md", { cache: "no-store" })).text();
+  const rb = document.createElement("div");
+  rb.innerHTML = md.toHtml(real);
+  check("Release notes: настоящий RELEASE_NOTES.md разбирается — заголовки, списки, таблицы", rb.querySelectorAll("h3").length >= 5 && rb.querySelectorAll("table").length >= 2 && rb.querySelectorAll("li").length >= 10);
+}
+
+// Формы полос «Эпик — история»: монохром, скобка у проекта, брусок у эпика, линия с точкой у истории.
+{
+  const stories = await import("../src/js/stories.js");
+  const sv = await import("../src/js/storiesView.js");
+  const EPS = [{ key: "F-E", summary: "Эпик", statusName: "В работе", statusCategory: "indeterminate", omg: { project: { name: "Проект Ф", created: "2026-09-01T10:00:00Z" }, notes: [] } }];
+  const L = (key) => ({ type: "Relates", key, typeName: "Задача" });
+  const ISS = [
+    { ...mk("F-S", "F-E", "AAA", "Ivan", null, 0, "prog"), typeName: "История", links: [L("F-1"), L("F-2"), L("F-3")] },
+    { ...mk("F-1", "F-E", "AAA", "Ivan", 2, 4, "done"), typeName: "Задача", links: [] },
+    { ...mk("F-2", "F-E", "AAA", "Ivan", 3, 4, "new"), typeName: "Задача", links: [] },
+    { ...mk("F-3", "F-E", "AAA", "Ivan", 4, 4, "new"), typeName: "Задача", links: [] },
+    { ...mk("F-4", "F-E", "AAA", "Ivan", 3, 2, "new"), typeName: "Задача", links: [] }
+  ];
+  const m = stories.buildStoryModel({ epics: EPS, issues: ISS, sprints, boards, storyTypes: ["история"], excludeTypes: ["история"], linkType: "Relates" });
+  const box = document.createElement("div");
+  document.body.append(box);
+  sv.resetCollapse();
+  sv.render(box, m, {});
+  box.querySelector(".gantt-bar .link").click();
+  const srow = box.querySelector('.s-story[data-story="F-S"]');
+  const dots = [...srow.querySelectorAll(".sbar-dot")];
+  check("Формы: у истории — тонкая линия, точка-начало только в первой секции с работой", srow.querySelectorAll(".sbar-s").length >= 2 && dots.length === 1 && dots[0].closest("td") === srow.querySelector(".sbar-s").closest("td") && Math.round(srow.querySelector(".sbar-track").getBoundingClientRect().height) === 2);
+  check("Формы: точка-начало насыщенная, если в секции есть сделанное", dots[0].classList.contains("done"));
+  check("Формы: у «Без истории» — линия без точки", !!box.querySelector(".s-nostory .sbar-s") && !box.querySelector(".s-nostory .sbar-dot"));
+  const fillColor = getComputedStyle(srow.querySelector(".sbar-fill")).backgroundColor;
+  const restColor = getComputedStyle(srow.querySelector(".sbar-track")).backgroundColor;
+  const pfill = getComputedStyle(box.querySelector(".s-project .sbar-fill")).backgroundColor;
+  const efill = getComputedStyle(box.querySelector(".s-epic .sbar-fill")).backgroundColor;
+  check("Формы: один цвет на всех уровнях — сделанное одним синим, остаток бледным", fillColor === pfill && fillColor === efill && fillColor !== restColor && fillColor !== "rgb(34, 160, 107)", `${fillColor} / ${restColor}`);
+  const prs = [...box.querySelectorAll(".s-project .sbar-p")];
+  const capsOk = prs.every((pr) => {
+    const w = parseFloat(pr.querySelector(".sbar-fill").style.width);
+    return pr.querySelector(".cap-l").classList.contains("done") === w > 0 && pr.querySelector(".cap-r").classList.contains("done") === w >= 100;
+  });
+  check("Формы: уголок скобки насыщенный слева, если что-то сделано, справа — только если сделано всё", prs.length >= 2 && capsOk && prs.some((pr) => !pr.querySelector(".cap-r").classList.contains("done")), prs.map((pr) => pr.querySelector(".sbar-fill").style.width).join());
+  box.remove();
+}
+
+// Направляющие дерева на «Эпик — история».
+{
+  const stories = await import("../src/js/stories.js");
+  const sv = await import("../src/js/storiesView.js");
+  const EPS = [
+    { key: "T-E1", summary: "Эпик 1", statusName: "В работе", statusCategory: "indeterminate", omg: { project: { name: "П", created: "2026-09-01T10:00:00Z" }, notes: [] } },
+    { key: "T-E2", summary: "Эпик 2", statusName: "В работе", statusCategory: "indeterminate", omg: { project: { name: "П", created: "2026-09-01T10:00:00Z" }, notes: [] } }
+  ];
+  const L = (key) => ({ type: "Relates", key, typeName: "Задача" });
+  const ISS = [
+    { ...mk("T-S1", "T-E1", "AAA", "Ivan", null, 0, "prog"), typeName: "История", links: [L("T-1")] },
+    { ...mk("T-S2", "T-E1", "AAA", "Ivan", null, 0, "new"), typeName: "История", links: [] },
+    { ...mk("T-1", "T-E1", "AAA", "Ivan", 2, 4, "new"), typeName: "Задача", links: [] },
+    { ...mk("T-2", "T-E2", "AAA", "Ivan", 2, 4, "new"), typeName: "Задача", links: [] }
+  ];
+  const m = stories.buildStoryModel({ epics: EPS, issues: ISS, sprints, boards, storyTypes: ["история"], excludeTypes: ["история"], linkType: "Relates" });
+  const box = document.createElement("div");
+  document.body.append(box);
+  sv.resetCollapse();
+  sv.render(box, m, {});
+  check("Дерево: у свёрнутого проекта направляющих нет", !box.querySelector(".s-guide"));
+  box.querySelector(".gantt-bar .link").click();
+  const gOf = (tr) => [...tr.querySelectorAll(".c-name > .s-guide")].map((g) => `${g.dataset.g}${g.classList.contains("s-guide-start") ? "^" : ""}`).join(",");
+  const pr = box.querySelector(".s-project");
+  const e1 = box.querySelector('.s-epic[data-epic="T-E1"]');
+  const s1 = box.querySelector('.s-story[data-story="T-S1"]');
+  check("Дерево: у проекта линия начинается от стрелки", gOf(pr) === "p:п^", gOf(pr));
+  check("Дерево: у эпика — линия проекта и начало своей; у истории — обе линии без начала", gOf(e1) === "p:п,e:T-E1^" && gOf(s1) === "p:п,e:T-E1", `${gOf(e1)} | ${gOf(s1)}`);
+  const lx = [...s1.querySelectorAll(".s-guide")].map((g) => Math.round(g.getBoundingClientRect().left - s1.querySelector(".c-name").getBoundingClientRect().left));
+  check("Дерево: линии стоят на отступах проекта и эпика", lx.join() === "12,30", lx.join());
+  s1.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+  const hot = [...box.querySelectorAll(".s-guide.hot")];
+  check("Дерево: наведение на историю подсвечивает линию её эпика во всём блоке, и только её", hot.length >= 3 && hot.every((g) => g.dataset.g === "e:T-E1"));
+  box.querySelector("tbody").dispatchEvent(new MouseEvent("mouseleave"));
+  check("Дерево: мышь ушла — подсветка снята", !box.querySelector(".s-guide.hot"));
+  check("Дерево: между эпиками разделитель заметнее", getComputedStyle(e1.querySelector("td")).boxShadow !== "none");
   box.remove();
 }
 

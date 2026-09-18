@@ -17,6 +17,11 @@
   --view-fg: #2b5aa8;
   /* Строка проекта на ракурсе «Эпик — история». */
   --proj-bg: #f4f5f7;
+  /* Монохромные полосы «Эпик — история»: сделанное, остаток, уголки и точки остатка. */
+  --mono-done: #185fa5;
+  --mono-rest: #b5d4f4;
+  --mono-cap: #85b7eb;
+  --guide: #c9ced8; /* направляющие дерева и разделитель эпиков */
 }
 
 * { box-sizing: border-box; }
@@ -84,7 +89,24 @@ input[type="search"] { min-width: 320px; }
   font-size: 12px;
   white-space: nowrap;
 }
-.brand:hover .about { display: block; }
+.brand:hover .about, .brand.pinned .about { display: block; }
+.brand-title { cursor: pointer; border-radius: 4px; }
+.brand-title:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.brand.pinned .brand-title { color: var(--accent); }
+.about-version { padding: 0; font: inherit; font-weight: 600; text-decoration: underline; text-underline-offset: 2px; }
+/* Release notes: окно побольше, с прокруткой. */
+.tooltip.tip-notes { width: min(720px, calc(100vw - 32px)); max-width: none; max-height: 80vh; }
+.notes-body { font-size: 13px; line-height: 1.5; white-space: normal; }
+.notes-body h2 { font-size: 16px; margin: 4px 0 8px; }
+.notes-body h3 { font-size: 14px; margin: 14px 0 6px; }
+.notes-body h4 { font-size: 13px; margin: 10px 0 4px; }
+.notes-body p { margin: 0 0 8px; }
+.notes-body ul, .notes-body ol { margin: 0 0 8px; padding-left: 20px; }
+.notes-body li { margin: 2px 0; }
+.notes-body code { padding: 0 3px; border-radius: 3px; background: var(--accent-soft); font-size: 12px; }
+.notes-body table { border-collapse: collapse; margin: 4px 0 10px; font-size: 12px; }
+.notes-body th, .notes-body td { border: 1px solid var(--line); padding: 3px 8px; text-align: left; vertical-align: top; }
+.notes-body th { background: var(--bg); }
 .about-row { line-height: 1.6; }
 .about-k { color: var(--muted); }
 .about a { color: var(--accent); text-decoration: none; }
@@ -450,19 +472,38 @@ button.s-pr:hover .s-pr-text { color: var(--accent); text-decoration: underline;
 .g-row:hover .s-actions, .s-actions:focus-within { display: inline-flex; }
 .pop-btn.s-act { padding: 0 6px; font-size: 12px; line-height: 18px; }
 .s-donegroup .s-title { color: var(--muted); }
-/* Полосы секций: одна система — толщина показывает уровень, зелёное — готовое, цифры под полосой. */
+/* Направляющие дерева: тонкая линия от стрелки проекта и эпика вниз по строкам блока; синим — блок
+   под мышью. Между эпиками — разделитель чуть заметнее, чем между историями. */
+.s-guide { position: absolute; top: 0; bottom: -1px; width: 1px; background: var(--guide); pointer-events: none; z-index: 1; }
+.s-guide-start { top: 62%; }
+.s-guide.hot { width: 2px; margin-left: -0.5px; background: var(--accent); }
+.g-row.s-epic > td { box-shadow: inset 0 1px 0 var(--guide); }
+/* Полосы секций: один цвет — сделанное насыщенным синим, остаток бледным; тип объекта — формой:
+   проект — «скобка» с уголками, эпик — брусок, история — тонкая линия с точкой-началом. */
 .gantt td.s-cell { padding: 4px 6px; }
 .sbar { display: flex; flex-direction: column; gap: 2px; cursor: pointer; }
-.sbar-track { display: block; width: 100%; border-radius: 4px; overflow: hidden; }
-.sbar-track > i { display: block; height: 100%; background: #22a06b; }
-.sbar-p .sbar-track { height: 8px; background: #9f8fef; }
-.sbar-e .sbar-track { height: 6px; background: #f5c04a; }
-.sbar-s .sbar-track { height: 4px; background: #85b8ff; }
+.sbar-line { display: flex; align-items: center; }
+.sbar-track { display: block; flex: 1; min-width: 0; overflow: hidden; background: var(--mono-rest); }
+.sbar-fill { display: block; height: 100%; background: var(--mono-done); }
+.sbar-p .sbar-track { height: 5px; }
+.sbar-caps { display: flex; justify-content: space-between; height: 5px; margin-top: -2px; }
+.sbar-caps > i { width: 0; height: 0; border-bottom: 5px solid transparent; }
+.sbar-caps > .cap-l { border-left: 5px solid var(--mono-cap); }
+.sbar-caps > .cap-r { border-right: 5px solid var(--mono-cap); }
+.sbar-caps > .cap-l.done { border-left-color: var(--mono-done); }
+.sbar-caps > .cap-r.done { border-right-color: var(--mono-done); }
+.sbar-e .sbar-track { height: 12px; border-radius: 2px; }
+.sbar-s .sbar-track { height: 2px; }
+.sbar-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--mono-cap); }
+.sbar-dot.done { background: var(--mono-done); }
 .sbar-num { font-size: 10px; line-height: 12px; color: var(--muted); text-align: right; white-space: nowrap; }
 .sbar:hover .sbar-track { outline: 1px solid var(--accent); outline-offset: 1px; }
 .sbar:hover .sbar-num { color: var(--text); }
 .sbar.own-sprint { cursor: help; }
-.sbar.own-sprint .sbar-track { background: repeating-linear-gradient(135deg, transparent 0 3px, #85b8ff 3px 6px); }
+.sbar.own-sprint .sbar-track { height: 2px; background: repeating-linear-gradient(90deg, var(--mono-cap) 0 4px, transparent 4px 7px); }
+/* «Готово» в таблице слева — тем же синим, что и полосы. */
+.mode-epicStories .s-pr-bar > i { background: var(--mono-done); }
+.gantt-bar.s-bar .swatch-done { background: var(--mono-done); opacity: 1; }
 /* Компактная шапка секций: «Текущий» / «+1» и точки команд; спринты — по щелчку. */
 .gantt th.c-sprint.compact { vertical-align: middle; }
 .sp-dots { display: flex; align-items: center; flex-wrap: wrap; gap: 1px; margin-top: 2px; }
@@ -874,6 +915,10 @@ textarea { font: inherit; padding: 5px 8px; border: 1px solid var(--line); borde
     --view-bg: #1c2b40;
     --view-fg: #85b8ff;
     --proj-bg: #2a2f35;
+    --mono-done: #85b7eb;
+    --mono-rest: #1f3a5c;
+    --mono-cap: #3a6aa0;
+    --guide: #4a525b;
   }
   button { background: #2c333a; }
   button:hover { background: #343b43; }
