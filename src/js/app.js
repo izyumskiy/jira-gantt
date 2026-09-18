@@ -1526,6 +1526,24 @@ async function drawStories() {
         await setEpicProject(keys, name);
         drawStories();
       },
+      storyTypesText: s.storyTypes,
+      storyLinkText: s.storyLinkType,
+      // Кнопка из подсказки «у историй нет задач»: выбрать связь задачи с историей.
+      onSetLinkType: async (name) => {
+        await settings.save({ storyLinkType: name });
+        if ($("#storyLinkType")) $("#storyLinkType").value = name;
+        status(t("story.linkSet", { name }));
+        drawStories();
+      },
+      // Кнопка из подсказки «историй не найдено»: добавить тип в «Типы историй».
+      onAddStoryType: async (name) => {
+        const list = String(settings.get().storyTypes || "").split(/[,;\n]/).map((x) => x.trim()).filter(Boolean);
+        if (!list.some((x) => x.toLowerCase() === name.toLowerCase())) list.push(name);
+        await settings.save({ storyTypes: list.join(", ") });
+        if ($("#storyTypes")) $("#storyTypes").value = settings.get().storyTypes;
+        status(t("story.typeAdded", { name }));
+        drawStories();
+      },
       // Заметки (Р4): строки заметок, порог «устарела», новая заметка — сразу и локально.
       showNotes: s.storyShowNotes !== false,
       staleDays: s.noteStaleDays,

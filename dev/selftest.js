@@ -2149,7 +2149,7 @@ check("пиктограмма 💬 есть и на «По эпикам и лю�
       DICT.ru[b.dataset.i18nTitle] && DICT.en[b.dataset.i18nTitle]));
   check("Р1: пиктограммы одного стиля с остальными (контур 24×24, линия 2)",
     [...doc.querySelectorAll(".tabs .tab-icon svg")].every((v) => v.getAttribute("viewBox") === "0 0 24 24" && v.getAttribute("stroke-width") === "2" && v.getAttribute("fill") === "none"));
-  check("Р1: «Команда» — текстом, вне группы", !!doc.querySelector('.tabs > .tab[data-tab="team"][data-i18n="tab.team"]'));
+  check("Р1: «Команда» — пиктограммой, вне группы ракурсов, подпись в подсказке", !!doc.querySelector('.tabs > .tab.tab-icon[data-tab="team"][data-i18n-title="tab.team"] svg') && !group.querySelector('[data-tab="team"]'));
   check("Р1: «Эпик — история» показан и ведёт на свою страницу", !views[2]?.hasAttribute("hidden") && !!doc.querySelector("#page-epicStories"));
   check("Р1: у группы есть подпись для экранного диктора", group?.dataset.i18nAria === "tab.views" && DICT.en["tab.views"]);
 }
@@ -2509,6 +2509,166 @@ check("пиктограмма 💬 есть и на «По эпикам и лю�
   cbx.dispatchEvent(new Event("change"));
   sv.render(box, model, { ...opts, showNotes: false });
   check("Р4: снятая галочка скрывает строки заметок", JSON.stringify(toggles) === "[false]" && !box.querySelector(".s-note") && !box.querySelector(".s-notes-toggle input").checked);
+  box.remove();
+}
+
+// Дефект: истории не выводились под эпиками — ракурс должен объяснять, почему историй нет.
+{
+  const stories = await import("../src/js/stories.js");
+  const sv = await import("../src/js/storiesView.js");
+  const EPS = [{ key: "D-E", summary: "Эпик", statusName: "В работе", statusCategory: "indeterminate" }];
+  const ISS = [
+    { ...mk("D-1", "D-E", "AAA", "Ivan", 2, 1, "new"), typeName: "Story", links: [] },
+    { ...mk("D-2", "D-E", "AAA", "Ivan", 2, 1, "new"), typeName: "Task", links: [] },
+    { ...mk("D-3", "D-E", "AAA", "Ivan", 2, 1, "new"), typeName: "Task", links: [] }
+  ];
+  const miss = stories.buildStoryModel({ epics: EPS, issues: ISS, sprints, boards, storyTypes: ["user story"], excludeTypes: ["user story"] });
+  check("Дефект: тип историй не совпал — историй 0, в модели типы задач эпика", miss.storyTotal === 0 && miss.typeCounts.map((x) => `${x.name}:${x.n}`).join() === "Task:2,Story:1", JSON.stringify(miss.typeCounts));
+  const box = document.createElement("div");
+  document.body.append(box);
+  sv.resetCollapse();
+  sv.render(box, miss, { storyTypesText: "User Story" });
+  const hint = box.querySelector(".s-nostories");
+  check("Дефект: над диаграммой — подсказка с типами задач и значением «Типов историй»", !!hint && hint.textContent.includes("Story (1)") && hint.textContent.includes("User Story"), hint && hint.textContent);
+  const hit = stories.buildStoryModel({ epics: EPS, issues: ISS, sprints, boards, storyTypes: ["story"], excludeTypes: ["story"] });
+  sv.render(box, hit, { storyTypesText: "Story" });
+  box.querySelector(".gantt-bar .link").click();
+  const added = [];
+  sv.render(box, miss, { storyTypesText: "User Story", onAddStoryType: (n) => added.push(n) });
+  box.querySelector(".s-add-type")?.click();
+  check("Дефект: в подсказке кнопка «Считать историями» для похожего типа", JSON.stringify(added) === '["Story"]' && JSON.stringify(miss.storyCandidates) === '["Story"]');
+  const ru = stories.buildStoryModel({ epics: EPS, issues: ISS.map((i) => (i.typeName === "Story" ? { ...i, typeName: "История" } : i)), sprints, boards, storyTypes: flowlib.storyTypes({ storyTypes: settings.DEFAULTS.storyTypes }), excludeTypes: [] });
+  check("Дефект: по умолчанию «Типы историй» понимают русское «История»", ru.storyTotal === 1);
+  const m1 = { storyTypes: " User Story " };
+  const m2 = { storyTypes: "Epic Story" };
+  settings.MIGRATIONS[1](m1);
+  settings.MIGRATIONS[1](m2);
+  check("Дефект: прежнее нетронутое умолчание «User Story» поднимается миграцией, своё значение не трогаем",
+    m1.storyTypes === settings.DEFAULTS.storyTypes && m2.storyTypes === "Epic Story" && settings.SCHEMA === 2);
+  sv.render(box, hit, { storyTypesText: "Story" });
+  box.querySelector(".gantt-bar .link").click();
+  check("Дефект: при верном типе история под эпиком, подсказки нет", hit.storyTotal === 1 && ![...box.querySelectorAll(".s-nostories")].some((h) => h.textContent.includes(t("story.noneFound", { setting: "Story" }))) && box.querySelector('.s-story[data-story="D-1"]'));
+  box.remove();
+}
+
+// Визуальные доработки: ширина колонки названий, строка проекта.
+{
+  const stories = await import("../src/js/stories.js");
+  const sv = await import("../src/js/storiesView.js");
+  await settings.save({ nameWidths: {} });
+  const gw = document.createElement("div");
+  document.body.append(gw);
+  const mw = agg.buildModel({ issues, others: [], sprints, epics, boards, mode: "epicPeople" });
+  renderOpen(gw, mw, { mode: "epicPeople" });
+  const tbl = gw.querySelector("table.gantt");
+  const rz = tbl.querySelector("thead .c-name .col-resizer");
+  const w = () => parseFloat(getComputedStyle(tbl).getPropertyValue("--name-w"));
+  check("Ширина: у заголовка колонки названий — ручка, по умолчанию 456px", !!rz && w() === gantt.NAME_W_DEFAULT && rz.getAttribute("role") === "separator");
+  rz.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, clientX: 100 }));
+  document.dispatchEvent(new MouseEvent("mousemove", { bubbles: true, clientX: 250 }));
+  const live = w();
+  document.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, clientX: 250 }));
+  await new Promise((r) => setTimeout(r, 20));
+  check("Ширина: тянем мышью — колонка шире, ширина запомнена для ракурса", live === 606 && settings.get().nameWidths.epicPeople === 606 && tbl.querySelector("thead .c-name").getBoundingClientRect().width >= 600, `${live} / ${JSON.stringify(settings.get().nameWidths)}`);
+  const lbl = tbl.querySelector(".glabel");
+  check("Ширина: подпись эпика растёт вместе с колонкой", parseFloat(getComputedStyle(lbl).maxWidth) === 606 - 200, getComputedStyle(lbl).maxWidth);
+  renderOpen(gw, mw, { mode: "epicPeople" });
+  check("Ширина: после перерисовки — сохранённая", w.call(null) === 606 || parseFloat(getComputedStyle(gw.querySelector("table.gantt")).getPropertyValue("--name-w")) === 606);
+  const rz2 = gw.querySelector("thead .c-name .col-resizer");
+  rz2.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true }));
+  await new Promise((r) => setTimeout(r, 20));
+  check("Ширина: стрелка ← — на 20px уже", settings.get().nameWidths.epicPeople === 586);
+  rz2.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, clientX: 500 }));
+  document.dispatchEvent(new MouseEvent("mousemove", { bubbles: true, clientX: -900 }));
+  document.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 20));
+  check("Ширина: не уже минимума", settings.get().nameWidths.epicPeople === gantt.NAME_W_MIN);
+  rz2.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 20));
+  check("Ширина: двойной щелчок — по умолчанию", !("epicPeople" in settings.get().nameWidths) && parseFloat(getComputedStyle(gw.querySelector("table.gantt")).getPropertyValue("--name-w")) === gantt.NAME_W_DEFAULT);
+  await settings.save({ nameWidths: { epicStories: 700 } });
+  renderOpen(gw, mw, { mode: "epicPeople" });
+  check("Ширина: у каждого ракурса своя", parseFloat(getComputedStyle(gw.querySelector("table.gantt")).getPropertyValue("--name-w")) === gantt.NAME_W_DEFAULT);
+  gw.remove();
+
+  const EPS = [{ key: "V-E", summary: "Эпик", statusName: "В работе", statusCategory: "indeterminate", omg: { project: { name: "Проект В", created: "2026-09-01T10:00:00Z" }, notes: [] } }];
+  const ISS = [{ ...mk("V-1", "V-E", "AAA", "Ivan", 2, 4, "new"), typeName: "Task", links: [] }];
+  const sm = stories.buildStoryModel({ epics: EPS, issues: ISS, sprints, boards, storyTypes: ["user story"], excludeTypes: ["user story"] });
+  const sb = document.createElement("div");
+  document.body.append(sb);
+  sv.resetCollapse();
+  sv.render(sb, sm, {});
+  sb.querySelector(".gantt-bar .link").click(); // развернуть всё — нужна и строка эпика для сравнения
+  const prow = sb.querySelector(".s-project");
+  const bg = (td) => getComputedStyle(td).backgroundColor;
+  check("Проект: ширина колонки ракурса — своя сохранённая (700px)", parseFloat(getComputedStyle(sb.querySelector("table.gantt")).getPropertyValue("--name-w")) === 700);
+  check("Проект: строка залита целиком — от названия до бэклога, одним цветом", [...prow.children].every((td) => bg(td) === bg(prow.children[0])) && bg(prow.children[0]) !== bg(sb.querySelector(".s-epic > .c-cell")));
+  const pb = prow.querySelector(".bar");
+  check("Проект: полосы-итоги проекта в своём стиле, у эпика — прежние жёлтые", pb.classList.contains("bar-project") && getComputedStyle(pb).color === "rgb(255, 255, 255)" && !sb.querySelector(".s-epic .bar-project"));
+  sb.remove();
+  await settings.save({ nameWidths: {} });
+}
+
+// Дефект: у историй не показывались задачи — связь в Jira называется иначе, чем в настройке.
+{
+  const stories = await import("../src/js/stories.js");
+  const sv = await import("../src/js/storiesView.js");
+  const EPS = [{ key: "K-E", summary: "Эпик", statusName: "В работе", statusCategory: "indeterminate" }];
+  const L = (key, type, typeName = "Задача") => ({ type, key, typeName });
+  const ISS = [
+    { ...mk("K-S", "K-E", "AAA", "Ivan", null, 0, "new"), typeName: "История", links: [L("K-1", "Связано"), L("K-2", "Связано"), L("K-3", "Блокирует"), L("K-E", "Связано", "Epic")] },
+    { ...mk("K-1", "K-E", "AAA", "Ivan", 2, 4, "new"), typeName: "Задача", links: [L("K-S", "Связано", "История")] },
+    { ...mk("K-2", "K-E", "AAA", "Ivan", 2, 4, "new"), typeName: "Задача", links: [L("K-S", "Связано", "История")] },
+    { ...mk("K-3", "K-E", "AAA", "Ivan", 3, 4, "new"), typeName: "Задача", links: [] }
+  ];
+  const opt = { epics: EPS, issues: ISS, sprints, boards, storyTypes: ["история"], excludeTypes: ["история"] };
+  const miss = stories.buildStoryModel({ ...opt, linkType: "Relates" });
+  check("Дефект связей: связь не совпала — у истории 0 задач, в модели типы связей историй",
+    miss.storyTotal === 1 && miss.storyTaskTotal === 0 && miss.linkTypeCounts.map((x) => `${x.name}:${x.n}`).join() === "Связано:2,Блокирует:1", JSON.stringify(miss.linkTypeCounts));
+  const box = document.createElement("div");
+  document.body.append(box);
+  const chosen = [];
+  sv.resetCollapse();
+  sv.render(box, miss, { storyLinkText: "Relates", onSetLinkType: (n) => chosen.push(n) });
+  const hint = box.querySelector(".s-nostories");
+  check("Дефект связей: подсказка — какие связи у историй и что в настройке", !!hint && hint.textContent.includes("Связано (2)") && hint.textContent.includes("Relates"), hint && hint.textContent);
+  hint.querySelector(".s-add-type").click();
+  check("Дефект связей: кнопка «Считать связью» выбирает связь", JSON.stringify(chosen) === '["Связано"]');
+  const hit = stories.buildStoryModel({ ...opt, linkType: "Связано" });
+  sv.render(box, hit, { storyLinkText: "Связано" });
+  box.querySelector(".gantt-bar .link").click();
+  const row = box.querySelector('.s-story[data-story="K-S"]');
+  check("Дефект связей: при верной связи задачи истории в её секциях, подсказки нет",
+    hit.storyTaskTotal === 2 && !box.querySelector(".s-nostories") && row.querySelectorAll(".c-cell .bar").length >= 1, `${hit.storyTaskTotal}`);
+  const nolinks = stories.buildStoryModel({ ...opt, issues: ISS.map((i) => ({ ...i, links: [] })), linkType: "Relates" });
+  sv.render(box, nolinks, { storyLinkText: "Relates" });
+  check("Дефект связей: у историй нет связей вовсе — так и сказано", box.querySelector(".s-nostories")?.textContent.includes(t("story.noLinks")));
+  box.remove();
+}
+
+// Истории, чьи задачи закрыты в прошлых спринтах: на шкале их нет — нужен счётчик «готово N из M».
+{
+  const stories = await import("../src/js/stories.js");
+  const sv = await import("../src/js/storiesView.js");
+  const EPS = [{ key: "P-E", summary: "Эпик", statusName: "В работе", statusCategory: "indeterminate" }];
+  const L = (key) => ({ type: "Relates", key, typeName: "Задача" });
+  const ISS = [{ ...mk("P-S", "P-E", "AAA", "Ivan", null, 0, "prog"), typeName: "История", links: [L("AO-1"), L("AO-2"), L("AO-3")] }];
+  // AO-1, AO-2 — из другого проекта, готовы в закрытом спринте 1; AO-3 — ещё не загружена.
+  const LINKED = [{ ...mk("AO-1", "", "AO", "Ivan", 1, 4, "done"), typeName: "Задача", links: [] }, { ...mk("AO-2", "", "AO", "Ivan", 1, 2, "prod"), typeName: "Задача", links: [] }];
+  const m = stories.buildStoryModel({ epics: EPS, issues: ISS, linked: LINKED, sprints, boards, storyTypes: ["история"], excludeTypes: ["история"], linkType: "Relates" });
+  const sn = m.projects[0].epics[0].stories[0];
+  check("История с задачами в прошлых спринтах: на шкале пусто, но задачи учтены", sn.all.length === 2 && sn.cells.size === 0 && sn.missing.join() === "AO-3");
+  const box = document.createElement("div");
+  document.body.append(box);
+  sv.resetCollapse();
+  sv.render(box, m, {});
+  box.querySelector(".gantt-bar .link").click();
+  const chip = box.querySelector('.s-story[data-story="P-S"] .s-progress');
+  check("Счётчик «готово N из M» у истории, все готовы — зелёный", chip?.textContent === t("story.progress", { done: 2, n: 2 }) && chip.classList.contains("all-done"));
+  chip.click();
+  check("По счётчику — список всех задач истории, чужие помечены", document.querySelectorAll(".tooltip.tip-issues tr").length === 2 && document.querySelector(".tooltip.tip-issues").textContent.includes(t("story.noEpic")));
+  document.querySelector(".tooltip .tip-close")?.click();
+  check("Незагруженная задача — подсказка предлагает «Обновить»", box.querySelector('.s-story[data-story="P-S"] .s-missing').title.includes("AO-3") && t("story.missing", { list: "" }).includes("Обновить"));
   box.remove();
 }
 

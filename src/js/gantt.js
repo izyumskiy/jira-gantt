@@ -402,16 +402,94 @@ export function chartBar(model, { withDue = true, onExpand, onCollapse }) {
   return bar;
 }
 
+// ---------- ширина колонки названий ----------
+// Длинные названия эпиков не помещаются в колонку по умолчанию: её граница двигается мышью (ручка
+// на правом краю заголовка), стрелками с клавиатуры, двойной щелчок — ширина по умолчанию.
+// Ширина запоминается в настройках отдельно для каждого ракурса.
+export const NAME_W_DEFAULT = 456;
+export const NAME_W_MIN = 260;
+export const NAME_W_MAX = 1000;
+const clampW = (w) => Math.round(Math.min(NAME_W_MAX, Math.max(NAME_W_MIN, w)));
+
+export function nameWidthOf(widthKey) {
+  const w = Number((settings.get().nameWidths || {})[widthKey]);
+  return w > 0 ? clampW(w) : NAME_W_DEFAULT;
+}
+
+// Сохранённая ширина — на таблицу ракурса (через --name-w: её читают колонка и подписи).
+export function applyNameWidth(table, widthKey) {
+  if (widthKey) table.style.setProperty("--name-w", `${nameWidthOf(widthKey)}px`);
+}
+
+async function saveNameWidth(widthKey, w) {
+  const all = { ...(settings.get().nameWidths || {}) };
+  if (w == null) delete all[widthKey];
+  else all[widthKey] = clampW(w);
+  await settings.save({ nameWidths: all });
+}
+
+function nameResizer(widthKey) {
+  const h = el("span", "col-resizer");
+  h.tabIndex = 0;
+  h.setAttribute("role", "separator");
+  h.setAttribute("aria-orientation", "vertical");
+  h.setAttribute("aria-label", t("gantt.resizeName"));
+  h.title = t("gantt.resizeName");
+  const set = (w) => {
+    const table = h.closest("table");
+    if (table) table.style.setProperty("--name-w", `${clampW(w)}px`);
+    h.setAttribute("aria-valuenow", String(clampW(w)));
+  };
+  h.onmousedown = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const startX = e.clientX;
+    const startW = nameWidthOf(widthKey);
+    const table = h.closest("table");
+    const current = table ? parseFloat(getComputedStyle(table).getPropertyValue("--name-w")) || startW : startW;
+    let w = current;
+    h.classList.add("active");
+    document.body.classList.add("col-resizing");
+    const move = (ev) => {
+      w = current + (ev.clientX - startX);
+      set(w);
+    };
+    const up = () => {
+      document.removeEventListener("mousemove", move);
+      document.removeEventListener("mouseup", up);
+      h.classList.remove("active");
+      document.body.classList.remove("col-resizing");
+      saveNameWidth(widthKey, w);
+    };
+    document.addEventListener("mousemove", move);
+    document.addEventListener("mouseup", up);
+  };
+  h.ondblclick = (e) => {
+    e.stopPropagation();
+    set(NAME_W_DEFAULT);
+    saveNameWidth(widthKey, null);
+  };
+  h.onkeydown = (e) => {
+    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+    e.preventDefault();
+    const w = nameWidthOf(widthKey) + (e.key === "ArrowRight" ? 20 : -20);
+    set(w);
+    saveNameWidth(widthKey, w);
+  };
+  return h;
+}
+
 // Шапка таблицы: колонка имён и секции спринтов, справа — «Бэклог».
 // Заголовок секции: только имена её спринтов с цветом команды и пометка «текущий».
 // Даты не показываем: период секции — расчётная величина с шагом в календарных днях,
 // с реальными границами спринтов (без выходных) он расходится и только путает.
-export function chartHead(model, rerender, { title, hint = "" }) {
+export function chartHead(model, rerender, { title, hint = "", widthKey = "" }) {
   const thead = el("thead");
   const hr = el("tr");
   const th0 = el("th", "c-name");
   th0.append(el("span", null, title));
   if (hint) th0.append(el("span", "th-hint", hint));
+  if (widthKey) th0.append(nameResizer(widthKey));
   hr.append(th0);
   for (const sec of model.columns) {
     const th = el("th", "c-sprint" + (sec.id === model.currentId ? " current" : ""));
@@ -490,9 +568,10 @@ export function render(container, model, opts) {
   );
 
   const wrap = el("div", "gantt-wrap");
-  const table = el("table", `gantt mode-${mode}`); // на вкладке по людям колонка имён шире
+  const table = el("table", `gantt mode-${mode}`);
+  applyNameWidth(table, mode);
   const childTitle = { person: t("gantt.assignee"), epic: t("gantt.epic") }[model.childKind] || t("gantt.project");
-  table.append(chartHead(model, () => render(container, model, opts), { title: epicLike ? t("gantt.epic") : t("gantt.assignee"), hint: ` / ${childTitle}` }));
+  table.append(chartHead(model, () => render(container, model, opts), { title: epicLike ? t("gantt.epic") : t("gantt.assignee"), hint: ` / ${childTitle}`, widthKey: mode }));
   const showBacklog = true;
   const extraCols = showBacklog ? 1 : 0;
 
