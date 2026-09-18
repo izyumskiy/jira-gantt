@@ -75,8 +75,29 @@ async function drawSummary() {
     onMode: (m) => {
       state.summaryMode = m;
       drawSummary().catch(fail);
-    }
+    },
+    onRefresh: () => drawSummary().catch(fail)
   });
+  setSummaryBadge(0);
+}
+
+// Счётчик новых сигналов на вкладке «Сводка» (Б7).
+function setSummaryBadge(n) {
+  const tab = document.querySelector('.tab[data-tab="summary"]');
+  if (!tab) return;
+  tab.querySelector(".tab-badge")?.remove();
+  if (n > 0) {
+    const b = document.createElement("span");
+    b.className = "tab-badge";
+    b.textContent = String(n);
+    b.title = t("sum.badgeHint", { n });
+    tab.append(b);
+  }
+}
+
+async function refreshSummaryBadge() {
+  if (state.activeTab === "summary") return; // сводка на экране — всё уже показано
+  setSummaryBadge(await summaryView.badgeCount());
 }
 
 // Карточка эпика (как по «+» в списке) — из «Сводки».
@@ -1132,6 +1153,7 @@ async function doSync({ full = false } = {}) {
     if (lines.length) status(lines.join(" — "), isError ? "error" : "info");
     gantt.resetCollapse();
     redrawActive();
+    refreshSummaryBadge().catch(() => {});
   } catch (e) {
     fail(e);
   } finally {

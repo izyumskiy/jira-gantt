@@ -121,7 +121,59 @@ export async function loadData({ mode = "seen", session = { baseSyncId: null }, 
     excludeTypes,
     now
   });
-  return { current, base, weekly, signals, lastSync: s.lastSync, lastSyncId, now, epics };
+  // «Принято»: отметки исчезнувших сигналов снимаем — вернувшийся сигнал будет новым случаем.
+  const rawAcks = (await db.metaGet("acks", {})) || {};
+  const acks = summary.pruneAcks(rawAcks, signals);
+  if (Object.keys(acks).length !== Object.keys(rawAcks).length) await db.metaSet("acks", acks);
+  return { current, base, weekly, signals, acks, lastSync: s.lastSync, lastSyncId, now, epics };
+}
+
+// Счётчик на вкладке (Б7): новые сигналы «внимание» и «критично», не принятые и не показанные
+// при прошлом просмотре сводки.
+export async function badgeCount() {
+  const data = await loadData({ session: { baseSyncId: await db.metaGet("seenSyncId", null) } });
+  if (data.empty) return 0;
+  return summary.freshCount(data.signals, data.acks, await db.metaGet("seenSignalIds", []), settings.get().summary);
+}
+
+async function setAck(sig, on) {
+  const acks = (await db.metaGet("acks", {})) || {};
+  if (on) acks[sig.id] = { ...summary.ackOf(sig), at: Date.now() };
+  else delete acks[sig.id];
+  await db.metaSet("acks", acks);
+}
+
+// Отчёт для мессенджера и почты (Б7): дата, база, итог по цветам, «Требует внимания» со ссылками.
+export function buildReport(data, { format = "md", baseUrl = "", limit = 7 } = {}) {
+  const th = settings.get().summary;
+  const md = format === "md";
+  const lines = [];
+  const url = (key) => (baseUrl ? `${baseUrl.replace(/\/+$/, "")}/browse/${key}` : "");
+  const title = t("rep.title", { at: fmtDateTime(data.lastSync || data.lastSyncId) });
+  lines.push(md ? `**${title}**` : title);
+  lines.push(data.base ? t("sum.base", { at: fmtDateTime(data.base.at) }) : t("sum.noBase"));
+  const counts = { red: 0, yellow: 0, green: 0, unknown: 0, nodue: 0, done: 0 };
+  for (const st of data.current.values()) counts[summary.colorOf(st, th, data.now)] += 1;
+  lines.push(
+    ["red", "yellow", "green", "unknown", "nodue", "done"]
+      .filter((c) => counts[c])
+      .map((c) => t(`sum.color.${c}`, { n: counts[c] }))
+      .join(" · ")
+  );
+  lines.push("");
+  const active = data.signals.filter((x) => !summary.isAcked(x, data.acks, th));
+  const top = summary.attention(active, limit);
+  lines.push(md ? `**${t("sum.attention")}**` : `${t("sum.attention")}:`);
+  if (!top.length) lines.push(t("sum.calm"));
+  for (const sig of top) {
+    const mark = sig.severity === "critical" ? t("rep.critical") : t("rep.warning");
+    const text = signalText(sig, data.current);
+    const link = sig.epicKey ? url(sig.epicKey) : "";
+    const label = epicLabel(data.current.get(sig.epicKey)) || sig.epicKey || "";
+    if (md) lines.push(`- ${mark} ${link && label && text.includes(label) ? text.replace(label, `[${label}](${link})`) : text}`);
+    else lines.push(`— ${mark} ${text}${link ? ` (${link})` : ""}`);
+  }
+  return lines.join("\n");
 }
 
 // ---------- отрисовка ----------
@@ -172,11 +224,21 @@ export function signalText(sig, current) {
 
 const SEV_ICON = { critical: "●", warning: "▲", info: "·" };
 
-function signalRow(sig, data, onOpenEpic) {
-  const row = el("div", `sig sig-${sig.severity}`);
+function signalRow(sig, data, onOpenEpic, onRefresh = () => {}) {
+  const acked = summary.isAcked(sig, data.acks, settings.get().summary);
+  const row = el("div", `sig sig-${sig.severity}${acked ? " acked" : ""}`);
   row.append(el("span", "sig-icon", SEV_ICON[sig.severity]));
   const text = el("span", "sig-text", signalText(sig, data.current));
   row.append(text);
+  const ack = el("button", "link sig-ack", acked ? t("sum.unack") : t("sum.ack"));
+  ack.type = "button";
+  ack.title = acked ? t("sum.unackHint") : t("sum.ackHint");
+  ack.onclick = async (e) => {
+    e.stopPropagation();
+    await setAck(sig, !acked);
+    onRefresh();
+  };
+  row.append(ack);
   if (sig.epicKey && data.current.has(sig.epicKey)) {
     row.classList.add("clickable");
     row.title = t("sum.openEpic");
@@ -218,7 +280,7 @@ function sparkline(points) {
   return svg;
 }
 
-export async function render(container, { mode = "seen", session, onOpenEpic = () => {}, onMode = () => {} } = {}) {
+export async function render(container, { mode = "seen", session, onOpenEpic = () => {}, onMode = () => {}, onRefresh = () => {} } = {}) {
   const data = await loadData({ mode, session });
   container.textContent = "";
   if (data.empty) {
@@ -242,6 +304,22 @@ export async function render(container, { mode = "seen", session, onOpenEpic = (
     modes.append(chip);
   }
   head.append(modes);
+  const copy = el("div", "sum-copy");
+  for (const fmt of ["md", "text"]) {
+    const b = el("button", null, t(`sum.copy.${fmt}`));
+    b.type = "button";
+    b.onclick = async () => {
+      try {
+        await navigator.clipboard.writeText(buildReport(data, { format: fmt, baseUrl: settings.get().baseUrl, limit: Number(th.attention) || 7 }));
+        b.textContent = t("sum.copied");
+      } catch {
+        b.textContent = t("sum.copyFailed");
+      }
+      setTimeout(() => (b.textContent = t(`sum.copy.${fmt}`)), 2000);
+    };
+    copy.append(b);
+  }
+  head.append(copy);
   container.append(head);
 
   // 2. Итог по цветам.
@@ -257,18 +335,19 @@ export async function render(container, { mode = "seen", session, onOpenEpic = (
   container.append(totals);
 
   // 3. Требует внимания.
-  const top = summary.attention(data.signals, Number(th.attention) || 7);
-  const allImportant = summary.attention(data.signals, Infinity);
+  const active = data.signals.filter((x) => !summary.isAcked(x, data.acks, th));
+  const top = summary.attention(active, Number(th.attention) || 7);
+  const allImportant = summary.attention(active, Infinity);
   container.append(el("h3", "sum-h", t("sum.attention")));
   const att = el("div", "sum-attention");
   if (!top.length) att.append(el("div", "muted", t("sum.calm")));
-  for (const sig of top) att.append(signalRow(sig, data, onOpenEpic));
+  for (const sig of top) att.append(signalRow(sig, data, onOpenEpic, onRefresh));
   if (allImportant.length > top.length) {
     const more = el("button", "link", t("sum.more", { n: allImportant.length - top.length }));
     more.type = "button";
     more.onclick = () => {
       more.remove();
-      for (const sig of allImportant.slice(top.length)) att.append(signalRow(sig, data, onOpenEpic));
+      for (const sig of allImportant.slice(top.length)) att.append(signalRow(sig, data, onOpenEpic, onRefresh));
     };
     att.append(more);
   }
@@ -285,9 +364,12 @@ export async function render(container, { mode = "seen", session, onOpenEpic = (
     if (!list.length) {
       details.append(el("div", "muted small", group === "changes" && !data.base ? t("sum.noBase") : t("sum.none")));
     }
-    for (const sig of list) details.append(signalRow(sig, data, onOpenEpic));
+    for (const sig of list) details.append(signalRow(sig, data, onOpenEpic, onRefresh));
     container.append(details);
   }
+
+  // Показанные сигналы больше не «новые» для счётчика на вкладке.
+  await db.metaSet("seenSignalIds", active.filter((x) => x.severity !== "info").map((x) => x.id));
 
   // 5. Таблица портфеля: от худшего запаса; без срока и готовые — внизу.
   container.append(el("h3", "sum-h", t("sum.portfolio")));

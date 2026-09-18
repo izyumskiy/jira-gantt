@@ -801,3 +801,10 @@ circle.tr-total { fill: #6b778c; }
   .tr-grid { stroke: #2c2c2a; }
   .sum-table tr.clickable.open td { background: #2c333a; }
 }
+
+/* ---------- «Принято», отчёт, счётчик (этап 3) ---------- */
+.sig-ack { margin-left: auto; flex: none; font-size: 11px; opacity: 0; }
+.sig:hover .sig-ack, .sig.acked .sig-ack { opacity: 1; }
+.sig.acked .sig-text { color: var(--muted); text-decoration: line-through; text-decoration-color: rgba(107, 119, 140, .5); }
+.sum-copy { display: flex; gap: 6px; }
+.tab-badge { display: inline-block; min-width: 16px; margin-left: 6px; padding: 0 5px; border-radius: 8px; background: #de350b; color: #fff; font-size: 11px; line-height: 16px; text-align: center; font-weight: 600; }

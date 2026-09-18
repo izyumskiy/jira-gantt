@@ -326,3 +326,56 @@ export function attention(signals, limit = 7) {
     .sort((a, b) => SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity] || b.rank - a.rank)
     .slice(0, limit);
 }
+
+// ---------- «Принято» ----------
+// Принятый сигнал скрывается, пока его величина не ухудшится сверх порога: шанс упал ещё на
+// 10 пунктов, опоздание выросло ещё на неделю и т. п. Для сигналов без величины — пока не
+// поменялись их параметры. Исчезнувший и вернувшийся сигнал — новый случай: отметку снимаем.
+export function ackDelta(type, th) {
+  const d = {
+    overdue: 7,
+    lowChance: 10,
+    riskChance: 10,
+    melting: 1,
+    shiftLater: th.shiftDays,
+    scopeUp: th.scopeAbs,
+    scopeUpEst: th.scopePct,
+    carryNew: 1,
+    chronicCarry: 1,
+    overload: 10,
+    idleNearLate: 10,
+    spread: 1,
+    bottleneck: 1,
+    firedTasks: 1,
+    unassigned: 1,
+    noEstimate: 1
+  };
+  return type in d ? d[type] : null;
+}
+
+const paramsKey = (sig) => JSON.stringify(sig.params || {});
+
+export function ackOf(sig) {
+  return { rank: sig.rank, key: paramsKey(sig) };
+}
+
+export function isAcked(sig, acks, th) {
+  const a = acks && acks[sig.id];
+  if (!a) return false;
+  const delta = ackDelta(sig.type, th);
+  if (delta == null) return a.key === paramsKey(sig);
+  return sig.rank < a.rank + delta;
+}
+
+// Отметки тех сигналов, которых больше нет, — убрать.
+export function pruneAcks(acks, signals) {
+  const ids = new Set(signals.map((s) => s.id));
+  return Object.fromEntries(Object.entries(acks || {}).filter(([id]) => ids.has(id)));
+}
+
+// Новые для счётчика на вкладке: важность «внимание» и «критично», не приняты, не показаны при
+// прошлом просмотре сводки.
+export function freshCount(signals, acks, seenIds, th) {
+  const seen = new Set(seenIds || []);
+  return signals.filter((s) => s.severity !== "info" && !isAcked(s, acks, th) && !seen.has(s.id)).length;
+}

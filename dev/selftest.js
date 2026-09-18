@@ -1307,6 +1307,63 @@ await settings.save({ infoSystems: [], fields: { plannedStart: "", plannedEnd: "
   await dbm.clearAll();
 }
 
+// Этап 3: «Принято» (Б5) и счётчик новых сигналов, отчёт в буфер обмена (Б7)
+{
+  const th = { ...settings.DEFAULTS.summary };
+  const sig = (type, rank, params = {}) => ({ id: `${type}|EP-1||`, type, rank, params, severity: "critical" });
+  const acks = { [`lowChance|EP-1||`]: summary.ackOf(sig("lowChance", 60, { chance: 40 })) };
+  check("«Принято»: сигнал скрыт, пока шанс не упадёт ещё на 10 пунктов",
+    summary.isAcked(sig("lowChance", 65, { chance: 35 }), acks, th) && !summary.isAcked(sig("lowChance", 71, { chance: 29 }), acks, th));
+  const acks2 = { [`stall|EP-1||`]: summary.ackOf(sig("stall", 0, { weeks: 3 })) };
+  check("«Принято»: сигнал без величины скрыт, пока не поменялись параметры",
+    summary.isAcked(sig("stall", 0, { weeks: 3 }), acks2, th) && !summary.isAcked(sig("stall", 0, { weeks: 4 }), acks2, th));
+  check("«Принято»: отметки исчезнувших сигналов снимаются", Object.keys(summary.pruneAcks({ ...acks, "gone|X||": { rank: 1 } }, [sig("lowChance", 60)])).join() === "lowChance|EP-1||");
+  check("счётчик: новые «внимание» и «критично», не принятые и не показанные",
+    summary.freshCount([sig("lowChance", 60), { ...sig("stall", 0), id: "stall|EP-2||" }, { ...sig("noDue", 0), id: "noDue|EP-3||", severity: "info" }], acks, ["stall|EP-2||"], th) === 0 &&
+      summary.freshCount([sig("lowChance", 60), { ...sig("stall", 0), id: "stall|EP-2||" }], {}, [], th) === 2);
+
+  const DAYMS = 86400000;
+  const now = Date.now();
+  const d = (days) => { const x = new Date(now + days * DAYMS); const p2 = (n) => String(n).padStart(2, "0"); return `${x.getFullYear()}-${p2(x.getMonth() + 1)}-${p2(x.getDate())}`; };
+  const stOf = (o = {}) => ({ epicKey: "EP-1", summary: "Личный кабинет", epicName: "ЛК", statusName: "В работе", statusCategory: "indeterminate", dueDate: d(90), total: 100, done: 40, remaining: 60, estTotal: 0, estDone: 0, carriedOver: 0, p50: d(40), p85: d(50), chance: 0.95, buffer: 5.5, reason: "", historyWeeks: 30, teams: [], ...o });
+  await dbm.clearAll();
+  const s2 = now - 1000;
+  await dbm.putAll(dbm.STORES.epics, [{ key: "EP-1", summary: "Личный кабинет" }, { key: "EP-2", summary: "Биллинг" }]);
+  await dbm.putAll(dbm.STORES.issues, ["EP-1", "EP-2"].map((k, i) => ({ ...mk(`S3-${i}`, k, "AAA", "Ivan", 2, 1, "done"), resolved: new Date(now - DAYMS).toISOString() })));
+  await dbm.putAll(dbm.STORES.syncLog, [{ ...stOf(), syncId: s2 }, { ...stOf({ epicKey: "EP-2", summary: "Биллинг", epicName: "", chance: 0.3, buffer: -1.5 }), syncId: s2 }]);
+  await dbm.metaSet("lastSyncId", s2);
+  await dbm.metaSet("seenSyncId", s2);
+  await dbm.metaSet("seenSignalIds", []);
+  await settings.save({ lastSync: s2, baseUrl: "https://jira.example.local/" });
+  check("счётчик на вкладке до просмотра — 1 новый сигнал", (await summaryView.badgeCount()) === 1, String(await summaryView.badgeCount()));
+
+  const box = document.createElement("div");
+  document.body.append(box);
+  let refreshed = 0;
+  const draw = () => summaryView.render(box, { session: { baseSyncId: s2 }, onRefresh: () => { refreshed += 1; } });
+  const data = await draw();
+  check("после просмотра счётчик — 0", (await summaryView.badgeCount()) === 0);
+  const md = summaryView.buildReport(data, { format: "md", baseUrl: settings.get().baseUrl });
+  const txt = summaryView.buildReport(data, { format: "text", baseUrl: settings.get().baseUrl });
+  check("отчёт Markdown: заголовок, итог по цветам, «Требует внимания» со ссылкой на эпик",
+    md.startsWith("**") && md.includes(t("sum.color.red", { n: 1 })) && md.includes("[EP-2 · Биллинг](https://jira.example.local/browse/EP-2)") && md.includes(t("rep.critical")), md);
+  check("отчёт текстом: ссылка в скобках, без разметки", !txt.includes("**") && txt.includes("(https://jira.example.local/browse/EP-2)"), txt);
+
+  box.querySelector(".sum-attention .sig .sig-ack").click();
+  await new Promise((r) => setTimeout(r, 50));
+  check("кнопка «Принято» сохраняет отметку и просит перерисовать", refreshed === 1 && Object.keys((await dbm.metaGet("acks", {})) || {}).length === 1);
+  await draw();
+  check("принятый сигнал уходит из «Требует внимания», в блоке — приглушён",
+    box.querySelectorAll(".sum-attention .sig").length === 0 && box.querySelectorAll("details .sig.acked").length === 1 &&
+      !summaryView.buildReport(await summaryView.loadData({ session: { baseSyncId: s2 } }), { format: "text" }).includes(t("rep.critical")));
+  box.querySelector("details .sig.acked .sig-ack").click();
+  await new Promise((r) => setTimeout(r, 50));
+  check("«Вернуть» снимает отметку", Object.keys((await dbm.metaGet("acks", {})) || {}).length === 0);
+  box.remove();
+  await settings.save({ baseUrl: "https://jira.example.local/" });
+  await dbm.clearAll();
+}
+
 // Б6. графики тренда
 {
   const pts = [
