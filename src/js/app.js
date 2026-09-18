@@ -739,6 +739,12 @@ function renderFlowChart(model) {
   return { el, draw };
 }
 
+// Запас в неделях со знаком: «+1,5» / «−0,8» (в русском — запятая).
+function fmtWeeks(v) {
+  const abs = Math.abs(v).toFixed(1);
+  return `${v > 0 ? "+" : v < 0 ? "−" : ""}${getLang() === "ru" ? abs.replace(".", ",") : abs}`;
+}
+
 // Прогноз срока эпика по выбранным командам: остаток делят только они (пропорционально вкладу в
 // эпик), история каждой — недели периода их работы над эпиком; срок прогона — максимум по командам.
 // Прогоны считаются в фоновом потоке (А3), поэтому рисуем асинхронно.
@@ -782,6 +788,7 @@ async function drawForecast(box, epic, flow, list, onDone = () => {}) {
     tbl.append(tr);
   }
   box.append(tbl);
+  if (res.chance != null) note(t("fc.outlook", { chance: Math.round(res.chance * 100), buffer: fmtWeeks(res.buffer) }));
   if (fc.last.length) {
     const top = fc.last[0];
     note(t("fc.last", { team: top.team.name || t("share.noTeam"), pct: top.pct }));

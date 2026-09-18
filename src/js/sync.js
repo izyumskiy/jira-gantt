@@ -5,6 +5,13 @@ import * as db from "./db.js";
 import * as settings from "./settings.js";
 import { t } from "./i18n.js";
 import { isDoneStatus } from "./status.js";
+import * as analytics from "./analytics.js";
+import * as flowlib from "./flow.js";
+import { runForecast } from "./forecastClient.js";
+
+const DAY_MS = 86400000;
+const SYNC_LOG_DAYS = 30; // журнал синхронизаций — для «что изменилось»
+const EPIC_WEEKS_KEEP = 104; // недельные записи — для трендов
 
 // ---------- определение кастомных полей ----------
 
@@ -737,11 +744,44 @@ export async function sync({ full = false, onProgress = () => {} } = {}) {
     // Agile API может быть недоступен — команды останутся безымянными.
   }
 
-  // ---------- фаза 2: запись одной транзакцией ----------
   // Эпики, которые пользователь успел убрать из выбора во время синхронизации, обратно не пишем;
   // флаг «скрыт» — локальный, из Jira не приходит.
   const stored = new Map((await db.all(db.STORES.epics)).map((e) => [e.key, e]));
   const epicsToPut = freshEpics.filter((e) => stored.has(e.key)).map((e) => ({ ...e, hidden: !!stored.get(e.key).hidden }));
+
+  // ---------- состояние эпиков для истории (Б1) ----------
+  // Считается по данным, которые сейчас будут записаны: база + собранное − пропавшее. Сбой расчёта
+  // не должен терять выгрузку: тогда история за эту синхронизацию просто не пишется.
+  const syncId = Date.now();
+  let states = null;
+  try {
+    onProgress(t("st.forecasting"));
+    const byKey = new Map();
+    if (!full) {
+      const gone = new Set(vanished);
+      for (const i of await db.all(db.STORES.issues)) if (!gone.has(i.key)) byKey.set(i.key, i);
+    }
+    for (const i of collected) byKey.set(i.key, i);
+    const freshByKey = new Map(epicsToPut.map((e) => [e.key, e]));
+    const s = settings.get();
+    states = await analytics.portfolioStates({
+      epics: [...stored.values()].map((e) => freshByKey.get(e.key) || e),
+      issues: [...byKey.values()],
+      flowRows: flow.rows || (await db.all(db.STORES.flow)),
+      tempo: tempo.rows || (await db.all(db.STORES.tempo)),
+      profiles: await db.all(db.STORES.people),
+      excludeTypes: flowlib.parseTypeList(s.forecastExcludeTypes),
+      weeks: Number(s.flowWeeks) || 52,
+      carrySprints: Number(s.summary.carrySprints) || 3,
+      today: syncId,
+      run: runForecast
+    });
+  } catch (e) {
+    console.warn("[OhMyGant] epic states failed", e);
+    states = null;
+  }
+
+  // ---------- фаза 2: запись одной транзакцией ----------
   const ops = [];
   if (full) ops.push({ store: db.STORES.issues, clear: true });
   else if (vanished.length) ops.push({ store: db.STORES.issues, del: vanished });
@@ -753,6 +793,21 @@ export async function sync({ full = false, onProgress = () => {} } = {}) {
   if (boards) ops.push({ store: db.STORES.boards, put: boards });
   ops.push({ store: db.STORES.sprints, put: [...sprintMap.values()] });
   ops.push({ store: db.STORES.meta, put: [{ k: "issueSchema", v: ISSUE_SCHEMA }] });
+  if (states) {
+    const week = flowlib.weekKey(syncId);
+    const list = [...states.values()];
+    ops.push({
+      store: db.STORES.syncLog,
+      del: await db.keysBelow(db.STORES.syncLog, "syncId", syncId - SYNC_LOG_DAYS * DAY_MS),
+      put: list.map((st) => ({ ...st, syncId, at: syncId }))
+    });
+    ops.push({
+      store: db.STORES.epicWeeks,
+      del: await db.keysBelow(db.STORES.epicWeeks, "week", flowlib.weekKey(syncId - EPIC_WEEKS_KEEP * 7 * DAY_MS)),
+      put: list.map((st) => ({ ...st, week, restored: false, at: syncId }))
+    });
+    ops.push({ store: db.STORES.meta, put: [{ k: "lastSyncId", v: syncId }] });
+  }
   onProgress(t("st.saving"));
   await db.commit(ops);
   await settings.save({ lastSync: Date.now() });
@@ -760,6 +815,7 @@ export async function sync({ full = false, onProgress = () => {} } = {}) {
   return {
     issues: collected.length,
     removed: vanished.length,
+    syncId: states ? syncId : null,
     sprints: sprintMap.size,
     others: others.length,
     othersError,

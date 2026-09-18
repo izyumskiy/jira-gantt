@@ -82,9 +82,81 @@ export function dueMsOf(epic) {
 
 // Прогноз по выбранным командам + шанс успеть и запас до срока. run — функция прогона: по
 // умолчанию здесь же (для проверок и восстановления), на странице — фоновый поток (forecastClient).
-export async function epicForecast({ epic, flow, teams = flow.teams, runs = 10000, now = Date.now(), seed = null, run = null }) {
+//
+// Детерминизм (Б2): зерно — ключ эпика, отсчёт — понедельник недели (today). Одинаковые данные
+// в пределах недели дают одинаковые даты; если за неделю ничего не закрыто, прогноз через неделю
+// сдвинется на неделю — это настоящий сдвиг, а не шум.
+export async function epicForecast({
+  epic,
+  flow,
+  teams = flow.teams,
+  runs = 10000,
+  today = Date.now(),
+  now = flowlib.mondayOf(today),
+  seed = epic.key,
+  run = null
+}) {
   const args = { teams, shares: flow.shares, epicKey: epic.key, remaining: flow.remaining, runs, now, seed };
   const res = run ? await run(args) : flowlib.forecastForTeams({ ...args, rnd: seed ? flowlib.seededRandom(seed) : Math.random });
   const outlook = res && res.fc ? flowlib.dueOutlook(res.fc, dueMsOf(epic), now) : { chance: null, buffer: null };
   return { ...res, ...outlook };
+}
+
+// Открытые задачи эпика, прошедшие не меньше N спринтов, — «хронические переносы».
+export function carriedOverCount(issues, epicKey, { excludeTypes = [], sprints = 3 } = {}) {
+  return issues.filter(
+    (i) => i.epicKey === epicKey && !agg.isDone(i) && !flowlib.isExcludedType(i.typeName, excludeTypes) && (i.sprintCount || 0) >= sprints
+  ).length;
+}
+
+// Состояние эпика для истории и «Сводки» (Б1): счётчики, прогноз, шанс успеть, запас, команды.
+// Плоский объект без Map и Date — чтобы лежать в IndexedDB и сравниваться между снимками.
+function toState(epic, counters, flow, fc, carriedOver) {
+  const pct = counters.pct;
+  // Местная дата «ГГГГ-ММ-ДД»: через toISOString дата уехала бы на день назад восточнее Гринвича.
+  const iso = (d) => {
+    if (!(d instanceof Date)) return "";
+    const p2 = (n) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}`;
+  };
+  const lastById = new Map(((fc && fc.fc && fc.fc.last) || []).map((x) => [x.team.id, x.pct]));
+  return {
+    epicKey: epic.key,
+    summary: epic.summary || "",
+    epicName: epic.epicName || "",
+    statusName: epic.statusName || "",
+    statusCategory: epic.statusCategory || "",
+    dueDate: epic.dueDate || "",
+    resolved: epic.resolved || "",
+    total: pct.count,
+    done: pct.doneCount,
+    remaining: pct.count - pct.doneCount,
+    estTotal: pct.total,
+    estDone: pct.done,
+    carriedOver,
+    p50: fc && fc.fc ? iso(fc.fc.dates.p50) : "",
+    p85: fc && fc.fc ? iso(fc.fc.dates.p85) : "",
+    chance: fc ? fc.chance ?? null : null,
+    buffer: fc ? fc.buffer ?? null : null,
+    reason: fc && fc.fc ? "" : (fc && fc.reason) || "none",
+    historyWeeks: fc && fc.history ? fc.history.weeks : 0,
+    teams: flow.teams.map((x) => {
+      const sh = flow.shares.get(x.team.id);
+      const act = (sh && (sh.active || sh)) || { share: 0 };
+      return { id: x.team.id, name: x.team.name || "", share: Math.round(act.share * 1000) / 1000, last: lastById.get(x.team.id) || 0 };
+    })
+  };
+}
+
+// Состояния всех эпиков портфеля. Прогнозы — через run (на странице — фоновый поток), параллельно.
+export async function portfolioStates({ epics, issues, flowRows, tempo = [], profiles = [], excludeTypes = [], weeks = 52, carrySprints = 3, runs = 10000, today = Date.now(), run = null }) {
+  const counters = epicCounters(epics, issues, { excludeTypes });
+  const out = await Promise.all(
+    epics.map(async (epic) => {
+      const flow = epicFlowState({ epic, rows: flowRows, tempo, profiles, issues, excludeTypes, weeks, now: today });
+      const fc = flow.teams.length && flow.remaining ? await epicForecast({ epic, flow, runs, today, run }) : null;
+      return toState(epic, counters.get(epic.key), flow, fc, carriedOverCount(issues, epic.key, { excludeTypes, sprints: carrySprints }));
+    })
+  );
+  return new Map(out.map((st) => [st.epicKey, st]));
 }

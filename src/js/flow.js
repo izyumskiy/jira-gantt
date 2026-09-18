@@ -12,6 +12,13 @@ export function mondayOf(ms) {
   return d.getTime() - shift * DAY;
 }
 
+// Ключ недели: понедельник в локальном времени, «ГГГГ-ММ-ДД».
+export function weekKey(ms) {
+  const d = new Date(mondayOf(ms));
+  const p = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
 export function isoWeekKey(ms) {
   const d = new Date(mondayOf(ms) + 3 * DAY); // четверг определяет номер недели по ISO
   const start = new Date(d.getFullYear(), 0, 4);

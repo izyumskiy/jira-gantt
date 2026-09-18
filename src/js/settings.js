@@ -15,6 +15,25 @@ export const DEFAULTS = {
   teams: [], // справочник команд для ручного распределения людей (вкладка «Команда»)
   doneStatuses: "", // статусы своего потока, которые считаем завершёнными, через запятую
   forecastExcludeTypes: "User Story", // типы задач, которые прогноз сроков не считает, через запятую
+  // Пороги «Сводки» (Б10).
+  summary: {
+    chanceGreen: 85, // шанс успеть, %: не ниже — зелёный
+    chanceYellow: 50, // не ниже — жёлтый, ниже — красный
+    shiftDays: 7, // значимый сдвиг прогноза, дней
+    scopePct: 10, // рост/сокращение объёма, %
+    scopeAbs: 5, // … или задач
+    nearWeeks: 2, // «близко к завершению»: прогноз 85% не дальше, недель
+    nearDonePct: 90, // … или готово, %
+    stallWeeks: 3, // недель без закрытий — «застой», «застрял на финише»
+    meltWeeks: 3, // недель снижения запаса — «запас тает»
+    carrySprints: 3, // спринтов — «повторный перенос»
+    idlePct: 50, // загрузка ниже, % — «простой рядом с опозданием»
+    spreadFlow: 2, // потока на эпик в работе меньше, задач в неделю — «распыление»
+    spreadWeeks: 4, // окно «эпиков в работе» у команды, недель
+    bottleneckPct: 50, // доля прогонов, где команда замыкает, % — «узкое место»
+    noEstimatePct: 20, // доля задач без оценки, % — «нет оценок»
+    attention: 7 // размер «Требует внимания»
+  },
   infoSystems: [], // справочник информационных систем для вкладки «Команда»
   boardId: "",
   boardName: "",
@@ -59,7 +78,7 @@ function listen() {
     chrome.storage.onChanged?.addListener((changes, area) => {
       if (area !== "local" || !changes[KEY] || !changes[KEY].newValue) return;
       const raw = changes[KEY].newValue;
-      cache = { ...DEFAULTS, ...raw, fields: { ...DEFAULTS.fields, ...(raw.fields || {}) } };
+      cache = { ...DEFAULTS, ...raw, fields: { ...DEFAULTS.fields, ...(raw.fields || {}) }, summary: { ...DEFAULTS.summary, ...(raw.summary || {}) } };
     });
   } catch {
     // окружение без событий хранилища (тесты) — работаем без синхронизации кэша
@@ -70,7 +89,7 @@ export async function load() {
   listen();
   if (cache) return cache;
   const raw = (await chrome.storage.local.get(KEY))[KEY] || {};
-  cache = { ...DEFAULTS, ...raw, fields: { ...DEFAULTS.fields, ...(raw.fields || {}) } };
+  cache = { ...DEFAULTS, ...raw, fields: { ...DEFAULTS.fields, ...(raw.fields || {}) }, summary: { ...DEFAULTS.summary, ...(raw.summary || {}) } };
   const from = Number(raw.schema) || 0;
   if (Object.keys(raw).length && from < SCHEMA) {
     for (let i = from; i < SCHEMA; i++) MIGRATIONS[i](cache);
@@ -84,7 +103,7 @@ export async function load() {
 
 export async function save(patch) {
   const cur = await load();
-  cache = { ...cur, ...patch, fields: { ...cur.fields, ...(patch.fields || {}) } };
+  cache = { ...cur, ...patch, fields: { ...cur.fields, ...(patch.fields || {}) }, summary: { ...cur.summary, ...(patch.summary || {}) } };
   await chrome.storage.local.set({ [KEY]: cache });
   return cache;
 }

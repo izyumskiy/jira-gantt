@@ -989,6 +989,93 @@ await settings.save({ infoSystems: [], fields: { plannedStart: "", plannedEnd: "
   await dbm.clearAll();
 }
 
+// Б1. история: журнал синхронизаций и недельные записи пишутся в той же транзакции, что и данные
+{
+  const DAYMS = 86400000;
+  const orig = window.fetch;
+  const saved = { fields: { ...settings.get().fields }, useTempoTeams: settings.get().useTempoTeams, flowWeeks: settings.get().flowWeeks };
+  await settings.save({ fields: { ...saved.fields, epicLink: "customfield_10100", sprint: "customfield_10101", version: 5 }, useTempoTeams: false, flowWeeks: 20 });
+  await dbm.clearAll();
+  const nowMs = Date.now();
+  await dbm.putAll(dbm.STORES.epics, [{ key: "EP-A", summary: "Эпик А", dueDate: ymd(365) }]);
+  await dbm.putAll(dbm.STORES.syncLog, [
+    { syncId: nowMs - 31 * DAYMS, epicKey: "EP-A", total: 1 },
+    { syncId: nowMs - 20 * DAYMS, epicKey: "EP-A", total: 2 }
+  ]);
+  await dbm.putAll(dbm.STORES.epicWeeks, [
+    { epicKey: "EP-A", week: flowlib.weekKey(nowMs - 110 * 7 * DAYMS), restored: true },
+    { epicKey: "EP-A", week: flowlib.weekKey(nowMs - 10 * 7 * DAYMS), restored: true }
+  ]);
+  const json = (o, status = 200) => new Response(JSON.stringify(o), { status, headers: { "Content-Type": "application/json" } });
+  const st = (done) => (done ? { name: "Готово", statusCategory: { key: "done" } } : { name: "В работе", statusCategory: { key: "indeterminate" } });
+  const person = { name: "ivan", key: "ivan", displayName: "Ivan" };
+  const task = (key, done) => ({ key, fields: { summary: key, project: { key: "AAA" }, assignee: person, status: st(done), issuetype: { name: "Task" }, updated: new Date().toISOString(), created: new Date(nowMs - 100 * DAYMS).toISOString(), customfield_10100: "EP-A", timeoriginalestimate: 3600 } });
+  const flowRows = [];
+  for (let w = 1; w <= 12; w++) for (let i = 0; i < 3; i++) {
+    flowRows.push({ key: `FL-${w}-${i}`, fields: { resolutiondate: new Date(nowMs - w * 7 * DAYMS - 2 * DAYMS).toISOString(), assignee: person, customfield_10100: "EP-A", status: st(true), issuetype: { name: "Task" }, project: { key: "AAA" } } });
+  }
+  window.fetch = async (url, opt = {}) => {
+    const u = String(url);
+    const b = opt.body ? JSON.parse(opt.body) : {};
+    if (u.includes("/rest/api/2/myself")) return json({ name: "ivan" });
+    if (u.includes("/rest/agile/1.0/board")) return json({ values: [], isLast: true });
+    if (u.includes("/rest/api/2/search")) {
+      const jql = b.jql || "";
+      if (jql.includes("resolutiondate >=")) return json({ issues: flowRows, total: flowRows.length });
+      if (jql.includes("key in (EP-A)")) return json({ issues: [{ key: "EP-A", fields: { summary: "Эпик А", status: st(false), project: { key: "AAA" }, duedate: ymd(365) } }], total: 1 });
+      if (jql.includes("in (EP-A)")) return json({ issues: [task("T-1", true), task("T-2", false), task("T-3", false), task("T-4", false)], total: 4 });
+      return json({ issues: [], total: 0 });
+    }
+    return json({}, 404);
+  };
+  let res = null;
+  let err = null;
+  try { res = await runSync({ full: true }); } catch (e) { err = e; }
+  const log = await dbm.all(dbm.STORES.syncLog);
+  const weeksRows = await dbm.all(dbm.STORES.epicWeeks);
+  const cur = log.find((r) => r.syncId === res?.syncId);
+  check("Б1: запись журнала на синхронизацию — со счётчиками и прогнозом",
+    !err && cur && cur.total === 4 && cur.done === 1 && cur.remaining === 3 && !!cur.p85 && cur.chance === 1 && cur.buffer > 0,
+    err ? err.message : JSON.stringify(cur && { total: cur.total, done: cur.done, p85: cur.p85, chance: cur.chance, buffer: cur.buffer, reason: cur.reason }));
+  check("Б1: дата прогноза в истории — местная дата, понедельник (отсчёт от понедельника)",
+    !!cur && new Date(`${cur.p85}T12:00:00`).getDay() === 1, cur && cur.p85);
+  check("Б1: журнал старше 30 дней удалён, 20-дневный остался",
+    !log.some((r) => r.syncId === nowMs - 31 * DAYMS) && log.some((r) => r.syncId === nowMs - 20 * DAYMS), String(log.length));
+  const thisWeek = weeksRows.filter((r) => r.week === flowlib.weekKey(res?.syncId || nowMs));
+  check("Б1: недельная запись текущей недели — настоящая", thisWeek.length === 1 && thisWeek[0].restored === false && thisWeek[0].p85 === cur?.p85);
+  check("Б1: недельные записи старше 104 недель удалены, остальные на месте",
+    !weeksRows.some((r) => r.week === flowlib.weekKey(nowMs - 110 * 7 * DAYMS)) && weeksRows.some((r) => r.week === flowlib.weekKey(nowMs - 10 * 7 * DAYMS)));
+  try { res = await runSync({ full: false }); } catch (e) { err = e; }
+  const weeks2 = (await dbm.all(dbm.STORES.epicWeeks)).filter((r) => r.week === flowlib.weekKey(nowMs));
+  const log2 = await dbm.all(dbm.STORES.syncLog);
+  check("Б1: вторая синхронизация недели — новая запись журнала, недельная перезаписана",
+    weeks2.length === 1 && log2.filter((r) => r.syncId >= nowMs).length === 2, `${weeks2.length} / ${log2.length}`);
+  await sync_saveSelectionCheck();
+  async function sync_saveSelectionCheck() {
+    const { saveSelection } = await import("../src/js/sync.js");
+    await saveSelection([]);
+    check("Б1: удаление эпика из выбора не удаляет его историю", (await dbm.all(dbm.STORES.epicWeeks)).some((r) => r.epicKey === "EP-A"));
+  }
+
+  // Б2. прогноз детерминирован в пределах недели: зерно — ключ эпика, отсчёт — понедельник
+  const rows = flowRows.map((r) => ({ key: r.key, resolved: r.fields.resolutiondate, assigneeKey: "ivan", assigneeLogin: "ivan", assigneeName: "Ivan", epicKey: "EP-A", typeName: "" }));
+  const iss = Array.from({ length: 20 }, (_, i) => mk(`D-${i}`, "EP-A", "AAA", "Ivan", null, 1, "prog"));
+  const flowSt = analytics.epicFlowState({ epic: { key: "EP-A" }, rows, issues: iss, weeks: 20, now: nowMs });
+  const monday = flowlib.mondayOf(nowMs);
+  const tue = await analytics.epicForecast({ epic: { key: "EP-A", dueDate: ymd(365) }, flow: flowSt, today: monday + 1 * DAYMS + 3600000, runs: 3000 });
+  const fri = await analytics.epicForecast({ epic: { key: "EP-A", dueDate: ymd(365) }, flow: flowSt, today: monday + 4 * DAYMS + 3600000, runs: 3000 });
+  check("Б2: во вторник и в пятницу одной недели на тех же данных — те же даты прогноза",
+    tue.fc.dates.p85.getTime() === fri.fc.dates.p85.getTime() && tue.fc.dates.p50.getTime() === fri.fc.dates.p50.getTime() && tue.chance === fri.chance,
+    `${tue.fc.dates.p85.toISOString()} / ${fri.fc.dates.p85.toISOString()}`);
+  const nextWeek = await analytics.epicForecast({ epic: { key: "EP-A" }, flow: flowSt, today: monday + 8 * DAYMS, runs: 3000 });
+  check("Б2: через неделю без изменений данных прогноз сдвигается ровно на неделю",
+    nextWeek.fc.dates.p85.getTime() - tue.fc.dates.p85.getTime() === 7 * DAYMS);
+
+  window.fetch = orig;
+  await settings.save({ fields: saved.fields, useTempoTeams: saved.useTempoTeams, flowWeeks: saved.flowWeeks });
+  await dbm.clearAll();
+}
+
 // А1. модуль расчётов: одни и те же числа для списка, карточки и сводки
 {
   const exc = flowlib.parseTypeList("User Story");
