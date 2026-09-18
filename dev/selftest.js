@@ -2150,7 +2150,7 @@ check("пиктограмма 💬 есть и на «По эпикам и лю�
   check("Р1: пиктограммы одного стиля с остальными (контур 24×24, линия 2)",
     [...doc.querySelectorAll(".tabs .tab-icon svg")].every((v) => v.getAttribute("viewBox") === "0 0 24 24" && v.getAttribute("stroke-width") === "2" && v.getAttribute("fill") === "none"));
   check("Р1: «Команда» — текстом, вне группы", !!doc.querySelector('.tabs > .tab[data-tab="team"][data-i18n="tab.team"]'));
-  check("Р1: «Эпик — история» скрыт, пока ракурса нет (этап 3)", views[2]?.hasAttribute("hidden"));
+  check("Р1: «Эпик — история» показан и ведёт на свою страницу", !views[2]?.hasAttribute("hidden") && !!doc.querySelector("#page-epicStories"));
   check("Р1: у группы есть подпись для экранного диктора", group?.dataset.i18nAria === "tab.views" && DICT.en["tab.views"]);
 }
 
@@ -2293,6 +2293,139 @@ check("пиктограмма 💬 есть и на «По эпикам и лю�
   window.fetch = orig;
   await settings.save({ fields: saved.fields, useTempoTeams: saved.useTempoTeams });
   await dbm.clearAll();
+}
+
+// Р3, Р5. Ракурс «Эпик — история»: проекты, эпики, истории, чужие задачи, смена проекта.
+{
+  const stories = await import("../src/js/stories.js");
+  const sv = await import("../src/js/storiesView.js");
+  const PR = [{ id: "1", name: "Highest", iconUrl: "" }, { id: "2", name: "High", iconUrl: "" }, { id: "3", name: "Medium", iconUrl: "" }, { id: "4", name: "Low", iconUrl: "" }];
+  const P = (id) => ({ ...PR.find((x) => x.id === id) });
+  const lab = (name, created) => ({ project: { name, created, author: "" }, notes: [] });
+  const EPS = [
+    { key: "E-1", summary: "Корзина", statusName: "В работе", statusCategory: "indeterminate", priority: P("2"), dueDate: ymd(10), omg: lab("Сайт", "2026-09-01T10:00:00Z") },
+    { key: "E-2", summary: "Оплата", statusName: "В работе", statusCategory: "indeterminate", priority: P("1"), dueDate: "", plannedEnd: ymd(5), omg: lab(" САЙТ ", "2026-09-05T10:00:00Z") },
+    { key: "E-3", summary: "Прочее", statusName: "Сделать", statusCategory: "new", priority: P("4") },
+    { key: "E-4", summary: "Приложение", statusName: "Готово", statusCategory: "done", priority: P("3"), dueDate: ymd(-3), omg: lab("Мобилка", "2026-09-02T10:00:00Z") }
+  ];
+  const L = (key, typeName = "Task", type = "Relates") => ({ type, key, typeName });
+  const iss = (key, epic, type, sprintId, hours, st, links = [], p = null) => ({ ...mk(key, epic, "AAA", "Ivan", sprintId, hours, st), typeName: type, links, priority: p });
+  const ISS = [
+    iss("US-1", "E-1", "User Story", null, 0, "prog", [L("T-1"), L("T-2"), L("X-9"), L("T-5"), L("M-1"), L("EPX", "Epic"), L("B-1", "Task", "Blocks")], P("3")),
+    iss("US-2", "E-1", "User Story", null, 0, "new", [L("T-2")], P("2")),
+    iss("US-3", "E-1", "User Story", 3, 0, "new", [], P("4")),
+    iss("T-1", "E-1", "Task", 2, 4, "done"),
+    iss("T-2", "E-1", "Task", 3, 8, "new"),
+    iss("T-3", "E-1", "Task", 2, 2, "new"),
+    iss("B-1", "E-1", "Task", 2, 1, "new"),
+    iss("T-5", "E-2", "Task", 2, 3, "new"),
+    iss("T-6", "E-3", "Task", 3, 5, "new"),
+    iss("T-7", "E-4", "Task", 2, 1, "done")
+  ];
+  const LINKED = [iss("X-9", "EP-Z", "Task", 2, 6, "new")];
+  const model = stories.buildStoryModel({ epics: EPS, issues: ISS, linked: LINKED, sprints, boards, priorities: PR, storyTypes: ["user story"], excludeTypes: ["user story"], excludeTypeNames: ["User Story"], linkType: "Relates" });
+  const proj = (name) => model.projects.find((p) => p.name === name);
+  const site = model.projects[0];
+  check("Р5: проекты по приоритету (самый высокий у незавершённых эпиков), «Без проекта» внизу",
+    model.projects.map((p) => p.name || "∅").join() === "САЙТ,Мобилка,∅", model.projects.map((p) => p.name || "∅").join());
+  check("Р3: «Сайт» и « САЙТ » — один проект, написание из самой свежей метки", site.epics.map((e) => e.key).join() === "E-2,E-1" && site.name === "САЙТ");
+  check("Р5: приоритет проекта — самый высокий у незавершённых эпиков; все готовы — среди всех", site.priority?.id === "1" && proj("Мобилка").priority?.id === "3");
+  const e1 = site.epics.find((e) => e.key === "E-1");
+  check("Р5: истории по приоритету, затем по ключу", e1.stories.map((s) => s.key).join() === "US-2,US-1,US-3", e1.stories.map((s) => s.key).join());
+  const us1 = e1.stories.find((s) => s.key === "US-1");
+  check("Р5: итог истории — её задачи по связи Relates, свои и чужие; эпик на том конце и связь другого типа — не в счёт",
+    us1.count === 4 && us1.foreign === 2 && us1.sum === 21 * 3600, `${us1.count} / ${us1.foreign} / ${us1.sum / 3600}`);
+  check("Р5: задача, которую не удалось загрузить, — в списке «не загружена»", us1.missing.join() === "M-1", us1.missing.join());
+  check("Р5: итог эпика — по задачам эпика, каждая один раз; чужие и истории не входят",
+    e1.count === 4 && e1.sum === 15 * 3600, `${e1.count} / ${e1.sum / 3600}`);
+  check("Р5: задача в двух историях видна в обеих", e1.stories.find((s) => s.key === "US-2").count === 1 && [...us1.cells.values()].some((c) => c.issues.some((i) => i.key === "T-2")));
+  check("Р5: «Без истории» — задачи эпика без истории в этом эпике (и связанные другим типом связи)",
+    e1.noStory.issues === undefined && [...e1.noStory.cells.values()].flatMap((c) => c.issues.map((i) => i.key)).sort().join() === "B-1,T-3");
+  const e2 = site.epics.find((e) => e.key === "E-2");
+  check("Р5: задача эпика E-2 в истории эпика E-1 — в итоге E-2 один раз, у E-2 она «Без истории»",
+    e2.count === 1 && e2.noStory.count === 1 && us1.cells.get([...us1.cells.keys()][0]).issues.some((i) => i.key === "T-5" && i.foreignEpic === "E-2"));
+  check("Р5: чужая задача невыбранного эпика помечена эпиком", [...us1.cells.values()].flatMap((c) => c.issues).some((i) => i.key === "X-9" && i.foreignEpic === "EP-Z"));
+  check("Р5: итог проекта — сумма итогов эпиков", site.count === e1.count + e2.count && site.sum === e1.sum + e2.sum);
+  check("Р5: история без задач со своим спринтом — отрезок по спринту истории", !!e1.stories.find((s) => s.key === "US-3").ownSprint && e1.stories.find((s) => s.key === "US-3").ownSprint.sprintId === 3);
+  check("Р5/Р7: веха проекта — ближайшая из вех незавершённых эпиков (плановое завершение E-2)", site.milestone?.date === ymd(5) && site.milestone.kind === "planned");
+  check("Р5/Р7: все эпики проекта готовы — веха по самой поздней", proj("Мобилка").milestone?.date === ymd(-3));
+
+  // Отрисовка.
+  const box = document.createElement("div");
+  document.body.append(box);
+  const published = [];
+  const set = [];
+  const notes = [];
+  let failKey = "";
+  sv.api.addComment = async (key, text) => {
+    if (key === failKey) throw new Error("403");
+    published.push([key, text]);
+  };
+  const opts = {
+    notify: (m, kind) => notes.push([m, kind]),
+    onProjectSet: async (key, name) => set.push(["set", key, name]),
+    onRenamed: async (keys, name) => set.push(["rename", keys.join(), name]),
+    epicsOfProject: (key) => EPS.filter((e) => (stories.projectOf(e) ? omgKey(stories.projectOf(e).name) : "") === key)
+  };
+  const omgKey = (await import("../src/js/omg.js")).projectKey;
+  sv.resetCollapse();
+  sv.render(box, model, opts);
+  check("Р5: по умолчанию видны только проекты", box.querySelectorAll(".s-project").length === 3 && !box.querySelector(".s-epic"));
+  box.querySelector(".gantt-bar .link").click(); // «Развернуть всё»
+  const rowsOf = (sel) => [...box.querySelectorAll(sel)];
+  check("Р5: «Развернуть всё» — эпики, истории и «Без истории»", rowsOf(".s-epic").length === 4 && rowsOf(".s-story").length === 3 && rowsOf(".s-nostory").length === 4);
+  check("Р6: у проекта, эпика и истории — пиктограмма приоритета", rowsOf(".s-project, .s-epic, .s-story").every((r) => r.querySelector(".prio-icon, .prio-dot")));
+  const us1Row = rowsOf(".s-story").find((r) => r.dataset.story === "US-1");
+  check("Р5: у истории отметка чужих задач и незагруженных", us1Row.querySelector(".s-foreign")?.textContent.includes("2") && us1Row.querySelector(".s-missing")?.textContent.includes("1"));
+  us1Row.querySelector(".bar.clickable").click();
+  const tipText = document.querySelector(".tooltip.tip-issues")?.textContent || "";
+  check("Р5: в списке задач истории чужие помечены эпиком", tipText.includes(t("story.fromEpic", { key: "EP-Z" })) || tipText.includes(t("story.fromEpic", { key: "E-2" })), tipText.slice(0, 200));
+  document.querySelector(".tooltip .tip-close")?.click();
+  check("Р5: у истории без задач — отрезок по её спринту", !!rowsOf(".s-story").find((r) => r.dataset.story === "US-3").querySelector(".bar.own-sprint"));
+  check("Р5: вехи проекта и эпика на строках", !!rowsOf(".s-project")[0].querySelector(".due-flag.due-planned") && !!rowsOf(".s-epic").find((r) => r.dataset.epic === "E-1").querySelector(".due-flag"));
+  check("Р5: у эпика — «Проект…» и 💬, у проекта «Без проекта» нет «Переименовать…»",
+    rowsOf(".s-epic").every((r) => r.querySelector(".s-proj-btn") && r.querySelector(".cmt-btn")) && !rowsOf(".s-project").at(-1).querySelector(".s-rename") && !!rowsOf(".s-project")[0].querySelector(".s-rename"));
+
+  // Смена проекта (Р3): публикация метки в эпик и перенос локально.
+  rowsOf(".s-epic").find((r) => r.dataset.epic === "E-3").querySelector(".s-proj-btn").click();
+  let pop = document.querySelector(".tooltip.tip-project");
+  check("Р3: в окне — существующие проекты, «Без проекта», поле нового и предупреждение о письме",
+    [...pop.querySelectorAll("option")].map((o) => o.textContent).join() === `САЙТ,Мобилка,${t("story.noProject")}` && pop.querySelector("select").value === "__none__" && pop.textContent.includes(t("story.notifyWarn")));
+  pop.querySelector(".s-proj-new").value = "Новый проект";
+  pop.querySelector(".s-proj-save").click();
+  await new Promise((r) => setTimeout(r, 20));
+  check("Р3: в эпик опубликован комментарий (omg project) и проект сменён локально",
+    JSON.stringify(published) === JSON.stringify([["E-3", "(omg project) Новый проект"]]) && JSON.stringify(set) === JSON.stringify([["set", "E-3", "Новый проект"]]), JSON.stringify([published, set]));
+  published.length = 0;
+  set.length = 0;
+  rowsOf(".s-epic").find((r) => r.dataset.epic === "E-1").querySelector(".s-proj-btn").click();
+  pop = document.querySelector(".tooltip.tip-project");
+  pop.querySelector("select").value = "__none__";
+  failKey = "E-1";
+  pop.querySelector(".s-proj-save").click();
+  await new Promise((r) => setTimeout(r, 20));
+  check("Р3: публикация не прошла — эпик на месте, сообщение в строке статуса", !set.length && notes.at(-1)?.[1] === "error" && notes.at(-1)[0].includes("E-1"), JSON.stringify(notes));
+  failKey = "";
+  pop.querySelector(".s-proj-save").click();
+  await new Promise((r) => setTimeout(r, 20));
+  check("Р3: «Без проекта» — метка без названия", JSON.stringify(published) === JSON.stringify([["E-1", "(omg project)"]]) && set[0]?.[2] === "");
+  published.length = 0;
+  set.length = 0;
+
+  // Переименование (Р3): во все эпики проекта из выборки; частичная ошибка.
+  rowsOf(".s-project")[0].querySelector(".s-rename").click();
+  pop = document.querySelector(".tooltip.tip-project");
+  check("Р3: подтверждение переименования — число эпиков и предупреждение про чужие выборки",
+    pop.textContent.includes(t("story.renameWarn", { n: 2 })) && pop.textContent.includes(t("story.renameScope")));
+  pop.querySelector(".s-proj-new").value = "Портал";
+  failKey = "E-2";
+  pop.querySelector(".s-proj-save").click();
+  await new Promise((r) => setTimeout(r, 30));
+  check("Р3: переименование — метка в каждый эпик; не прошедшие остаются в старом проекте, их ключи в сообщении",
+    published.map((x) => x.join(":")).join() === "E-1:(omg project) Портал" && JSON.stringify(set) === JSON.stringify([["rename", "E-1", "Портал"]]) && notes.at(-1)[1] === "error" && notes.at(-1)[0].includes("E-2"),
+    JSON.stringify([published, set, notes.at(-1)]));
+  failKey = "";
+  box.remove();
 }
 
 const total = document.createElement("div");

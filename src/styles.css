@@ -355,6 +355,24 @@ table.gantt { border-collapse: separate; border-spacing: 0; }
 /* Пиктограмма приоритета Jira (Р6); если картинка не грузится — цветной кружок. */
 .prio-icon { width: 16px; height: 16px; vertical-align: -3px; margin-right: 4px; flex: none; }
 .prio-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin: 0 6px 0 3px; vertical-align: -1px; flex: none; }
+/* Ракурс «Эпик — история» (Р5): проект → эпик → история. */
+.indent2 { width: 36px; }
+.s-project > .c-name { font-weight: 700; }
+.g-row.s-epic { background: var(--panel); }
+.g-row.s-epic > .c-name { font-weight: 600; }
+.s-label { margin-left: 2px; }
+.s-meta { margin-left: 8px; color: var(--muted); font-weight: 400; font-size: 11px; }
+.s-story-link { color: var(--text); text-decoration: none; }
+a.s-story-link:hover { color: var(--accent); text-decoration: underline; }
+.s-foreign { margin-left: 6px; padding: 0 5px; border-radius: 8px; background: #eae6ff; color: #403294; font-size: 10px; white-space: nowrap; }
+.s-missing { margin-left: 6px; color: var(--danger); font-size: 11px; cursor: help; }
+.pop-btn.s-proj-btn { margin-left: 6px; padding: 0 6px; font-size: 11px; line-height: 18px; font-weight: 400; }
+.pop-btn.s-rename { margin-left: 4px; font-size: 11px; font-weight: 400; }
+.bar.own-sprint { background: repeating-linear-gradient(135deg, transparent 0 4px, rgba(76, 154, 255, .18) 4px 8px); border: 1px dashed var(--bar); }
+.ti-foreign { font-size: 10px; color: #403294; white-space: nowrap; }
+.tooltip.tip-project { min-width: 300px; max-width: 380px; }
+.tip-project select, .tip-project input { width: 100%; margin: 2px 0 6px; }
+.s-proj-actions { display: flex; justify-content: flex-end; margin: 4px 0; }
 /* Ручной порядок эпиков (Р8): ручка перетаскивания и линия-указатель между эпиками. */
 .drag-handle {
   border: none;

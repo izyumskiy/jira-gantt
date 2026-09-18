@@ -136,7 +136,7 @@ export function setCollapsed(mode, keys) {
   collapseSeeded.add(mode);
 }
 
-function el(tag, cls, text) {
+export function el(tag, cls, text) {
   const n = document.createElement(tag);
   if (cls) n.className = cls;
   if (text != null) n.textContent = text;
@@ -170,7 +170,7 @@ function numbers(count, sum) {
 }
 
 // Жёлтая полоса-итог эпика; по клику — список задач ячейки.
-function groupBar(cell, maxCell, title) {
+export function groupBar(cell, maxCell, title) {
   const bar = el("div", "bar bar-group clickable");
   const doneText = applyDone(bar, cell.issues);
   bar.append(...numbers(cell.count, cell.sum));
@@ -180,7 +180,7 @@ function groupBar(cell, maxCell, title) {
 }
 
 // Подпись секции для заголовка списка задач: имена её спринтов.
-function sectionTitle(sec) {
+export function sectionTitle(sec) {
   if (sec.id === BACKLOG_ID) return t("gantt.backlog");
   if (sec.id === NO_DATES_ID) return t("gantt.noDates");
   return sec.sprints.map((s) => s.name).join(", ") || t("gantt.current");
@@ -214,7 +214,7 @@ function splitBar(target, other) {
 }
 
 // Вложенная строка (исполнитель или эпик): тонкий голубой отрезок на каждый спринт секции.
-function nestedCell(cell, section, model, rowLabel) {
+export function nestedCell(cell, section, model, rowLabel) {
   const td = el("td", "c-cell");
   if (!cell || !cell.count) return td;
   const stack = el("div", "stack");
@@ -244,7 +244,7 @@ function nestedCell(cell, section, model, rowLabel) {
 }
 
 // Ячейка бэклога вложенной строки: один голубой отрезок без имени спринта.
-function backlogNested(cell, model, rowLabel) {
+export function backlogNested(cell, model, rowLabel) {
   const td = el("td", "c-cell c-backlog");
   if (!cell || !cell.count) return td;
   const bar = el("div", "bar nested clickable");
@@ -329,7 +329,7 @@ export function dueInfo(g, model) {
 }
 
 // Линия вехи в ячейке строки; у строки эпика — ещё и флажок с датой.
-function addDueLine(row, info, withFlag) {
+export function addDueLine(row, info, withFlag) {
   const td = row.children[1 + info.colIndex];
   if (!td) return;
   td.classList.add("has-due");
@@ -353,7 +353,7 @@ function emptyCells(n) {
 
 // Перерисовка стирает таблицу целиком, страница на миг становится короче и браузер сбрасывает
 // прокрутку. Запоминаем её (страницы и самой таблицы) и возвращаем после сборки DOM.
-function keepScroll(container) {
+export function keepScroll(container) {
   const scroller = document.scrollingElement || document.documentElement;
   const pageY = scroller.scrollTop;
   const wrap = container.querySelector(".gantt-wrap");
@@ -367,6 +367,87 @@ function keepScroll(container) {
     }
     scroller.scrollTop = pageY;
   };
+}
+
+// Панель над диаграммой: «Развернуть всё» / «Свернуть всё», легенды доли готовых, вехи и команд.
+export function chartBar(model, { withDue = true, onExpand, onCollapse }) {
+  const bar = el("div", "gantt-bar");
+  const expand = el("button", "link", t("gantt.expandAll"));
+  const collapse = el("button", "link", t("gantt.collapseAll"));
+  expand.onclick = onExpand;
+  collapse.onclick = onCollapse;
+  bar.append(expand, collapse);
+  const doneLegend = el("span", "legend legend-done");
+  doneLegend.append(el("i", "swatch swatch-done"), el("span", null, t("gantt.legendDone")));
+  bar.append(doneLegend);
+  if (withDue) {
+    const dueLegend = el("span", "legend legend-done");
+    dueLegend.append(el("i", "swatch swatch-due"), el("span", null, t("gantt.legendDue")));
+    bar.append(dueLegend);
+  }
+  if (model.teams.length) {
+    // Команд может быть много — список в горизонтальной прокрутке, панель не растёт.
+    const legend = el("span", "legend legend-teams");
+    legend.append(el("span", "legend-title", t("gantt.teams")));
+    const scroll = el("span", "legend-scroll");
+    for (const tm of model.teams) {
+      const item = el("span", "legend-item" + (tm.derived ? " derived" : ""));
+      if (tm.hint) item.title = tm.hint;
+      item.append(dot(tm), el("span", null, tm.name));
+      scroll.append(item);
+    }
+    legend.append(scroll);
+    bar.append(legend);
+  }
+  return bar;
+}
+
+// Шапка таблицы: колонка имён и секции спринтов, справа — «Бэклог».
+// Заголовок секции: только имена её спринтов с цветом команды и пометка «текущий».
+// Даты не показываем: период секции — расчётная величина с шагом в календарных днях,
+// с реальными границами спринтов (без выходных) он расходится и только путает.
+export function chartHead(model, rerender, { title, hint = "" }) {
+  const thead = el("thead");
+  const hr = el("tr");
+  const th0 = el("th", "c-name");
+  th0.append(el("span", null, title));
+  if (hint) th0.append(el("span", "th-hint", hint));
+  hr.append(th0);
+  for (const sec of model.columns) {
+    const th = el("th", "c-sprint" + (sec.id === model.currentId ? " current" : ""));
+    if (sec.id === NO_DATES_ID) th.append(el("div", "sp-name", t("gantt.noDates")));
+    if (sec.id === model.currentId) th.append(el("div", "sp-name", t("gantt.current")));
+    const list = el("div", "sp-list");
+    const expanded = expandedHeaders.has(sec.id);
+    const shown = expanded ? sec.sprints : sec.sprints.slice(0, HEADER_SPRINTS);
+    for (const s of shown) {
+      const item = el("div", "sp-item");
+      item.title = `${s.name} · ${model.teamOf(s).name}`;
+      item.append(dot(model.teamOf(s)), el("span", "sp-item-name", s.name));
+      list.append(item);
+    }
+    th.append(list);
+    if (sec.sprints.length > HEADER_SPRINTS) {
+      // Длинный список спринтов не должен вытеснять таблицу: остаток — за строкой «ещё N».
+      const hidden = sec.sprints.length - HEADER_SPRINTS;
+      th.append(el("div", "sp-more", expanded ? t("gantt.headerLess") : t("gantt.headerMore", { n: hidden })));
+      th.classList.add("expandable");
+      th.title = expanded ? t("gantt.headerLess") : t("gantt.headerMore", { n: hidden });
+      th.onclick = () => {
+        expanded ? expandedHeaders.delete(sec.id) : expandedHeaders.add(sec.id);
+        rerender();
+      };
+    }
+    hr.append(th);
+  }
+  // Справа от спринтов — «Бэклог»: задачи без спринта и не в статусе «Готово» (на всех вкладках;
+  // у человека — по его задачам целевых эпиков, «прочие» вне спринтов не загружаются).
+  const th = el("th", "c-sprint backlog");
+  th.append(el("div", "sp-name", t("gantt.backlog")));
+  th.append(el("div", "sp-date", t("gantt.backlogHint")));
+  hr.append(th);
+  thead.append(hr);
+  return thead;
 }
 
 export function render(container, model, opts) {
@@ -394,95 +475,26 @@ export function render(container, model, opts) {
     collapseSeeded.add(mode);
   }
 
-  // Панель: свернуть/развернуть + легенда команд.
-  const bar = el("div", "gantt-bar");
-  const expand = el("button", "link", t("gantt.expandAll"));
-  const collapse = el("button", "link", t("gantt.collapseAll"));
-  expand.onclick = () => {
-    collapsed[mode].clear();
-    render(container, model, opts);
-  };
-  collapse.onclick = () => {
-    model.groups.forEach((g) => collapsed[mode].add(g.key));
-    render(container, model, opts);
-  };
-  bar.append(expand, collapse);
-  const doneLegend = el("span", "legend legend-done");
-  doneLegend.append(el("i", "swatch swatch-done"), el("span", null, t("gantt.legendDone")));
-  bar.append(doneLegend);
-  if (epicLike) {
-    const dueLegend = el("span", "legend legend-done");
-    dueLegend.append(el("i", "swatch swatch-due"), el("span", null, t("gantt.legendDue")));
-    bar.append(dueLegend);
-  }
-  if (model.teams.length) {
-    // Команд может быть много — список в горизонтальной прокрутке, панель не растёт.
-    const legend = el("span", "legend legend-teams");
-    legend.append(el("span", "legend-title", t("gantt.teams")));
-    const scroll = el("span", "legend-scroll");
-    for (const tm of model.teams) {
-      const item = el("span", "legend-item" + (tm.derived ? " derived" : ""));
-      if (tm.hint) item.title = tm.hint;
-      item.append(dot(tm), el("span", null, tm.name));
-      scroll.append(item);
-    }
-    legend.append(scroll);
-    bar.append(legend);
-  }
-  container.append(bar);
+  container.append(
+    chartBar(model, {
+      withDue: epicLike,
+      onExpand: () => {
+        collapsed[mode].clear();
+        render(container, model, opts);
+      },
+      onCollapse: () => {
+        model.groups.forEach((g) => collapsed[mode].add(g.key));
+        render(container, model, opts);
+      }
+    })
+  );
 
   const wrap = el("div", "gantt-wrap");
   const table = el("table", `gantt mode-${mode}`); // на вкладке по людям колонка имён шире
-
-  // Заголовок секции: только имена её спринтов с цветом команды и пометка «текущий».
-  // Даты не показываем: период секции — расчётная величина с шагом в календарных днях,
-  // с реальными границами спринтов (без выходных) он расходится и только путает.
-  const thead = el("thead");
-  const hr = el("tr");
-  const th0 = el("th", "c-name");
-  th0.append(el("span", null, epicLike ? t("gantt.epic") : t("gantt.assignee")));
   const childTitle = { person: t("gantt.assignee"), epic: t("gantt.epic") }[model.childKind] || t("gantt.project");
-  th0.append(el("span", "th-hint", ` / ${childTitle}`));
-  hr.append(th0);
-  for (const sec of model.columns) {
-    const th = el("th", "c-sprint" + (sec.id === model.currentId ? " current" : ""));
-    if (sec.id === NO_DATES_ID) th.append(el("div", "sp-name", t("gantt.noDates")));
-    if (sec.id === model.currentId) th.append(el("div", "sp-name", t("gantt.current")));
-    const list = el("div", "sp-list");
-    const expanded = expandedHeaders.has(sec.id);
-    const shown = expanded ? sec.sprints : sec.sprints.slice(0, HEADER_SPRINTS);
-    for (const s of shown) {
-      const item = el("div", "sp-item");
-      item.title = `${s.name} · ${model.teamOf(s).name}`;
-      item.append(dot(model.teamOf(s)), el("span", "sp-item-name", s.name));
-      list.append(item);
-    }
-    th.append(list);
-    if (sec.sprints.length > HEADER_SPRINTS) {
-      // Длинный список спринтов не должен вытеснять таблицу: остаток — за строкой «ещё N».
-      const hidden = sec.sprints.length - HEADER_SPRINTS;
-      th.append(el("div", "sp-more", expanded ? t("gantt.headerLess") : t("gantt.headerMore", { n: hidden })));
-      th.classList.add("expandable");
-      th.title = expanded ? t("gantt.headerLess") : t("gantt.headerMore", { n: hidden });
-      th.onclick = () => {
-        expanded ? expandedHeaders.delete(sec.id) : expandedHeaders.add(sec.id);
-        render(container, model, opts);
-      };
-    }
-    hr.append(th);
-  }
-  // Справа от спринтов — «Бэклог»: задачи без спринта и не в статусе «Готово» (на всех вкладках;
-  // у человека — по его задачам целевых эпиков, «прочие» вне спринтов не загружаются).
+  table.append(chartHead(model, () => render(container, model, opts), { title: epicLike ? t("gantt.epic") : t("gantt.assignee"), hint: ` / ${childTitle}` }));
   const showBacklog = true;
-  if (showBacklog) {
-    const th = el("th", "c-sprint backlog");
-    th.append(el("div", "sp-name", t("gantt.backlog")));
-    th.append(el("div", "sp-date", t("gantt.backlogHint")));
-    hr.append(th);
-  }
   const extraCols = showBacklog ? 1 : 0;
-  thead.append(hr);
-  table.append(thead);
 
   const tbody = el("tbody");
   // Ручной порядок эпиков (Р8): ручка ⋮⋮ у строки эпика, перетаскивание и Alt+↑ / Alt+↓.
@@ -704,7 +716,7 @@ function wireReorder(tbody, model, onReorder) {
 }
 
 // Статус эпика — лейбл в стиле Jira: цвет берётся из таблицы статусов.
-function lozenge(status) {
+export function lozenge(status) {
   const node = el("span", `lozenge lz-s-${status.id || "other"}`, status.name);
   node.title = status.name;
   return node;
@@ -712,7 +724,7 @@ function lozenge(status) {
 
 // ---------- комментарии эпика (в Jira) ----------
 
-function commentButton(key, label) {
+export function commentButton(key, label) {
   const btn = el("button", "cmt-btn", "💬");
   btn.type = "button";
   btn.title = t("cmt.button");
@@ -1019,7 +1031,7 @@ function jiraBase() {
   return (settings.get().baseUrl || "").trim().replace(/\/+$/, "");
 }
 
-function browseUrl(key) {
+export function browseUrl(key) {
   const base = jiraBase();
   return base && key ? `${base}/browse/${encodeURIComponent(key)}` : "";
 }
@@ -1050,7 +1062,7 @@ function sprintEmptyJql() {
 }
 
 // Текст превращаем в ссылку, только если адрес Jira задан; иначе оставляем как есть.
-function maybeLink(text, url, cls) {
+export function maybeLink(text, url, cls) {
   if (!url) return el("span", cls, text);
   const a = el("a", cls, text);
   a.href = url;
@@ -1063,7 +1075,16 @@ function maybeLink(text, url, cls) {
 
 let tip = null;
 
-function closeTooltip() {
+// Своё всплывающее окно (например, «Проект…» на ракурсе «Эпик — история»): одно на экране, как подсказки.
+export function openPopover(box, anchor) {
+  closeTooltip();
+  tip = box;
+  document.body.append(tip);
+  placePopover(tip, anchor);
+  return tip;
+}
+
+export function closeTooltip() {
   if (tip) {
     tip.remove();
     tip = null;
@@ -1071,11 +1092,11 @@ function closeTooltip() {
 }
 document.addEventListener("keydown", (e) => e.key === "Escape" && closeTooltip());
 document.addEventListener("click", (e) => {
-  if (tip && !tip.contains(e.target) && !e.target.closest(".glabel") && !e.target.closest(".bar.clickable") && !e.target.closest(".cmp-btn") && !e.target.closest(".cmt-btn")) closeTooltip();
+  if (tip && !tip.contains(e.target) && !e.target.closest(".glabel") && !e.target.closest(".bar.clickable") && !e.target.closest(".cmp-btn") && !e.target.closest(".cmt-btn") && !e.target.closest(".pop-btn")) closeTooltip();
 });
 
 // Список задач ячейки: ключ со ссылкой в Jira, название, статус, оценка.
-function showIssues(anchor, title, issues) {
+export function showIssues(anchor, title, issues) {
   closeTooltip();
   tip = el("div", "tooltip tip-issues");
   const head = el("div", "tip-head");
@@ -1099,6 +1120,10 @@ function showIssues(anchor, title, issues) {
       mark.title = t("gantt.offSprintHint");
       keyCell.append(mark);
     }
+    // Чужая задача истории (ракурс «Эпик — история»): из другого эпика или без эпика.
+    if (it.foreignEpic !== undefined) {
+      keyCell.append(el("div", "ti-foreign", it.foreignEpic ? t("story.fromEpic", { key: it.foreignEpic }) : t("story.noEpic")));
+    }
     const sumCell = el("td", "ti-summary");
     const summaryLink = maybeLink(it.summary || t("dash"), browseUrl(it.key), "ti-summary-link");
     summaryLink.title = it.summary;
@@ -1113,7 +1138,7 @@ function showIssues(anchor, title, issues) {
   placePopover(tip, anchor);
 }
 
-function showTooltip(anchor, g, mode, model, profile = null) {
+export function showTooltip(anchor, g, mode, model, profile = null) {
   const epicLike = mode !== "assignee";
   closeTooltip();
   tip = el("div", "tooltip");

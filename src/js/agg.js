@@ -367,11 +367,11 @@ function buildTeams(sprints, boards) {
 // ---------- модель ----------
 
 // Ячейка хранит и список задач — для всплывающего окна по клику на полосу.
-function emptyCell() {
+export function emptyCell() {
   return { count: 0, sum: 0, bySprint: new Map(), issues: [] };
 }
 
-function addTo(cell, sprintId, est, brief) {
+export function addTo(cell, sprintId, est, brief) {
   cell.count += 1;
   cell.sum += est;
   cell.issues.push(brief);
@@ -394,7 +394,7 @@ export function isOffSprintWork(issue) {
 }
 
 // Краткая карточка задачи для списков.
-function briefOf(issue, est, done) {
+export function briefOf(issue, est, done) {
   return {
     key: issue.key,
     summary: issue.summary || "",
