@@ -89,6 +89,9 @@ input[type="search"] { min-width: 320px; }
 .tabs { display: flex; gap: 4px; }
 .tab { border-radius: 4px; }
 .tab.active { background: var(--accent-soft); border-color: #b3d4ff; color: var(--accent); font-weight: 600; }
+/* Вкладки-пиктограммы: «Поиск» (лупа) и «Сводка» (график). */
+.tab.tab-icon { display: inline-flex; align-items: center; gap: 4px; padding-left: 9px; padding-right: 9px; }
+.tab.tab-icon svg { display: block; }
 .today { align-self: center; margin-left: 10px; padding: 0 6px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .lang { font-size: 18px; line-height: 1; padding: 2px 4px; }
