@@ -2836,6 +2836,45 @@ check("пиктограмма 💬 есть и на «По эпикам и лю�
   box.remove();
 }
 
+// Направляющие дерева на «Эпик — история».
+{
+  const stories = await import("../src/js/stories.js");
+  const sv = await import("../src/js/storiesView.js");
+  const EPS = [
+    { key: "T-E1", summary: "Эпик 1", statusName: "В работе", statusCategory: "indeterminate", omg: { project: { name: "П", created: "2026-09-01T10:00:00Z" }, notes: [] } },
+    { key: "T-E2", summary: "Эпик 2", statusName: "В работе", statusCategory: "indeterminate", omg: { project: { name: "П", created: "2026-09-01T10:00:00Z" }, notes: [] } }
+  ];
+  const L = (key) => ({ type: "Relates", key, typeName: "Задача" });
+  const ISS = [
+    { ...mk("T-S1", "T-E1", "AAA", "Ivan", null, 0, "prog"), typeName: "История", links: [L("T-1")] },
+    { ...mk("T-S2", "T-E1", "AAA", "Ivan", null, 0, "new"), typeName: "История", links: [] },
+    { ...mk("T-1", "T-E1", "AAA", "Ivan", 2, 4, "new"), typeName: "Задача", links: [] },
+    { ...mk("T-2", "T-E2", "AAA", "Ivan", 2, 4, "new"), typeName: "Задача", links: [] }
+  ];
+  const m = stories.buildStoryModel({ epics: EPS, issues: ISS, sprints, boards, storyTypes: ["история"], excludeTypes: ["история"], linkType: "Relates" });
+  const box = document.createElement("div");
+  document.body.append(box);
+  sv.resetCollapse();
+  sv.render(box, m, {});
+  check("Дерево: у свёрнутого проекта направляющих нет", !box.querySelector(".s-guide"));
+  box.querySelector(".gantt-bar .link").click();
+  const gOf = (tr) => [...tr.querySelectorAll(".c-name > .s-guide")].map((g) => `${g.dataset.g}${g.classList.contains("s-guide-start") ? "^" : ""}`).join(",");
+  const pr = box.querySelector(".s-project");
+  const e1 = box.querySelector('.s-epic[data-epic="T-E1"]');
+  const s1 = box.querySelector('.s-story[data-story="T-S1"]');
+  check("Дерево: у проекта линия начинается от стрелки", gOf(pr) === "p:п^", gOf(pr));
+  check("Дерево: у эпика — линия проекта и начало своей; у истории — обе линии без начала", gOf(e1) === "p:п,e:T-E1^" && gOf(s1) === "p:п,e:T-E1", `${gOf(e1)} | ${gOf(s1)}`);
+  const lx = [...s1.querySelectorAll(".s-guide")].map((g) => Math.round(g.getBoundingClientRect().left - s1.querySelector(".c-name").getBoundingClientRect().left));
+  check("Дерево: линии стоят на отступах проекта и эпика", lx.join() === "12,30", lx.join());
+  s1.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+  const hot = [...box.querySelectorAll(".s-guide.hot")];
+  check("Дерево: наведение на историю подсвечивает линию её эпика во всём блоке, и только её", hot.length >= 3 && hot.every((g) => g.dataset.g === "e:T-E1"));
+  box.querySelector("tbody").dispatchEvent(new MouseEvent("mouseleave"));
+  check("Дерево: мышь ушла — подсветка снята", !box.querySelector(".s-guide.hot"));
+  check("Дерево: между эпиками разделитель заметнее", getComputedStyle(e1.querySelector("td")).boxShadow !== "none");
+  box.remove();
+}
+
 const total = document.createElement("div");
 total.className = failures ? "t-fail" : "t-ok";
 total.textContent = failures ? `${failures} FAILED` : "ALL PASSED";

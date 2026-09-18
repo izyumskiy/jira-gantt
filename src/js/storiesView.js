@@ -113,6 +113,36 @@ function nameCell({ indent = "", twist = null, icon = null, title, actions = [],
   return td;
 }
 
+// Направляющие дерева: тонкая вертикальная линия от стрелки проекта (уровень 0) и эпика (уровень 1)
+// вниз по строкам их блока, как направляющие отступов в редакторах кода; без уголков у каждой строки.
+// start — начало линии на строке самого проекта или эпика (от стрелки вниз). hot — ключ блока, чья
+// линия подсвечивается при наведении на строку.
+const GUIDE_X = [12, 30];
+function addGuides(tr, guides, hot) {
+  const td = tr.querySelector(".c-name");
+  for (const g of guides) {
+    const line = el("i", "s-guide" + (g.start ? " s-guide-start" : ""));
+    line.style.left = `${GUIDE_X[g.level]}px`;
+    line.dataset.g = g.key;
+    td.append(line);
+  }
+  if (hot) tr.dataset.hot = hot;
+  return tr;
+}
+
+// Подсветка направляющей блока, в котором сейчас мышь.
+function wireGuideHover(tbody) {
+  let cur = "";
+  const set = (key) => {
+    if (key === cur) return;
+    tbody.querySelectorAll(".s-guide.hot").forEach((g) => g.classList.remove("hot"));
+    cur = key;
+    if (key) tbody.querySelectorAll(".s-guide").forEach((g) => g.dataset.g === key && g.classList.add("hot"));
+  };
+  tbody.addEventListener("mouseover", (e) => set(e.target.closest("tr")?.dataset.hot || ""));
+  tbody.addEventListener("mouseleave", () => set(""));
+}
+
 // ---------- правая часть: полосы по секциям ----------
 
 // Полоса секции. Цвет один (синий): сделанное — насыщенным, остаток — бледным; доля готового — по
@@ -285,7 +315,7 @@ export function render(container, model, opts = {}) {
   const projectNames = model.projects.filter((p) => p.key !== NO_PROJECT).map((p) => p.name);
   const noteOf = (rec) => (showNotes ? omg.latestNote(rec) : null);
 
-  const storyRow = (en, sn, edue) => {
+  const storyRow = (en, sn, edue, guides) => {
     const str = el("tr", "g-row s-story" + (sn.status && sn.status.id === "done" ? " s-story-done" : ""));
     str.dataset.story = sn.key;
     const link = gantt.maybeLink("", gantt.browseUrl(sn.key), "plabel s-story-link");
@@ -332,9 +362,9 @@ export function render(container, model, opts = {}) {
       }
     }
     if (edue) gantt.addDueLine(str, edue, false);
-    tbody.append(str);
+    tbody.append(addGuides(str, guides, eKey(en)));
     const note = noteOf(sn.story.omg);
-    if (note) tbody.append(noteRow({ target, note, model, opts, indent: "indent indent2", due: edue }));
+    if (note) tbody.append(addGuides(noteRow({ target, note, model, opts, indent: "indent indent2", due: edue }), guides, eKey(en)));
   };
 
   model.projects.forEach((p) => {
@@ -355,8 +385,9 @@ export function render(container, model, opts = {}) {
       }),
       ...barCells(p, model, "p", plabel)
     );
-    tbody.append(ptr);
+    tbody.append(addGuides(ptr, pc ? [] : [{ level: 0, key: pKey(p), start: true }], pKey(p)));
     if (pc) return;
+    const pg = { level: 0, key: pKey(p) };
 
     p.epics.forEach((en) => {
       const ec = collapsed.has(eKey(en));
@@ -386,15 +417,17 @@ export function render(container, model, opts = {}) {
       );
       const edue = gantt.dueInfo(en, model);
       if (edue) gantt.addDueLine(etr, edue, false);
-      tbody.append(etr);
       // Заметка эпика — его собственная строка: видна и у свёрнутого эпика.
       const enote = noteOf(en.epic.omg);
-      if (enote) tbody.append(noteRow({ target, note: enote, model, opts, indent: "indent", due: edue }));
+      const eg = { level: 1, key: eKey(en) };
+      const epicBlock = !ec || !!enote; // у эпика есть строки ниже — линия эпика нужна
+      tbody.append(addGuides(etr, epicBlock ? [pg, { ...eg, start: true }] : [pg], epicBlock ? eKey(en) : pKey(p)));
+      if (enote) tbody.append(addGuides(noteRow({ target, note: enote, model, opts, indent: "indent", due: edue }), [pg, eg], eKey(en)));
       if (ec) return;
 
       const open = en.stories.filter((sn) => !(sn.status && sn.status.id === "done"));
       const done = en.stories.filter((sn) => sn.status && sn.status.id === "done");
-      for (const sn of open) storyRow(en, sn, edue);
+      for (const sn of open) storyRow(en, sn, edue, [pg, eg]);
       // Готовые истории — одной строкой, раскрываются по щелчку.
       if (done.length) {
         const isOpen = openDone.has(en.key);
@@ -417,8 +450,8 @@ export function render(container, model, opts = {}) {
           ...model.columns.map(() => el("td", "c-cell s-cell")),
           el("td", "c-cell c-backlog s-cell")
         );
-        tbody.append(dtr);
-        if (isOpen) for (const sn of done) storyRow(en, sn, edue);
+        tbody.append(addGuides(dtr, [pg, eg], eKey(en)));
+        if (isOpen) for (const sn of done) storyRow(en, sn, edue, [pg, eg]);
       }
       if (en.noStory.count) {
         const ntr = el("tr", "g-row s-nostory");
@@ -431,10 +464,11 @@ export function render(container, model, opts = {}) {
           ...barCells(en.noStory, model, "s", `${en.label} · ${t("story.noStory")}`)
         );
         if (edue) gantt.addDueLine(ntr, edue, false);
-        tbody.append(ntr);
+        tbody.append(addGuides(ntr, [pg, eg], eKey(en)));
       }
     });
   });
+  wireGuideHover(tbody);
   table.append(tbody);
   wrap.append(table);
   container.append(wrap);

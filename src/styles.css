@@ -21,6 +21,7 @@
   --mono-done: #185fa5;
   --mono-rest: #b5d4f4;
   --mono-cap: #85b7eb;
+  --guide: #c9ced8; /* направляющие дерева и разделитель эпиков */
 }
 
 * { box-sizing: border-box; }
@@ -471,6 +472,12 @@ button.s-pr:hover .s-pr-text { color: var(--accent); text-decoration: underline;
 .g-row:hover .s-actions, .s-actions:focus-within { display: inline-flex; }
 .pop-btn.s-act { padding: 0 6px; font-size: 12px; line-height: 18px; }
 .s-donegroup .s-title { color: var(--muted); }
+/* Направляющие дерева: тонкая линия от стрелки проекта и эпика вниз по строкам блока; синим — блок
+   под мышью. Между эпиками — разделитель чуть заметнее, чем между историями. */
+.s-guide { position: absolute; top: 0; bottom: -1px; width: 1px; background: var(--guide); pointer-events: none; z-index: 1; }
+.s-guide-start { top: 62%; }
+.s-guide.hot { width: 2px; margin-left: -0.5px; background: var(--accent); }
+.g-row.s-epic > td { box-shadow: inset 0 1px 0 var(--guide); }
 /* Полосы секций: один цвет — сделанное насыщенным синим, остаток бледным; тип объекта — формой:
    проект — «скобка» с уголками, эпик — брусок, история — тонкая линия с точкой-началом. */
 .gantt td.s-cell { padding: 4px 6px; }
@@ -911,6 +918,7 @@ textarea { font: inherit; padding: 5px 8px; border: 1px solid var(--line); borde
     --mono-done: #85b7eb;
     --mono-rest: #1f3a5c;
     --mono-cap: #3a6aa0;
+    --guide: #4a525b;
   }
   button { background: #2c333a; }
   button:hover { background: #343b43; }
