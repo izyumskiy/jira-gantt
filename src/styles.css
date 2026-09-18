@@ -13,6 +13,8 @@
   --row-h: 34px;
   --name-w: 456px; /* колонка дерева одинакова на обеих вкладках */
   --col-w: 264px;
+  --view-bg: #e9f0fb; /* подложка группы ракурсов */
+  --view-fg: #2b5aa8;
 }
 
 * { box-sizing: border-box; }
@@ -92,6 +94,31 @@ input[type="search"] { min-width: 320px; }
 /* Вкладки-пиктограммы: «Поиск» (лупа), «Сводка» (график), «Настройки» (шестерёнка). */
 .tab.tab-icon { display: inline-flex; align-items: center; gap: 4px; padding-left: 9px; padding-right: 9px; }
 .tab.tab-icon svg { display: block; }
+/* Ракурсы диаграммы (Р1): пиктограммы одной семьёй на общей подложке, отделённые от соседних вкладок. */
+.view-group {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin: 0 7px;
+  padding: 2px;
+  border-radius: 6px;
+  background: var(--view-bg);
+}
+.view-group::before, .view-group::after {
+  content: "";
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  width: 1px;
+  background: var(--line);
+}
+.view-group::before { left: -6px; }
+.view-group::after { right: -6px; }
+.tab[hidden] { display: none; } /* .tab-icon задаёт inline-flex и иначе перебивает hidden */
+.view-group .tab { border-color: transparent; background: transparent; color: var(--view-fg); }
+.view-group .tab:hover { background: var(--panel); }
+.view-group .tab.active { background: var(--panel); border-color: #b3d4ff; color: var(--accent); box-shadow: 0 1px 2px rgba(9, 30, 66, 0.12); }
 .today { align-self: center; margin-left: 10px; padding: 0 6px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .lang { font-size: 18px; line-height: 1; padding: 2px 4px; }
@@ -703,6 +730,8 @@ textarea { font: inherit; padding: 5px 8px; border: 1px solid var(--line); borde
     --accent-soft: #1c3053;
     --bar: #1d4d8f;
     --bar-strong: #2a6fd6;
+    --view-bg: #1c2b40;
+    --view-fg: #85b8ff;
   }
   button { background: #2c333a; }
   button:hover { background: #343b43; }

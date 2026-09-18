@@ -2135,6 +2135,25 @@ check("пиктограмма 💬 есть и на «По эпикам и лю�
   g9box.remove();
 }
 
+// Р1. Ракурсы диаграммы — пиктограммы одной группой.
+{
+  const { DICT } = await import("../src/js/dict.js");
+  const html = await (await fetch("../src/app.html", { cache: "no-store" })).text();
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  const group = doc.querySelector(".tabs .view-group");
+  const views = group ? [...group.querySelectorAll(".tab")] : [];
+  check("Р1: три ракурса в одной группе — «По эпикам», «По людям», «Эпик — история»",
+    views.map((b) => b.dataset.tab).join() === "epicPeople,people,epicStories", views.map((b) => b.dataset.tab).join());
+  check("Р1: у ракурсов пиктограммы, подпись — в подсказке и aria-label, на обоих языках",
+    views.every((b) => b.classList.contains("tab-icon") && b.querySelector("svg") && !b.dataset.i18n && b.dataset.i18nTitle && b.dataset.i18nAria === b.dataset.i18nTitle &&
+      DICT.ru[b.dataset.i18nTitle] && DICT.en[b.dataset.i18nTitle]));
+  check("Р1: пиктограммы одного стиля с остальными (контур 24×24, линия 2)",
+    [...doc.querySelectorAll(".tabs .tab-icon svg")].every((v) => v.getAttribute("viewBox") === "0 0 24 24" && v.getAttribute("stroke-width") === "2" && v.getAttribute("fill") === "none"));
+  check("Р1: «Команда» — текстом, вне группы", !!doc.querySelector('.tabs > .tab[data-tab="team"][data-i18n="tab.team"]'));
+  check("Р1: «Эпик — история» скрыт, пока ракурса нет (этап 3)", views[2]?.hasAttribute("hidden"));
+  check("Р1: у группы есть подпись для экранного диктора", group?.dataset.i18nAria === "tab.views" && DICT.en["tab.views"]);
+}
+
 const total = document.createElement("div");
 total.className = failures ? "t-fail" : "t-ok";
 total.textContent = failures ? `${failures} FAILED` : "ALL PASSED";
