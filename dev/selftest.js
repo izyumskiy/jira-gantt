@@ -14,6 +14,8 @@ import * as agg from "../src/js/agg.js";
 import * as gantt from "../src/js/gantt.js";
 import { parseSprint, datesFromName, checkApis, searchEpics, epicKeysFrom, sync as runSync } from "../src/js/sync.js";
 import * as jiraApi from "../src/js/jira.js";
+import * as analytics from "../src/js/analytics.js";
+import { runForecast, workerAvailable } from "../src/js/forecastClient.js";
 import { classify, isDoneStatus } from "../src/js/status.js";
 import { collectPeople, mergeProfiles, parseSystems, systemsList, teamsList, normName, roleSummary } from "../src/js/team.js";
 import { parseConfig, exportConfig, applyConfig } from "../src/js/configio.js";
@@ -786,7 +788,10 @@ await settings.save({ infoSystems: [], fields: { plannedStart: "", plannedEnd: "
 // (из-за такого `onkeydown` в поле поиска не набирался ни один символ).
 {
   const sources = await Promise.all(
-    ["app", "gantt", "team", "sync", "agg", "flow", "configio"].map(async (n) => [n, await (await fetch(`../src/js/${n}.js`)).text()])
+    ["app", "gantt", "team", "sync", "agg", "flow", "configio", "analytics", "forecastClient", "jira", "db", "settings"].map(async (n) => [
+      n,
+      await (await fetch(`../src/js/${n}.js`, { cache: "no-store" })).text()
+    ])
   );
   const bad = [];
   for (const [name, code] of sources) {
@@ -795,6 +800,14 @@ await settings.save({ infoSystems: [], fields: { plannedStart: "", plannedEnd: "
     }
   }
   check("обработчики on* не возвращают результат логического выражения", bad.length === 0, bad.join(" | "));
+  // Повторное объявление функции ломает загрузку модуля целиком, а селфтест app.js не импортирует.
+  const dupes = [];
+  for (const [name, code] of sources) {
+    const seen = new Map();
+    for (const m of code.matchAll(/^(?:export\s+)?(?:async\s+)?function\s+([A-Za-z0-9_$]+)\s*\(/gm)) seen.set(m[1], (seen.get(m[1]) || 0) + 1);
+    for (const [fn, n] of seen) if (n > 1) dupes.push(`${name}.js: ${fn} ×${n}`);
+  }
+  check("в модулях нет повторно объявленных функций", dupes.length === 0, dupes.join(" | "));
 }
 
 // 4j. прогноз по выбранным командам (переключатель в карточке эпика, можно несколько)
@@ -912,6 +925,60 @@ await settings.save({ infoSystems: [], fields: { plannedStart: "", plannedEnd: "
   window.fetch = orig;
   await settings.save({ fields: saved.fields, useTempoTeams: saved.useTempoTeams, flowWeeks: saved.flowWeeks, requestTimeoutSec: saved.timeout });
   await dbm.clearAll();
+}
+
+// А1. модуль расчётов: одни и те же числа для списка, карточки и сводки
+{
+  const exc = flowlib.parseTypeList("User Story");
+  const iss = [
+    mk("C-1", "EP-1", "AAA", "Ivan", 2, 8, "done"),
+    mk("C-2", "EP-1", "BBB", "Ivan", 2, 4, "prog"),
+    { ...mk("C-3", "EP-1", "AAA", "Ivan", null, 6, "new"), typeName: "User Story", timeSpent: 3600 },
+    { ...mk("C-4", "EP-1", "AAA", "Olga", 3, 2, "prog"), timeSpent: 1800 }
+  ];
+  const c = analytics.epicCounters([{ key: "EP-1", timeSpent: 600 }], iss, { excludeTypes: exc }).get("EP-1");
+  check("А1: счётчики эпика без User Story, а списанное на неё время — в сумме",
+    c.pct.count === 3 && c.pct.doneCount === 1 && c.spent.total === 3 && c.spent.withLogs === 1 && c.spent.issues === 5400 && c.spent.epic === 600 && c.issueKeys.length === 4,
+    JSON.stringify({ count: c.pct.count, done: c.pct.doneCount, spent: c.spent }));
+  check("А1: задачи по проектам", c.pct.projects.get("AAA").count === 2 && c.pct.projects.get("BBB").count === 1);
+
+  const DAYMS = 86400000;
+  const nowMs = Date.now();
+  const rows = [];
+  for (let w = 1; w <= 20; w++) {
+    const resolved = new Date(nowMs - w * 7 * DAYMS - 2 * DAYMS).toISOString();
+    for (let i = 0; i < 10; i++) {
+      rows.push({ key: `R-${w}-${i}`, resolved, assigneeKey: "ivan", assigneeLogin: "ivan", assigneeName: "Ivan", epicKey: w <= 6 && i < 4 ? "EP-1" : "EP-9", typeName: "" });
+    }
+  }
+  const tempoRows = [{ id: 1, name: "1C", members: [{ key: "ivan", login: "ivan", name: "Ivan" }] }];
+  const flow = analytics.epicFlowState({ epic: { key: "EP-1" }, rows, tempo: tempoRows, issues: iss, excludeTypes: exc, weeks: 30, now: nowMs });
+  check("А1: остаток в прогнозе = всего − готово в счётчиках списка", flow.remaining === c.pct.count - c.pct.doneCount, `${flow.remaining}`);
+  check("А1: команда потока — из Tempo", flow.teams.length === 1 && flow.teams[0].team.name === "1C", flow.teams.map((x) => x.team.name).join(","));
+  const manualFlow = analytics.epicFlowState({ epic: { key: "EP-1" }, rows, tempo: tempoRows, profiles: [{ name: "ivan", login: "ivan", team: "Платформа" }], issues: iss, excludeTypes: exc, weeks: 30, now: nowMs });
+  check("А1: ручная команда важнее Tempo и в потоке — как на «По людям»", manualFlow.teams[0].team.name === "Платформа");
+
+  const far = { key: "EP-1", dueDate: ymd(365) };
+  const near = { key: "EP-1", dueDate: ymd(1) };
+  const localFar = await analytics.epicForecast({ epic: far, flow, seed: "EP-1", runs: 2000, now: nowMs });
+  const localNear = await analytics.epicForecast({ epic: near, flow, seed: "EP-1", runs: 2000, now: nowMs });
+  check("А1: шанс успеть и запас: далёкий срок — 100% и запас больше нуля", localFar.chance === 1 && localFar.buffer > 0, `${localFar.chance} / ${localFar.buffer}`);
+  check("А1: срок завтра — шанс 0% и запас меньше нуля", localNear.chance === 0 && localNear.buffer < 0, `${localNear.chance} / ${localNear.buffer}`);
+  check("А1: без срока исполнения шанса и запаса нет", (await analytics.epicForecast({ epic: { key: "EP-1" }, flow, seed: "EP-1", runs: 500, now: nowMs })).chance === null);
+  const again = await analytics.epicForecast({ epic: far, flow, seed: "EP-1", runs: 2000, now: nowMs });
+  check("А1: с одинаковым зерном прогноз одинаковый", JSON.stringify(again.fc.weeks) === JSON.stringify(localFar.fc.weeks));
+
+  // А3. тот же прогноз в фоновом потоке — на эпике покрупнее, чтобы срок был не в одну неделю
+  const bigIssues = Array.from({ length: 40 }, (_, i) => mk(`BIG-${i}`, "EP-1", "AAA", "Ivan", null, 1, "new"));
+  const bigFlow = analytics.epicFlowState({ epic: { key: "EP-1" }, rows, tempo: tempoRows, issues: bigIssues, weeks: 30, now: nowMs });
+  const bigLocal = await analytics.epicForecast({ epic: far, flow: bigFlow, seed: "EP-1", runs: 2000, now: nowMs });
+  const viaWorker = await analytics.epicForecast({ epic: far, flow: bigFlow, seed: "EP-1", runs: 2000, now: nowMs, run: runForecast });
+  check("А3: фоновый поток для прогнозов поднимается", workerAvailable());
+  check("А3: прогноз в фоновом потоке совпадает с расчётом на странице",
+    bigLocal.fc.weeks.p85 > 3 && JSON.stringify(viaWorker.fc.weeks) === JSON.stringify(bigLocal.fc.weeks) &&
+      viaWorker.chance === bigLocal.chance && viaWorker.history.weeks === bigLocal.history.weeks,
+    `${JSON.stringify(viaWorker.fc && viaWorker.fc.weeks)} / ${JSON.stringify(bigLocal.fc.weeks)}`);
+  check("А3: даты прогноза из потока — настоящие даты", viaWorker.fc.dates.p85 instanceof Date);
 }
 
 // 4g. умолчания настроек

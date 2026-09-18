@@ -140,7 +140,37 @@ export function forecastDelivery({ teams, runs = 10000, now = Date.now(), rnd = 
     dates: { p50: date(weeks.p50), p85: date(weeks.p85), p95: date(weeks.p95) },
     last,
     teams: usable,
-    overflow
+    overflow,
+    durations // отсортированные сроки прогонов в неделях — для шанса успеть к сроку
+  };
+}
+
+// Шанс успеть и запас до срока исполнения (dueMs — конец дня срока). Шанс — доля прогонов,
+// закончившихся не позже срока; запас — срок минус прогноз 85%, в неделях (меньше нуля — опаздываем).
+export function dueOutlook(fc, dueMs, now = Date.now()) {
+  if (!fc || !Number.isFinite(dueMs)) return { chance: null, buffer: null };
+  const inTime = fc.durations.filter((w) => now + w * 7 * DAY <= dueMs).length;
+  return {
+    chance: inTime / fc.durations.length,
+    buffer: Math.round(((dueMs - fc.dates.p85.getTime()) / (7 * DAY)) * 10) / 10
+  };
+}
+
+// Генератор случайных чисел с зерном (mulberry32 от хеша строки): одинаковое зерно — одинаковые
+// прогоны. Нужен, чтобы прогноз менялся только от данных, а не от случая.
+export function seededRandom(seed) {
+  let h = 1779033703 ^ String(seed).length;
+  for (const ch of String(seed)) {
+    h = Math.imul(h ^ ch.charCodeAt(0), 3432918353);
+    h = (h << 13) | (h >>> 19);
+  }
+  let a = h >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
 }
 

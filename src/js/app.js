@@ -10,6 +10,8 @@ import * as team from "./team.js";
 import { classify, isDoneStatus } from "./status.js";
 import * as configio from "./configio.js";
 import * as flowlib from "./flow.js";
+import * as analytics from "./analytics.js";
+import { runForecast } from "./forecastClient.js";
 
 const $ = (sel) => document.querySelector(sel);
 const state = {
@@ -557,27 +559,28 @@ async function renderEpicFlow(box, epic, onDone = () => {}) {
   box.textContent = "";
   const div = (className, textContent = "") => Object.assign(document.createElement("div"), { className, textContent });
   box.append(div("tip-sub", t("flow.title")));
-  const [rows, tempo, issues] = await Promise.all([db.all(db.STORES.flow), db.all(db.STORES.tempo), db.all(db.STORES.issues)]);
+  const [rows, tempo, issues, profiles] = await Promise.all([
+    db.all(db.STORES.flow),
+    db.all(db.STORES.tempo),
+    db.all(db.STORES.issues),
+    db.all(db.STORES.people)
+  ]);
   if (!rows.length) {
     box.append(div("muted", t("flow.none")));
     onDone();
     return;
   }
-  const index = agg.buildTempoIndex(tempo);
   // Прогноз считает задачи без исключённых типов (User Story и т.п.) — и в истории, и в остатке.
-  const excludeTypes = flowlib.parseTypeList(settings.get().forecastExcludeTypes);
-  const model = flowlib.buildFlow({
-    excludeTypes,
+  const flow = analytics.epicFlowState({
+    epic,
     rows,
-    teamOf: (p) => index.of(p),
-    weeks: Number(settings.get().flowWeeks) || 52,
-    epicKey: epic.key
+    tempo,
+    profiles,
+    issues,
+    excludeTypes: flowlib.parseTypeList(settings.get().forecastExcludeTypes),
+    weeks: Number(settings.get().flowWeeks) || 52
   });
-  const teams = model.teams.filter((x) => (x.byEpic.get(epic.key) || 0) > 0);
-  // незакрытый эпик всё ещё в работе — его период активности тянется до конца окна
-  const remaining = issues.filter((i) => i.epicKey === epic.key && !agg.isDone(i) && !flowlib.isExcludedType(i.typeName, excludeTypes)).length;
-  const open = remaining > 0;
-  const shares = new Map(teams.map((x) => [x.team.id, flowlib.epicShare(x, epic.key, { open })]));
+  const { model, teams, shares } = flow;
 
   const windowNote = div(
     model.weeksCount < 5 ? "cmt-error small" : "muted small",
@@ -588,7 +591,7 @@ async function renderEpicFlow(box, epic, onDone = () => {}) {
 
   if (!teams.length) {
     box.append(div("muted", t("share.none")), windowNote, fcBox);
-    drawForecast(fcBox, epic, model, [], remaining, shares);
+    drawForecast(fcBox, epic, flow, [], onDone).catch(() => {});
     onDone();
     return;
   }
@@ -684,7 +687,7 @@ async function renderEpicFlow(box, epic, onDone = () => {}) {
         pct: sum.total ? Math.round((sum.done / sum.total) * 100) : 0
       });
     }
-    drawForecast(fcBox, epic, model, list, remaining, shares);
+    drawForecast(fcBox, epic, flow, list, onDone).catch(() => {});
     onDone();
   };
   redraw();
@@ -738,23 +741,36 @@ function renderFlowChart(model) {
 
 // Прогноз срока эпика по выбранным командам: остаток делят только они (пропорционально вкладу в
 // эпик), история каждой — недели периода их работы над эпиком; срок прогона — максимум по командам.
-function drawForecast(box, epic, model, list, remaining, shares) {
-  box.textContent = "";
+// Прогоны считаются в фоновом потоке (А3), поэтому рисуем асинхронно.
+let forecastSeq = 0;
+async function drawForecast(box, epic, flow, list, onDone = () => {}) {
+  const token = String(++forecastSeq);
+  box.dataset.token = token;
+  const head = () => {
+    box.textContent = "";
+    box.append(Object.assign(document.createElement("div"), { className: "tip-sub", textContent: t("fc.title") }));
+  };
   const note = (text, error = false) =>
     box.append(Object.assign(document.createElement("div"), { className: error ? "cmt-error small" : "muted small", textContent: text }));
-  box.append(Object.assign(document.createElement("div"), { className: "tip-sub", textContent: t("fc.title") }));
+  head();
+  note(t("fc.loading"));
 
-  const res = flowlib.forecastForTeams({ teams: list, shares, epicKey: epic.key, remaining });
+  const res = await analytics.epicForecast({ epic, flow, teams: list, run: runForecast });
+  if (box.dataset.token !== token) return; // пока считали, выбор команд поменялся
+  head();
+  const model = flow.model;
   if (res.reason === "short") {
     note(t("fc.short", { n: res.weeks, min: flowlib.FORECAST_MIN_WEEKS }), true);
+    onDone();
     return;
   }
   if (!res.fc) {
     note(t("fc.none"));
+    onDone();
     return;
   }
   const { fc, history } = res;
-  note(t("fc.remaining", { n: remaining }));
+  note(t("fc.remaining", { n: flow.remaining }));
   const tbl = document.createElement("table");
   tbl.className = "tip-table";
   for (const [p, key] of [[50, "p50"], [85, "p85"], [95, "p95"]]) {
@@ -781,6 +797,7 @@ function drawForecast(box, epic, model, list, remaining, shares) {
   );
   if (history.weeks < flowlib.FORECAST_OK_WEEKS) note(t("fc.warn", { n: history.weeks, ok: flowlib.FORECAST_OK_WEEKS }), true);
   note(t("fc.caveat"));
+  onDone();
 }
 
 function renderTeamShares(box, epic, onDone = () => {}) {
@@ -981,36 +998,13 @@ async function renderStored() {
   const shown = applyFilter(stored);
   renderStatusSummary($("#storedSummary"), shown);
   if (stored.length || hasFilter()) box.append(listHead());
-  // Списано: на сам эпик + на его задачи из выгрузки.
-  state.issuesByEpic = new Map();
-  const spentByEpic = new Map(stored.map((e) => [e.key, { epic: e.timeSpent || 0, issues: 0, withLogs: 0, total: 0 }]));
-  // Доля выполнения: оценки сделанных задач (Готово / On Prod / Cancel) относительно всех.
-  const pctByEpic = new Map(stored.map((e) => [e.key, { done: 0, total: 0, doneCount: 0, count: 0, projects: new Map() }]));
-  // Исключённые типы (по умолчанию User Story) — контейнеры для задач: в количестве задач, оценках
-  // и готовности их нет. Списанное на них время остаётся в сумме «Списано» — это реально потраченные часы.
-  const excludeTypes = flowlib.parseTypeList(settings.get().forecastExcludeTypes);
-  for (const i of await db.all(db.STORES.issues)) {
-    const acc = spentByEpic.get(i.epicKey);
-    if (!acc) continue;
-    if (!state.issuesByEpic.has(i.epicKey)) state.issuesByEpic.set(i.epicKey, []);
-    state.issuesByEpic.get(i.epicKey).push(i.key);
-    acc.issues += i.timeSpent || 0;
-    if (flowlib.isExcludedType(i.typeName, excludeTypes)) continue;
-    acc.total += 1;
-    if (i.timeSpent) acc.withLogs += 1;
-    const p = pctByEpic.get(i.epicKey);
-    const est = agg.estimateOf(i);
-    p.count += 1;
-    p.total += est;
-    // Число задач по проектам Jira — для карточки эпика.
-    const pk = i.projectKey || t("dash");
-    if (!p.projects.has(pk)) p.projects.set(pk, { key: pk, name: i.projectName || pk, count: 0 });
-    p.projects.get(pk).count += 1;
-    if (agg.isDone(i)) {
-      p.doneCount += 1;
-      p.done += est;
-    }
-  }
+  // Списано, готовность и задачи по проектам — из модуля расчётов (те же числа, что в карточке).
+  const counters = analytics.epicCounters(stored, await db.all(db.STORES.issues), {
+    excludeTypes: flowlib.parseTypeList(settings.get().forecastExcludeTypes)
+  });
+  state.issuesByEpic = new Map([...counters].map(([k, c]) => [k, c.issueKeys]));
+  const spentByEpic = new Map([...counters].map(([k, c]) => [k, c.spent]));
+  const pctByEpic = new Map([...counters].map(([k, c]) => [k, c.pct]));
   sortEpics(shown).forEach((e, i) => box.append(epicRow(e, state.selected.has(e.key), i, spentByEpic.get(e.key), pctByEpic.get(e.key))));
   if (!stored.length) {
     const p = document.createElement("div");
@@ -1270,7 +1264,7 @@ async function drawGantt(mode, container) {
       mode,
       timelineIssues: [...issues, ...others]
     });
-    const opts = { mode, profiles, personLoad: agg.personLoad(model, issues, others) };
+    const opts = { mode, profiles, personLoad: analytics.personLoad(model, issues, others) };
     if (mode === "epicPeople") {
       applyPersonFilter(model);
       renderPersonFilterNote();
