@@ -949,7 +949,7 @@ await settings.save({ infoSystems: [], fields: { plannedStart: "", plannedEnd: "
   const saved = { fields: { ...settings.get().fields }, useTempoTeams: settings.get().useTempoTeams, flowWeeks: settings.get().flowWeeks, lastSync: settings.get().lastSync };
   await settings.save({ fields: { ...saved.fields, epicLink: "customfield_10100", sprint: "customfield_10101", version: 5 }, useTempoTeams: false, flowWeeks: 4, lastSync: Date.now() - 3600000 });
   await dbm.clearAll();
-  await dbm.metaSet("issueSchema", 4);
+  await dbm.metaSet("issueSchema", 5); // текущая схема задач — иначе «Обновить» станет полной выгрузкой
   await dbm.putAll(dbm.STORES.epics, [{ key: "EP-A", summary: "Эпик А" }]);
   await dbm.putAll(dbm.STORES.issues, [
     mk("KEEP-1", "EP-A", "AAA", "Ivan", null, 1, "prog"),
@@ -2102,7 +2102,7 @@ check("пиктограмма 💬 есть и на «По эпикам и лю�
 {
   const ex = flowlib.excludedTypes({ forecastExcludeTypes: "User Story, user story;Epic Task" });
   check("Р9: исключённые типы — один набор, без учёта регистра; для JQL — написание из настроек без дублей",
-    ex.join("|") === "user story|user story|epic task" && flowlib.excludedTypeNames({ forecastExcludeTypes: "User Story, user story;Epic Task" }).join("|") === "User Story|Epic Task");
+    ex.join("|") === "user story|epic task" && flowlib.excludedTypeNames({ forecastExcludeTypes: "User Story, user story;Epic Task" }).join("|") === "User Story|Epic Task");
   const story = { ...mk("S-1", "EP-1", "AAA", "Story Owner", 2, 16, "new"), typeName: "User Story" };
   const storyOff = { ...mk("S-2", "EP-1", "AAA", "Story Owner", null, 8, "prog"), typeName: "User Story" };
   const withStories = [...issues, story, storyOff];
@@ -2133,6 +2133,383 @@ check("пиктограмма 💬 есть и на «По эпикам и лю�
   check("Р9: ссылки подсказки эпика — с issuetype not in (\"User Story\")", tipLinks.length > 0 && tipLinks.every((h) => h.includes('issuetype not in ("User Story")')), tipLinks[0]);
   document.querySelector(".tooltip .tip-close")?.click();
   g9box.remove();
+}
+
+// Р1. Ракурсы диаграммы — пиктограммы одной группой.
+{
+  const { DICT } = await import("../src/js/dict.js");
+  const html = await (await fetch("../src/app.html", { cache: "no-store" })).text();
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  const group = doc.querySelector(".tabs .view-group");
+  const views = group ? [...group.querySelectorAll(".tab")] : [];
+  check("Р1: три ракурса в одной группе — «По эпикам», «По людям», «Эпик — история»",
+    views.map((b) => b.dataset.tab).join() === "epicPeople,people,epicStories", views.map((b) => b.dataset.tab).join());
+  check("Р1: у ракурсов пиктограммы, подпись — в подсказке и aria-label, на обоих языках",
+    views.every((b) => b.classList.contains("tab-icon") && b.querySelector("svg") && !b.dataset.i18n && b.dataset.i18nTitle && b.dataset.i18nAria === b.dataset.i18nTitle &&
+      DICT.ru[b.dataset.i18nTitle] && DICT.en[b.dataset.i18nTitle]));
+  check("Р1: пиктограммы одного стиля с остальными (контур 24×24, линия 2)",
+    [...doc.querySelectorAll(".tabs .tab-icon svg")].every((v) => v.getAttribute("viewBox") === "0 0 24 24" && v.getAttribute("stroke-width") === "2" && v.getAttribute("fill") === "none"));
+  check("Р1: «Команда» — текстом, вне группы", !!doc.querySelector('.tabs > .tab[data-tab="team"][data-i18n="tab.team"]'));
+  check("Р1: «Эпик — история» показан и ведёт на свою страницу", !views[2]?.hasAttribute("hidden") && !!doc.querySelector("#page-epicStories"));
+  check("Р1: у группы есть подпись для экранного диктора", group?.dataset.i18nAria === "tab.views" && DICT.en["tab.views"]);
+}
+
+// Р2, Р6. Данные: приоритеты, связи, комментарии; пиктограммы приоритетов.
+{
+  const omgMod = await import("../src/js/omg.js");
+  const prio = await import("../src/js/priority.js");
+  const syncMod = await import("../src/js/sync.js");
+  const cm = (id, created, body, author = "Иван") => ({ id: String(id), created, body, author: { displayName: author } });
+  // Разбор меток проекта (Р3): последняя по дате создания, пустая — «Без проекта», регистр и пробелы.
+  const p1 = omgMod.parseComments([
+    cm(2, "2026-09-10T10:00:00.000+0300", "(omg project) Новый сайт"),
+    cm(1, "2026-09-01T10:00:00.000+0300", "(omg project) Старый сайт"),
+    cm(3, "2026-09-11T10:00:00.000+0300", "просто комментарий (omg project) не в начале")
+  ]);
+  check("Р3: действует последняя по дате метка проекта, текст не в начале — не метка", p1.project?.name === "Новый сайт", JSON.stringify(p1));
+  check("Р3: последняя метка с пустым названием — «Без проекта»",
+    omgMod.parseComments([cm(1, "2026-09-01T10:00:00Z", "(omg project) Сайт"), cm(2, "2026-09-02T10:00:00Z", "  (OMG Project)  \nлишнее")]).project === null);
+  check("Р3: кодовое слово без учёта регистра и с пробелами в начале; название — первая строка без пробелов по краям",
+    omgMod.parseComments([cm(1, "2026-09-01T10:00:00Z", "  (OMG  Project)   ПРОЕКТ  \nвторая строка")]).project?.name === "ПРОЕКТ");
+  check("Р3: «Проект» и «ПРОЕКТ » — один проект", omgMod.projectKey("Проект") === omgMod.projectKey(" ПРОЕКТ  ") && omgMod.projectKey("Мой  проект") === "мой проект");
+  check("Р3: квадратные скобки — не кодовое слово", omgMod.parseComments([cm(1, "2026-09-01T10:00:00Z", "[omg project] Сайт")]).project === null);
+  const n1 = omgMod.parseComments([
+    cm(5, "2026-09-05T10:00:00Z", "(omg comment)\nВторая заметка\nстрока 2", "Пётр"),
+    cm(4, "2026-09-04T10:00:00Z", "(omg comment) Первая"),
+    cm(6, "2026-09-06T10:00:00Z", "обычный комментарий")
+  ]);
+  check("Р4: заметки по дате, последняя — действующая, текст без кодового слова, обычные комментарии не попадают",
+    n1.notes.length === 2 && n1.notes[0].text === "Первая" && n1.notes[1].text === "Вторая заметка\nстрока 2" && n1.notes[1].author === "Пётр", JSON.stringify(n1.notes));
+  check("Р3/Р4: текст публикуемых комментариев", omgMod.projectComment(" Сайт ") === "(omg project) Сайт" && omgMod.projectComment("") === "(omg project)" && omgMod.noteComment(" Текст ") === "(omg comment)\nТекст");
+
+  // Приоритеты (Р6).
+  const order = [{ id: "1", name: "Highest" }, { id: "2", name: "High" }, { id: "3", name: "Medium" }, { id: "4", name: "Low" }, { id: "5", name: "Lowest" }];
+  const P = (id) => order.find((x) => x.id === id);
+  check("Р6: порядок из Jira, без приоритета — ниже самого низкого",
+    prio.rankOf(P("1"), order) === 0 && prio.rankOf(P("5"), order) === 4 && prio.rankOf(null, order) === 5 && prio.compare(P("2"), P("4"), order) < 0 && prio.compare(null, P("5"), order) > 0);
+  check("Р6: самый высокий из списка", prio.highest([P("4"), null, P("2"), P("3")], order)?.id === "2" && prio.highest([null], order) === null);
+  check("Р6: запасной кружок — от красного к серому", prio.fallbackColor(P("1"), order) === "#de350b" && prio.fallbackColor(P("5"), order) === "#a5adba" && prio.fallbackColor(null, order) === "#a5adba");
+  const bad = prio.icon({ id: "2", name: "High", iconUrl: "/no-such-icon.svg" }, order, t);
+  const holder = document.createElement("div");
+  holder.append(bad);
+  document.body.append(holder);
+  await new Promise((r) => setTimeout(r, 400));
+  const dot = holder.querySelector(".prio-dot");
+  check("Р6: пиктограмма не загрузилась — цветной кружок с названием в подсказке", !!dot && dot.title === "High" && !holder.querySelector("img"), holder.innerHTML);
+  holder.remove();
+  const good = prio.icon({ id: "1", name: "Highest", iconUrl: "https://jira.example.local/images/icons/priorities/highest.svg" }, order, t);
+  check("Р6: пиктограмма из Jira — картинка с названием в подсказке", good.tagName === "IMG" && good.title === "Highest" && good.src.endsWith("highest.svg"));
+  check("Р6: без приоритета — серый кружок «Приоритет не задан»", prio.icon(null, order, t).title === t("prio.none"));
+
+  // Типы историй всегда вне подсчётов (Р2).
+  check("Р2: типы историй входят в исключённые, даже если их нет в «Типах задач, не учитываемых в подсчётах»",
+    flowlib.excludedTypes({ forecastExcludeTypes: "Sub-task", storyTypes: "Story, User Story" }).join("|") === "sub-task|story|user story" &&
+      flowlib.excludedTypeNames({ forecastExcludeTypes: "User Story", storyTypes: "user story, Story" }).join("|") === "User Story|Story");
+
+  // Связи (Р2).
+  const links = syncMod.linksOf([
+    { type: { name: "Relates" }, outwardIssue: { key: "T-1", fields: { issuetype: { name: "Task" } } } },
+    { type: { name: "Blocks" }, inwardIssue: { key: "T-2", fields: { issuetype: { name: "Bug" } } } },
+    { type: { name: "Relates" } }
+  ]);
+  check("Р2: связи — тип, ключ и тип задачи на том конце, в любую сторону", JSON.stringify(links) === JSON.stringify([{ type: "Relates", key: "T-1", typeName: "Task" }, { type: "Blocks", key: "T-2", typeName: "Bug" }]));
+  const storyIs = (i) => flowlib.isExcludedType(i.typeName, ["user story"]);
+  const iss = new Map([
+    ["US-1", { key: "US-1", typeName: "User Story", links: [
+      { type: "Relates", key: "T-1", typeName: "Task" }, { type: "relates", key: "X-9", typeName: "Task" }, { type: "Blocks", key: "X-8", typeName: "Task" },
+      { type: "Relates", key: "EP-Q", typeName: "Epic" }, { type: "Relates", key: "US-7", typeName: "User Story" }, { type: "Relates", key: "EP-S", typeName: "" }] }],
+    ["T-1", { key: "T-1", typeName: "Task", links: [{ type: "Relates", key: "X-5", typeName: "Task" }] }]
+  ]);
+  check("Р2: догружаются только чужие задачи историй по связи из настроек; эпики, истории и связи задач не в счёт",
+    syncMod.linkedKeysToLoad({ issues: iss, isStory: storyIs, linkType: "Relates", epicKeys: ["EP-S"] }).join() === "X-9");
+
+  // Синхронизация с заглушкой Jira: приоритеты, связи, комментарии, чужие задачи, порядок приоритетов.
+  const orig = window.fetch;
+  const saved = { fields: { ...settings.get().fields }, useTempoTeams: settings.get().useTempoTeams };
+  await settings.save({ fields: { ...saved.fields, epicLink: "customfield_10100", sprint: "customfield_10101", version: 5 }, useTempoTeams: false, storyTypes: "User Story", storyLinkType: "Relates" });
+  await dbm.clearAll();
+  await dbm.putAll(dbm.STORES.epics, [{ key: "EP-S", summary: "Эпик С" }]);
+  const json = (o, status = 200) => new Response(JSON.stringify(o), { status, headers: { "Content-Type": "application/json" } });
+  const stt = { name: "В работе", statusCategory: { key: "indeterminate" } };
+  const who = { name: "ivan", key: "ivan", displayName: "Ivan" };
+  const hi = { id: "2", name: "High", iconUrl: "https://jira.example.local/high.svg" };
+  const lnk = (key, typeName, name = "Relates") => ({ type: { name }, outwardIssue: { key, fields: { issuetype: { name: typeName } } } });
+  const issue = (key, type, links = [], epic = "EP-S") => ({ key, fields: { summary: key, project: { key: "AAA" }, assignee: who, status: stt, issuetype: { name: type }, priority: hi, issuelinks: links, updated: new Date().toISOString(), created: new Date().toISOString(), customfield_10100: epic, timeoriginalestimate: 3600 } });
+  const epicUpdated = "2026-09-17T10:00:00.000+0300";
+  const commentReq = [];
+  window.fetch = async (url, opt = {}) => {
+    const u = String(url);
+    const b = opt.body ? JSON.parse(opt.body) : {};
+    if (u.includes("/rest/api/2/myself")) return json({ name: "ivan" });
+    if (u.includes("/rest/api/2/priority")) return json([{ id: "1", name: "Highest", iconUrl: "h.svg" }, hi, { id: "3", name: "Medium", iconUrl: "m.svg" }]);
+    if (u.includes("/rest/api/2/issue/US-1/comment")) return json({ comments: [cm(1, "2026-09-01T10:00:00Z", "(omg comment) Старая"), cm(2, "2026-09-02T10:00:00Z", "(omg comment) Свежая заметка")], total: 2 });
+    if (u.includes("/rest/agile/1.0/board")) return json({ values: [], isLast: true });
+    if (u.includes("/rest/api/2/search")) {
+      const jql = b.jql || "";
+      if ((b.fields || []).includes("comment")) {
+        commentReq.push(jql);
+        const rows = [];
+        if (jql.includes("EP-S")) rows.push({ key: "EP-S", fields: { comment: { total: 2, comments: [cm(1, "2026-09-01T10:00:00Z", "(omg project) Сайт"), cm(2, "2026-09-03T10:00:00Z", "(omg comment) Заметка эпика")] } } });
+        if (jql.includes("US-1")) rows.push({ key: "US-1", fields: { comment: { total: 2, comments: [cm(1, "2026-09-01T10:00:00Z", "(omg comment) Старая")] } } });
+        return json({ issues: rows, total: rows.length });
+      }
+      if (jql.includes("resolutiondate >=")) return json({ issues: [], total: 0 });
+      if (jql.includes("key in (EP-S)")) return json({ issues: [{ key: "EP-S", fields: { summary: "Эпик С", status: stt, project: { key: "AAA" }, priority: hi, updated: epicUpdated } }], total: 1 });
+      if (jql.includes("in (EP-S)")) return json({ issues: [issue("US-1", "User Story", [lnk("T-1", "Task"), lnk("X-9", "Task"), lnk("EP-Q", "Epic"), lnk("X-8", "Task", "Blocks")]), issue("T-1", "Task", [lnk("US-1", "User Story")])], total: 2 });
+      if (jql.includes("key in (X-9)")) return json({ issues: [issue("X-9", "Task", [], "EP-Z")], total: 1 });
+      return json({ issues: [], total: 0 });
+    }
+    return json({}, 404);
+  };
+  let res = null;
+  let err = null;
+  try { res = await runSync({ full: true }); } catch (e) { err = e; }
+  const us = await dbm.getOne(dbm.STORES.issues, "US-1");
+  const t1 = await dbm.getOne(dbm.STORES.issues, "T-1");
+  const ep = await dbm.getOne(dbm.STORES.epics, "EP-S");
+  check("Р2: синхронизация прошла, ошибок комментариев и чужих задач нет", !err && res && !res.commentsError && !res.linkedError, err ? err.message : JSON.stringify(res && { c: res.commentsError, l: res.linkedError }));
+  check("Р2: у задач приоритет и связи", t1?.priority?.name === "High" && t1.links.length === 1 && us?.links.length === 4);
+  check("Р2: у эпика приоритет, время изменения и метка проекта", ep?.priority?.id === "2" && ep.updated === epicUpdated && ep.omg?.project?.name === "Сайт" && ep.omg.notes[0]?.text === "Заметка эпика", JSON.stringify(ep && ep.omg));
+  check("Р2: у истории заметки; не все комментарии в поиске — догружены поштучно", us?.omg?.notes.length === 2 && us.omg.notes[1].text === "Свежая заметка", JSON.stringify(us && us.omg));
+  check("Р2: комментарии обычных задач не запрашиваются", !commentReq.some((j) => j.includes("T-1")));
+  const linkedRows = await dbm.all(dbm.STORES.linked);
+  check("Р2: чужая задача истории загружена отдельно; эпик на том конце и связь другого типа — нет", linkedRows.map((r) => r.key).join() === "X-9" && linkedRows[0].epicKey === "EP-Z", linkedRows.map((r) => r.key).join());
+  check("Р2: порядок приоритетов сохранён", (await dbm.metaGet("priorities"))?.map((p) => p.name).join() === "Highest,High,Medium");
+  commentReq.length = 0;
+  try { res = await runSync({ full: false }); } catch (e) { err = e; }
+  const ep2 = await dbm.getOne(dbm.STORES.epics, "EP-S");
+  check("Р2: «Обновить» — комментарии неизменившегося эпика не перечитываются, разбор сохраняется",
+    !err && !commentReq.some((j) => j.includes("EP-S")) && ep2?.omg?.project?.name === "Сайт", JSON.stringify(commentReq));
+  // Сбой запроса комментариев: разбор истории не теряется, об ошибке — отдельной строкой.
+  const okFetch = window.fetch;
+  window.fetch = async (url, opt = {}) => {
+    const b = opt.body ? JSON.parse(opt.body) : {};
+    if (String(url).includes("/rest/api/2/search") && (b.fields || []).includes("comment")) return json({ errorMessages: ["boom"] }, 500);
+    return okFetch(url, opt);
+  };
+  try { res = await runSync({ full: false }); } catch (e) { err = e; }
+  const us3 = await dbm.getOne(dbm.STORES.issues, "US-1");
+  check("Р2: комментарии не прочитались — заметки истории прежние, синхронизация завершена, об ошибке сказано", !err && us3?.omg?.notes.length === 2 && !!res?.commentsError, err ? err.message : JSON.stringify(us3 && us3.omg));
+  window.fetch = orig;
+  await settings.save({ fields: saved.fields, useTempoTeams: saved.useTempoTeams });
+  await dbm.clearAll();
+}
+
+// Р3, Р5. Ракурс «Эпик — история»: проекты, эпики, истории, чужие задачи, смена проекта.
+{
+  const stories = await import("../src/js/stories.js");
+  const sv = await import("../src/js/storiesView.js");
+  const PR = [{ id: "1", name: "Highest", iconUrl: "" }, { id: "2", name: "High", iconUrl: "" }, { id: "3", name: "Medium", iconUrl: "" }, { id: "4", name: "Low", iconUrl: "" }];
+  const P = (id) => ({ ...PR.find((x) => x.id === id) });
+  const lab = (name, created) => ({ project: { name, created, author: "" }, notes: [] });
+  const EPS = [
+    { key: "E-1", summary: "Корзина", statusName: "В работе", statusCategory: "indeterminate", priority: P("2"), dueDate: ymd(10), omg: lab("Сайт", "2026-09-01T10:00:00Z") },
+    { key: "E-2", summary: "Оплата", statusName: "В работе", statusCategory: "indeterminate", priority: P("1"), dueDate: "", plannedEnd: ymd(5), omg: lab(" САЙТ ", "2026-09-05T10:00:00Z") },
+    { key: "E-3", summary: "Прочее", statusName: "Сделать", statusCategory: "new", priority: P("4") },
+    { key: "E-4", summary: "Приложение", statusName: "Готово", statusCategory: "done", priority: P("3"), dueDate: ymd(-3), omg: lab("Мобилка", "2026-09-02T10:00:00Z") }
+  ];
+  const L = (key, typeName = "Task", type = "Relates") => ({ type, key, typeName });
+  const iss = (key, epic, type, sprintId, hours, st, links = [], p = null) => ({ ...mk(key, epic, "AAA", "Ivan", sprintId, hours, st), typeName: type, links, priority: p });
+  const ISS = [
+    iss("US-1", "E-1", "User Story", null, 0, "prog", [L("T-1"), L("T-2"), L("X-9"), L("T-5"), L("M-1"), L("EPX", "Epic"), L("B-1", "Task", "Blocks")], P("3")),
+    iss("US-2", "E-1", "User Story", null, 0, "new", [L("T-2")], P("2")),
+    iss("US-3", "E-1", "User Story", 3, 0, "new", [], P("4")),
+    iss("T-1", "E-1", "Task", 2, 4, "done"),
+    iss("T-2", "E-1", "Task", 3, 8, "new"),
+    iss("T-3", "E-1", "Task", 2, 2, "new"),
+    iss("B-1", "E-1", "Task", 2, 1, "new"),
+    iss("T-5", "E-2", "Task", 2, 3, "new"),
+    iss("T-6", "E-3", "Task", 3, 5, "new"),
+    iss("T-7", "E-4", "Task", 2, 1, "done")
+  ];
+  const LINKED = [iss("X-9", "EP-Z", "Task", 2, 6, "new")];
+  const model = stories.buildStoryModel({ epics: EPS, issues: ISS, linked: LINKED, sprints, boards, priorities: PR, storyTypes: ["user story"], excludeTypes: ["user story"], excludeTypeNames: ["User Story"], linkType: "Relates" });
+  const proj = (name) => model.projects.find((p) => p.name === name);
+  const site = model.projects[0];
+  check("Р5: проекты по приоритету (самый высокий у незавершённых эпиков), «Без проекта» внизу",
+    model.projects.map((p) => p.name || "∅").join() === "САЙТ,Мобилка,∅", model.projects.map((p) => p.name || "∅").join());
+  check("Р3: «Сайт» и « САЙТ » — один проект, написание из самой свежей метки", site.epics.map((e) => e.key).join() === "E-2,E-1" && site.name === "САЙТ");
+  check("Р5: приоритет проекта — самый высокий у незавершённых эпиков; все готовы — среди всех", site.priority?.id === "1" && proj("Мобилка").priority?.id === "3");
+  const e1 = site.epics.find((e) => e.key === "E-1");
+  check("Р5: истории по приоритету, затем по ключу", e1.stories.map((s) => s.key).join() === "US-2,US-1,US-3", e1.stories.map((s) => s.key).join());
+  const us1 = e1.stories.find((s) => s.key === "US-1");
+  check("Р5: итог истории — её задачи по связи Relates, свои и чужие; эпик на том конце и связь другого типа — не в счёт",
+    us1.count === 4 && us1.foreign === 2 && us1.sum === 21 * 3600, `${us1.count} / ${us1.foreign} / ${us1.sum / 3600}`);
+  check("Р5: задача, которую не удалось загрузить, — в списке «не загружена»", us1.missing.join() === "M-1", us1.missing.join());
+  check("Р5: итог эпика — по задачам эпика, каждая один раз; чужие и истории не входят",
+    e1.count === 4 && e1.sum === 15 * 3600, `${e1.count} / ${e1.sum / 3600}`);
+  check("Р5: задача в двух историях видна в обеих", e1.stories.find((s) => s.key === "US-2").count === 1 && [...us1.cells.values()].some((c) => c.issues.some((i) => i.key === "T-2")));
+  check("Р5: «Без истории» — задачи эпика без истории в этом эпике (и связанные другим типом связи)",
+    e1.noStory.issues === undefined && [...e1.noStory.cells.values()].flatMap((c) => c.issues.map((i) => i.key)).sort().join() === "B-1,T-3");
+  const e2 = site.epics.find((e) => e.key === "E-2");
+  check("Р5: задача эпика E-2 в истории эпика E-1 — в итоге E-2 один раз, у E-2 она «Без истории»",
+    e2.count === 1 && e2.noStory.count === 1 && us1.cells.get([...us1.cells.keys()][0]).issues.some((i) => i.key === "T-5" && i.foreignEpic === "E-2"));
+  check("Р5: чужая задача невыбранного эпика помечена эпиком", [...us1.cells.values()].flatMap((c) => c.issues).some((i) => i.key === "X-9" && i.foreignEpic === "EP-Z"));
+  check("Р5: итог проекта — сумма итогов эпиков", site.count === e1.count + e2.count && site.sum === e1.sum + e2.sum);
+  check("Р5: история без задач со своим спринтом — отрезок по спринту истории", !!e1.stories.find((s) => s.key === "US-3").ownSprint && e1.stories.find((s) => s.key === "US-3").ownSprint.sprintId === 3);
+  check("Р5/Р7: веха проекта — ближайшая из вех незавершённых эпиков (плановое завершение E-2)", site.milestone?.date === ymd(5) && site.milestone.kind === "planned");
+  check("Р5/Р7: все эпики проекта готовы — веха по самой поздней", proj("Мобилка").milestone?.date === ymd(-3));
+
+  // Отрисовка.
+  const box = document.createElement("div");
+  document.body.append(box);
+  const published = [];
+  const set = [];
+  const notes = [];
+  let failKey = "";
+  sv.api.addComment = async (key, text) => {
+    if (key === failKey) throw new Error("403");
+    published.push([key, text]);
+  };
+  const opts = {
+    notify: (m, kind) => notes.push([m, kind]),
+    onProjectSet: async (key, name) => set.push(["set", key, name]),
+    onRenamed: async (keys, name) => set.push(["rename", keys.join(), name]),
+    epicsOfProject: (key) => EPS.filter((e) => (stories.projectOf(e) ? omgKey(stories.projectOf(e).name) : "") === key)
+  };
+  const omgKey = (await import("../src/js/omg.js")).projectKey;
+  sv.resetCollapse();
+  sv.render(box, model, opts);
+  check("Р5: по умолчанию видны только проекты", box.querySelectorAll(".s-project").length === 3 && !box.querySelector(".s-epic"));
+  box.querySelector(".gantt-bar .link").click(); // «Развернуть всё»
+  const rowsOf = (sel) => [...box.querySelectorAll(sel)];
+  check("Р5: «Развернуть всё» — эпики, истории и «Без истории»", rowsOf(".s-epic").length === 4 && rowsOf(".s-story").length === 3 && rowsOf(".s-nostory").length === 4);
+  check("Р6: у проекта, эпика и истории — пиктограмма приоритета", rowsOf(".s-project, .s-epic, .s-story").every((r) => r.querySelector(".prio-icon, .prio-dot")));
+  const us1Row = rowsOf(".s-story").find((r) => r.dataset.story === "US-1");
+  check("Р5: у истории отметка чужих задач и незагруженных", us1Row.querySelector(".s-foreign")?.textContent.includes("2") && us1Row.querySelector(".s-missing")?.textContent.includes("1"));
+  us1Row.querySelector(".bar.clickable").click();
+  const tipText = document.querySelector(".tooltip.tip-issues")?.textContent || "";
+  check("Р5: в списке задач истории чужие помечены эпиком", tipText.includes(t("story.fromEpic", { key: "EP-Z" })) || tipText.includes(t("story.fromEpic", { key: "E-2" })), tipText.slice(0, 200));
+  document.querySelector(".tooltip .tip-close")?.click();
+  check("Р5: у истории без задач — отрезок по её спринту", !!rowsOf(".s-story").find((r) => r.dataset.story === "US-3").querySelector(".bar.own-sprint"));
+  check("Р5: вехи проекта и эпика на строках", !!rowsOf(".s-project")[0].querySelector(".due-flag.due-planned") && !!rowsOf(".s-epic").find((r) => r.dataset.epic === "E-1").querySelector(".due-flag"));
+  check("Р5: у эпика — «Проект…» и 💬, у проекта «Без проекта» нет «Переименовать…»",
+    rowsOf(".s-epic").every((r) => r.querySelector(".s-proj-btn") && r.querySelector(".cmt-btn")) && !rowsOf(".s-project").at(-1).querySelector(".s-rename") && !!rowsOf(".s-project")[0].querySelector(".s-rename"));
+
+  // Смена проекта (Р3): публикация метки в эпик и перенос локально.
+  rowsOf(".s-epic").find((r) => r.dataset.epic === "E-3").querySelector(".s-proj-btn").click();
+  let pop = document.querySelector(".tooltip.tip-project");
+  check("Р3: в окне — существующие проекты, «Без проекта», поле нового и предупреждение о письме",
+    [...pop.querySelectorAll("option")].map((o) => o.textContent).join() === `САЙТ,Мобилка,${t("story.noProject")}` && pop.querySelector("select").value === "__none__" && pop.textContent.includes(t("story.notifyWarn")));
+  pop.querySelector(".s-proj-new").value = "Новый проект";
+  pop.querySelector(".s-proj-save").click();
+  await new Promise((r) => setTimeout(r, 20));
+  check("Р3: в эпик опубликован комментарий (omg project) и проект сменён локально",
+    JSON.stringify(published) === JSON.stringify([["E-3", "(omg project) Новый проект"]]) && JSON.stringify(set) === JSON.stringify([["set", "E-3", "Новый проект"]]), JSON.stringify([published, set]));
+  published.length = 0;
+  set.length = 0;
+  rowsOf(".s-epic").find((r) => r.dataset.epic === "E-1").querySelector(".s-proj-btn").click();
+  pop = document.querySelector(".tooltip.tip-project");
+  pop.querySelector("select").value = "__none__";
+  failKey = "E-1";
+  pop.querySelector(".s-proj-save").click();
+  await new Promise((r) => setTimeout(r, 20));
+  check("Р3: публикация не прошла — эпик на месте, сообщение в строке статуса", !set.length && notes.at(-1)?.[1] === "error" && notes.at(-1)[0].includes("E-1"), JSON.stringify(notes));
+  failKey = "";
+  pop.querySelector(".s-proj-save").click();
+  await new Promise((r) => setTimeout(r, 20));
+  check("Р3: «Без проекта» — метка без названия", JSON.stringify(published) === JSON.stringify([["E-1", "(omg project)"]]) && set[0]?.[2] === "");
+  published.length = 0;
+  set.length = 0;
+
+  // Переименование (Р3): во все эпики проекта из выборки; частичная ошибка.
+  rowsOf(".s-project")[0].querySelector(".s-rename").click();
+  pop = document.querySelector(".tooltip.tip-project");
+  check("Р3: подтверждение переименования — число эпиков и предупреждение про чужие выборки",
+    pop.textContent.includes(t("story.renameWarn", { n: 2 })) && pop.textContent.includes(t("story.renameScope")));
+  pop.querySelector(".s-proj-new").value = "Портал";
+  failKey = "E-2";
+  pop.querySelector(".s-proj-save").click();
+  await new Promise((r) => setTimeout(r, 30));
+  check("Р3: переименование — метка в каждый эпик; не прошедшие остаются в старом проекте, их ключи в сообщении",
+    published.map((x) => x.join(":")).join() === "E-1:(omg project) Портал" && JSON.stringify(set) === JSON.stringify([["rename", "E-1", "Портал"]]) && notes.at(-1)[1] === "error" && notes.at(-1)[0].includes("E-2"),
+    JSON.stringify([published, set, notes.at(-1)]));
+  failKey = "";
+  box.remove();
+}
+
+// Р4. Заметки (omg comment) к эпику и истории: показ, история, правка.
+{
+  const omgMod = await import("../src/js/omg.js");
+  const stories = await import("../src/js/stories.js");
+  const sv = await import("../src/js/storiesView.js");
+  const ago = (d) => new Date(Date.now() - d * day).toISOString();
+  const rec = { project: null, notes: [{ id: "1", text: "Старая", created: ago(30), author: "Иван" }, { id: "2", text: "Первая строка\nвторая\nтретья", created: ago(20), author: "Пётр" }] };
+  check("Р4: действующая заметка — последняя, история — прежние, новые первыми",
+    omgMod.latestNote(rec).id === "2" && omgMod.noteHistory(rec).map((n) => n.id).join() === "1" && omgMod.latestNote({ notes: [] }) === null && omgMod.noteHistory(null).length === 0);
+  check("Р4: возраст заметки в днях", omgMod.noteAgeDays(rec.notes[1]) === 20 && omgMod.noteAgeDays({ created: "" }) === null);
+  check("Р4: заметка из ответа Jira — автор и дата настоящие",
+    JSON.stringify(omgMod.noteFromComment({ id: 9, body: "(omg comment)\nТекст", created: "2026-09-18T10:00:00Z", author: { displayName: "Анна" } })) === JSON.stringify({ id: "9", text: "Текст", created: "2026-09-18T10:00:00Z", author: "Анна" }) &&
+      omgMod.noteFromComment({ body: "обычный" }) === null && omgMod.noteFromComment(null) === null);
+
+  const EPS = [{ key: "N-E", summary: "Эпик с заметкой", statusName: "В работе", statusCategory: "indeterminate", omg: { project: { name: "Проект", created: ago(1) }, notes: rec.notes } }];
+  const ISS = [
+    { ...mk("N-S1", "N-E", "AAA", "Ivan", 2, 1, "new"), typeName: "User Story", links: [], omg: { project: null, notes: [{ id: "5", text: "Заметка истории", created: ago(2), author: "Ольга" }] } },
+    { ...mk("N-S2", "N-E", "AAA", "Ivan", 2, 1, "new"), typeName: "User Story", links: [] },
+    { ...mk("N-T1", "N-E", "AAA", "Ivan", 2, 3, "new"), typeName: "Task", links: [] }
+  ];
+  const model = stories.buildStoryModel({ epics: EPS, issues: ISS, sprints, boards, storyTypes: ["user story"], excludeTypes: ["user story"], linkType: "Relates" });
+  const box = document.createElement("div");
+  document.body.append(box);
+  const added = [];
+  const toggles = [];
+  const notes = [];
+  const opts = { staleDays: 14, notify: (m, k) => notes.push([m, k]), onToggleNotes: (on) => toggles.push(on), onNoteAdded: async (kind, key, note) => added.push([kind, key, note]) };
+  sv.resetCollapse();
+  sv.render(box, model, opts);
+  box.querySelector(".gantt-bar .link").click(); // развернуть всё
+  const noteRows = [...box.querySelectorAll(".s-note")];
+  check("Р4: строки заметок под эпиком и под каждой историей, у проекта — нет", noteRows.map((r) => r.dataset.note).join() === "N-E,N-S1,N-S2" && !box.querySelector(".s-project + .s-note"), noteRows.map((r) => r.dataset.note).join());
+  const epicNote = noteRows[0];
+  check("Р4: заметка эпика — текст (первые две строки), автор, дата, полный текст при наведении",
+    epicNote.querySelector(".s-note-text").textContent.startsWith("Первая строка") && epicNote.querySelector(".s-note-text").title.includes("третья") && epicNote.querySelector(".s-note-who").textContent.includes("Пётр") &&
+      getComputedStyle(epicNote.querySelector(".s-note-text")).webkitLineClamp === "2");
+  check("Р4: заметка старше порога помечена «заметке N дн.»", epicNote.querySelector(".s-note-stale")?.textContent === t("note.stale", { n: 20 }) && !noteRows[1].querySelector(".s-note-stale"));
+  check("Р4: заметка истории — только у своей истории", noteRows[1].textContent.includes("Заметка истории") && !noteRows[0].textContent.includes("Заметка истории") && !noteRows[2].textContent.includes("Заметка истории"));
+  check("Р4: нет заметки — бледное «Заметки нет · добавить»", noteRows[2].querySelector(".s-note-box.s-note-empty") && noteRows[2].textContent.includes(t("note.none")) && !!noteRows[2].querySelector(".s-note-add"));
+  check("Р4: «История (N)» — только когда есть прежние заметки", epicNote.querySelector(".s-note-hist")?.textContent === t("note.history", { n: 1 }) && !noteRows[1].querySelector(".s-note-hist"));
+  epicNote.querySelector(".s-note-hist").click();
+  check("Р4: в истории — прежние заметки с автором", document.querySelector(".tooltip.tip-note")?.textContent.includes("Старая") && document.querySelector(".tooltip.tip-note").textContent.includes("Иван"));
+  document.querySelector(".tooltip .tip-close").click();
+
+  // Правка: форма с последней заметкой, публикация нового комментария в ту же задачу.
+  const sent = [];
+  let fail = null;
+  sv.api.addComment = async (key, text) => {
+    if (fail) throw fail;
+    sent.push([key, text]);
+    return { id: "77", body: text, created: "2026-09-18T12:00:00.000+0300", author: { displayName: "Менеджер" } };
+  };
+  noteRows[1].querySelector(".s-note-edit").click();
+  let pop = document.querySelector(".tooltip.tip-note");
+  check("Р4: форма заполнена текстом последней заметки и предупреждает о письме", pop.querySelector("textarea").value === "Заметка истории" && pop.textContent.includes(t("note.notifyWarn")));
+  pop.querySelector("textarea").value = "  Новая заметка\nвторая строка  ";
+  pop.querySelector(".s-note-save").click();
+  await new Promise((r) => setTimeout(r, 20));
+  check("Р4: опубликован комментарий (omg comment) в ту же историю; заметка — с автором и датой из ответа Jira",
+    JSON.stringify(sent) === JSON.stringify([["N-S1", "(omg comment)\nНовая заметка\nвторая строка"]]) && added[0]?.[0] === "story" && added[0][1] === "N-S1" && added[0][2].author === "Менеджер" && added[0][2].text === "Новая заметка\nвторая строка",
+    JSON.stringify([sent, added]));
+  noteRows[2].querySelector(".s-note-add").click();
+  pop = document.querySelector(".tooltip.tip-note");
+  pop.querySelector(".s-note-save").click();
+  check("Р4: пустую заметку не публикуем", pop.querySelector(".s-note-msg").textContent === t("note.empty") && sent.length === 1);
+  pop.querySelector("textarea").value = "Текст";
+  fail = Object.assign(new Error("Forbidden"), { code: 403 });
+  pop.querySelector(".s-note-save").click();
+  await new Promise((r) => setTimeout(r, 20));
+  check("Р4: нет права комментировать — понятное сообщение, заметка не добавлена",
+    added.length === 1 && notes.at(-1)?.[1] === "error" && notes.at(-1)[0].includes(t("story.noPermission")), JSON.stringify(notes.at(-1)));
+  fail = null;
+  document.querySelector(".tooltip .tip-close")?.click();
+
+  // Галочка «Заметки».
+  const cbx = box.querySelector(".s-notes-toggle input");
+  check("Р4: галочка «Заметки» на панели, по умолчанию включена", !!cbx && cbx.checked);
+  cbx.checked = false;
+  cbx.dispatchEvent(new Event("change"));
+  sv.render(box, model, { ...opts, showNotes: false });
+  check("Р4: снятая галочка скрывает строки заметок", JSON.stringify(toggles) === "[false]" && !box.querySelector(".s-note") && !box.querySelector(".s-notes-toggle input").checked);
+  box.remove();
 }
 
 const total = document.createElement("div");

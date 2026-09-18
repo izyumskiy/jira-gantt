@@ -54,17 +54,23 @@ export function parseTypeList(text) {
     .filter(Boolean);
 }
 
-// Типы задач, не учитываемые в подсчётах: один набор на всех экранах — список, карточка, прогноз,
-// «Сводка», «По эпикам» и загрузка людей (Р9). s — настройки.
-export function excludedTypes(s) {
-  return parseTypeList(s && s.forecastExcludeTypes);
+// Типы историй (ракурс «Эпик — история», Р2), в нижнем регистре.
+export function storyTypes(s) {
+  return parseTypeList(s && s.storyTypes);
 }
 
-// Те же типы в написании из настройки — для JQL-ссылок в Jira.
+// Типы задач, не учитываемые в подсчётах: один набор на всех экранах — список, карточка, прогноз,
+// «Сводка», «По эпикам» и загрузка людей (Р9). Типы историй входят всегда, даже если их нет в
+// «Типах задач, не учитываемых в подсчётах»: история — контейнер, а не задача (Р2). s — настройки.
+export function excludedTypes(s) {
+  return [...new Set([...parseTypeList(s && s.forecastExcludeTypes), ...storyTypes(s)])];
+}
+
+// Те же типы в написании из настроек — для JQL-ссылок в Jira.
 export function excludedTypeNames(s) {
   const seen = new Set();
   const out = [];
-  for (const x of String((s && s.forecastExcludeTypes) || "").split(/[,;\n]/)) {
+  for (const x of `${(s && s.forecastExcludeTypes) || ""},${(s && s.storyTypes) || ""}`.split(/[,;\n]/)) {
     const name = x.trim();
     if (name && !seen.has(name.toLowerCase())) {
       seen.add(name.toLowerCase());

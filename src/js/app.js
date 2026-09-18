@@ -14,6 +14,9 @@ import * as analytics from "./analytics.js";
 import { runForecast } from "./forecastClient.js";
 import * as summaryView from "./summaryView.js";
 import * as autoSync from "./autoSync.js";
+import * as stories from "./stories.js";
+import * as storiesView from "./storiesView.js";
+import * as omg from "./omg.js";
 
 const $ = (sel) => document.querySelector(sel);
 const state = {
@@ -60,6 +63,7 @@ function showTab(name) {
   $(`#page-${name}`).classList.remove("hidden");
   if (name === "people") drawGantt("assignee", $("#page-people"));
   if (name === "epicPeople") drawGantt("epicPeople", $("#page-epicPeople"));
+  if (name === "epicStories") drawStories();
   if (name === "team") team.render($("#page-team"), { notify: (m) => status(m) }).catch(fail);
   if (name === "summary") drawSummary().catch(fail);
 }
@@ -117,6 +121,7 @@ function redrawActive() {
   if (active === "search") renderStored().then(renderResults).catch(fail);
   if (active === "people") drawGantt("assignee", $("#page-people"));
   if (active === "epicPeople") drawGantt("epicPeople", $("#page-epicPeople"));
+  if (active === "epicStories") drawStories();
   if (active === "team") team.render($("#page-team"), { notify: (m) => status(m) }).catch(fail);
   if (active === "summary") drawSummary().catch(fail);
 }
@@ -1123,6 +1128,7 @@ async function afterForeignSync() {
   await refreshHeader();
   state.shareCache.clear();
   gantt.resetCollapse();
+  storiesView.resetCollapse();
   redrawActive();
   refreshSummaryBadge().catch(() => {});
 }
@@ -1178,15 +1184,18 @@ async function runSync(full) {
       lines.push(t("st.tempoSummary", { teams: result.tempoStats.teams, members: result.tempoStats.members }).replace(/^ · /, ""));
     }
     if (result.othersError) lines.push(result.othersError);
+    if (result.commentsError) lines.push(result.commentsError);
+    if (result.linkedError) lines.push(result.linkedError);
     // Ограничения API: выгрузка прошла, но часть источников закрыта — об этом надо сказать прямо.
     const api = result.apiStats;
     const apiLimited = api && (!api.agile.ok || (!api.tempo.ok && !api.tempo.skipped));
     if (api && !api.agile.ok) lines.push(t("st.apiAgileLimited", { msg: api.agile.msg }));
     if (api && !api.tempo.ok && !api.tempo.skipped) lines.push(t("st.apiTempoLimited", { msg: api.tempo.msg }));
     // Одной строкой, чтобы сводка не перекрывалась ошибкой; ошибка красит всю строку.
-    const isError = (st && st.boardsFailed.length) || result.othersError || apiLimited;
+    const isError = (st && st.boardsFailed.length) || result.othersError || result.commentsError || result.linkedError || apiLimited;
     if (lines.length) status(lines.join(" — "), isError ? "error" : "info");
     gantt.resetCollapse();
+    storiesView.resetCollapse();
     redrawActive();
     refreshSummaryBadge().catch(() => {});
     if (syncChannel) syncChannel.postMessage({ type: "synced" });
@@ -1446,6 +1455,95 @@ async function drawGantt(mode, container) {
   }
 }
 
+// ---------- ракурс «Эпик — история» (Р3, Р5) ----------
+
+// Проект эпика после публикации метки в Jira — сразу и локально, не дожидаясь «Обновить».
+async function setEpicProject(keys, name) {
+  const want = new Set(keys);
+  const rows = (await db.all(db.STORES.epics)).filter((e) => want.has(e.key));
+  const project = name ? { name, created: new Date().toISOString(), author: "" } : null;
+  await db.putAll(
+    db.STORES.epics,
+    rows.map((e) => ({ ...e, omg: { notes: [], ...(e.omg || {}), project } }))
+  );
+}
+
+// Заметка после публикации в Jira — в запись эпика или истории, не дожидаясь «Обновить».
+async function addLocalNote(kind, key, note) {
+  const store = kind === "epic" ? db.STORES.epics : db.STORES.issues;
+  const rec = await db.getOne(store, key);
+  if (!rec) return;
+  const cur = rec.omg || { project: null, notes: [] };
+  await db.putAll(store, [{ ...rec, omg: { ...cur, notes: [...(cur.notes || []), note] } }]);
+}
+
+async function drawStories() {
+  try {
+    const [issues, others, linked, sprints, epics, boards, priorities] = await Promise.all([
+      db.all(db.STORES.issues),
+      db.all(db.STORES.others),
+      db.all(db.STORES.linked),
+      db.all(db.STORES.sprints),
+      db.all(db.STORES.epics),
+      db.all(db.STORES.boards),
+      db.metaGet("priorities", [])
+    ]);
+    // Какие эпики — как на «По эпикам»: галочки, фильтры «Поиска» и фильтр по исполнителю эпика.
+    renderEpicAssigneeFilter(epics, $("#epicAssignee3"));
+    const filter = settings.get().epicAssigneeFilter || "";
+    const visible = epics.filter((e) => !e.hidden);
+    const shown = applyFilter(visible.filter((e) => epicMatchesFilter(e, filter)));
+    renderGanttFilterNote(epics.length - visible.length, $("#ganttFilterNote3"));
+    const s = settings.get();
+    // Задачи — всех выбранных эпиков: задача скрытого эпика, связанная с историей показанного,
+    // остаётся «своей» для плагина, а не пропавшей.
+    const model = stories.buildStoryModel({
+      epics: shown,
+      issues,
+      linked,
+      sprints,
+      boards,
+      priorities: priorities || [],
+      storyTypes: flowlib.storyTypes(s),
+      excludeTypes: flowlib.excludedTypes(s),
+      excludeTypeNames: flowlib.excludedTypeNames(s),
+      linkType: s.storyLinkType,
+      timelineIssues: [...issues, ...others]
+    });
+    const keyOf = (e) => {
+      const p = stories.projectOf(e);
+      return p ? omg.projectKey(p.name) : stories.NO_PROJECT;
+    };
+    storiesView.render($("#epicStoriesChart"), model, {
+      notify: (m, kind) => status(m, kind),
+      onProjectSet: async (key, name) => {
+        await setEpicProject([key], name);
+        status(t("story.projectSaved", { key, name: name || t("story.noProject") }));
+        drawStories();
+      },
+      epicsOfProject: (key) => epics.filter((e) => keyOf(e) === key),
+      onRenamed: async (keys, name) => {
+        await setEpicProject(keys, name);
+        drawStories();
+      },
+      // Заметки (Р4): строки заметок, порог «устарела», новая заметка — сразу и локально.
+      showNotes: s.storyShowNotes !== false,
+      staleDays: s.noteStaleDays,
+      onToggleNotes: async (on) => {
+        await settings.save({ storyShowNotes: on });
+        drawStories();
+      },
+      onNoteAdded: async (kind, key, note) => {
+        await addLocalNote(kind, key, note);
+        status(t("note.saved", { key }));
+        drawStories();
+      }
+    });
+  } catch (e) {
+    fail(e);
+  }
+}
+
 // ---------- настройки ----------
 
 function fillSettingsForm() {
@@ -1466,6 +1564,9 @@ function fillSettingsForm() {
   renderFlowDiag().catch(() => {});
   $("#doneStatuses").value = s.doneStatuses;
   $("#forecastExcludeTypes").value = s.forecastExcludeTypes ?? "";
+  $("#storyTypes").value = s.storyTypes ?? "";
+  $("#storyLinkType").value = s.storyLinkType ?? "";
+  $("#noteStaleDays").value = s.noteStaleDays ?? "";
   $("#infoSystems").value = (s.infoSystems || []).join("\n");
   $("#teamsList").value = (s.teams || []).join("\n");
   $("#lang").value = s.lang;
@@ -1618,6 +1719,9 @@ async function saveSettingsForm() {
     ),
     doneStatuses: $("#doneStatuses").value.trim(),
     forecastExcludeTypes: $("#forecastExcludeTypes").value.trim(),
+    storyTypes: $("#storyTypes").value.trim() || settings.DEFAULTS.storyTypes,
+    storyLinkType: $("#storyLinkType").value.trim() || settings.DEFAULTS.storyLinkType,
+    noteStaleDays: Number($("#noteStaleDays").value) > 0 ? Number($("#noteStaleDays").value) : settings.DEFAULTS.noteStaleDays,
     infoSystems: team.parseSystems($("#infoSystems").value),
     teams: team.parseSystems($("#teamsList").value),
     fields: {
@@ -1774,6 +1878,10 @@ async function boot() {
   $("#epicAssignee2").onchange = async () => {
     await settings.save({ epicAssigneeFilter: $("#epicAssignee2").value });
     drawGantt("epicPeople", $("#page-epicPeople"));
+  };
+  $("#epicAssignee3").onchange = async () => {
+    await settings.save({ epicAssigneeFilter: $("#epicAssignee3").value });
+    drawStories();
   };
   $("#btnRefresh").onclick = () => doSync({ full: false });
   $("#btnReload").onclick = () => doSync({ full: true });

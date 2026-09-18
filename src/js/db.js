@@ -1,6 +1,6 @@
 // Локальное хранилище IndexedDB: эпики, задачи, спринты, служебные ключи.
 const DB_NAME = "jiragantt";
-const DB_VER = 7;
+const DB_VER = 8;
 
 // others — задачи людей из целевых эпиков, лежащие в ДРУГИХ эпиках (текущий и будущие спринты).
 // people — введённые вручную свойства людей (роль, системы, статус); ключ — нормализованное имя.
@@ -13,6 +13,9 @@ export const STORES = {
   people: "people",
   tempo: "tempo", // команды Tempo с составом участников
   flow: "flow", // история завершённых задач людей — для прогноза сроков по потоку
+  // Чужие задачи историй (Р2, Р5): связанные с историями выбранных эпиков, но из других эпиков или
+  // без эпика. Снимок — перечитывается целиком при каждой синхронизации.
+  linked: "linked",
   // История для «Сводки»: состояние эпиков на каждую синхронизацию (30 дней) и на конец недели
   // (104 недели). Удаление эпика из выбора историю не трогает — она нужна трендам и проверке прогнозов.
   syncLog: "syncLog",
@@ -48,6 +51,9 @@ export function open() {
       if (!db.objectStoreNames.contains(STORES.flow)) {
         const f = db.createObjectStore(STORES.flow, { keyPath: "key" });
         f.createIndex("resolved", "resolved", { unique: false });
+      }
+      if (!db.objectStoreNames.contains(STORES.linked)) {
+        db.createObjectStore(STORES.linked, { keyPath: "key" });
       }
       if (!db.objectStoreNames.contains(STORES.tempo)) {
         db.createObjectStore(STORES.tempo, { keyPath: "id" });

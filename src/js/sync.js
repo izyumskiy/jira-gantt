@@ -8,6 +8,8 @@ import { isDoneStatus } from "./status.js";
 import * as analytics from "./analytics.js";
 import * as flowlib from "./flow.js";
 import { runForecast } from "./forecastClient.js";
+import * as omg from "./omg.js";
+import * as prio from "./priority.js";
 
 const DAY_MS = 86400000;
 const SYNC_LOG_DAYS = 30; // журнал синхронизаций — для «что изменилось»
@@ -120,7 +122,7 @@ function epicFieldList() {
   return [
     "summary", "project", "status", "updated", "created", "resolutiondate", "duedate", "labels", "timespent",
     // Оценка самого эпика («экспресс-оценка») — те же поля, что у задач.
-    "timeoriginalestimate", "timeestimate",
+    "timeoriginalestimate", "timeestimate", "priority",
     f.epicAssignee || "assignee", f.epicReporter || "reporter",
     f.plannedStart, f.plannedEnd, f.epicName, f.storyPoints
   ].filter(Boolean);
@@ -196,6 +198,18 @@ function issueSprint(value) {
 
 // ---------- маппинг задачи ----------
 
+// Связи задачи (Р2): тип связи, ключ и тип задачи на том конце. Тип нужен, чтобы не считать задачами
+// истории эпики и другие истории, не догружая их.
+export function linksOf(issuelinks) {
+  const out = [];
+  for (const l of Array.isArray(issuelinks) ? issuelinks : []) {
+    const other = l && (l.outwardIssue || l.inwardIssue);
+    if (!other || !other.key) continue;
+    out.push({ type: (l.type && l.type.name) || "", key: other.key, typeName: other.fields?.issuetype?.name || "" });
+  }
+  return out;
+}
+
 function mapIssue(issue, fields, epicKeyFallback) {
   const f = issue.fields || {};
   const sp = issueSprint(f[fields.sprint]);
@@ -213,6 +227,8 @@ function mapIssue(issue, fields, epicKeyFallback) {
     statusName: f.status?.name || "",
     statusCategory: f.status?.statusCategory?.key || "",
     typeName: f.issuetype?.name || "",
+    priority: prio.fromField(f.priority), // Р6
+    links: linksOf(f.issuelinks), // Р2: задачи истории — по связи с ней
     updated: f.updated || "",
     created: f.created || "", // объём эпика в прошлых неделях — для восстановления истории
     resolved: f.resolutiondate || "", // дата завершения — для потока и диагностики
@@ -274,6 +290,9 @@ function mapEpic(i) {
     statusName: i.fields.status?.name || "",
     statusCategory: i.fields.status?.statusCategory?.key || "",
     statusColor: i.fields.status?.statusCategory?.colorName || "",
+    priority: prio.fromField(i.fields.priority), // Р6
+    // Время изменения: новый комментарий его сдвигает — по нему решаем, перечитывать ли комментарии (Р2).
+    updated: i.fields.updated || "",
     created: dateOf(i.fields.created),
     resolved: i.fields.resolutiondate || "", // дата завершения эпика — для проверки точности прогнозов
     dueDate: dateOf(i.fields.duedate),
@@ -409,6 +428,97 @@ async function loadOthers({ collected, full, fields, fieldList, epicKeys, onProg
     for (const e of await jira.search(`key in (${chunk.join(",")})`, ["summary"])) summaries.set(e.key, e.fields.summary || "");
   }
   for (const it of out) it.epicSummary = summaries.get(it.epicKey) || "";
+  return out;
+}
+
+// ---------- комментарии эпиков и историй, чужие задачи историй (Р2) ----------
+
+// Комментарии по ключам — лёгким запросом пачками по 50; если Jira отдала не все (total больше
+// полученных), остальные догружаются поштучно. Из комментариев оставляем только разобранные метки
+// проекта и заметки (omg.parseComments). Несуществующий ключ роняет весь key in (…) — тогда по одному.
+// Возвращает { map, failed } — failed: ключи, чьи комментарии прочитать не удалось.
+async function collectOmg(keys, onProgress) {
+  const out = new Map();
+  const failed = [];
+  const take = async (it) => {
+    const c = (it.fields && it.fields.comment) || {};
+    let list = Array.isArray(c.comments) ? c.comments : [];
+    if (Number(c.total) > list.length) list = await jira.comments(it.key);
+    out.set(it.key, omg.parseComments(list));
+  };
+  for (let i = 0; i < keys.length; i += 50) {
+    const chunk = keys.slice(i, i + 50);
+    onProgress(t("st.commentsLoading", { n: out.size, total: keys.length }));
+    let rows;
+    try {
+      rows = await jira.search(`key in (${chunk.join(",")})`, ["comment"]);
+    } catch (e) {
+      if (isUnreachable(e)) throw e;
+      rows = [];
+      for (const k of chunk) {
+        try {
+          rows.push(...(await jira.search(`key = ${k}`, ["comment"])));
+        } catch (e2) {
+          if (isUnreachable(e2)) throw e2;
+          failed.push(k);
+        }
+      }
+    }
+    for (const it of rows) {
+      try {
+        await take(it);
+      } catch (e3) {
+        if (isUnreachable(e3)) throw e3;
+        failed.push(it.key);
+      }
+    }
+  }
+  return { map: out, failed };
+}
+
+// Чужие задачи историй: по связям историй (тип связи — из настроек, направление не важно) — задачи,
+// которых нет среди задач выбранных эпиков. Эпики и другие истории на том конце задачами не считаются.
+export function linkedKeysToLoad({ issues, isStory, linkType, epicKeys }) {
+  const lt = String(linkType || "").trim().toLowerCase();
+  const epicSet = new Set(epicKeys);
+  const want = new Set();
+  for (const i of issues.values()) {
+    if (!isStory(i)) continue;
+    for (const l of i.links || []) {
+      if (lt && String(l.type || "").toLowerCase() !== lt) continue;
+      if (issues.has(l.key) || epicSet.has(l.key)) continue;
+      const tn = String(l.typeName || "").toLowerCase();
+      if (tn === "epic" || (tn && isStory({ typeName: l.typeName }))) continue;
+      want.add(l.key);
+    }
+  }
+  return [...want];
+}
+
+async function collectLinked({ keys, isStory, fields, fieldList, onProgress }) {
+  const out = [];
+  const keep = (it) => {
+    const m = mapIssue(it, fields);
+    if (String(m.typeName).toLowerCase() === "epic" || isStory(m)) return;
+    out.push(m);
+  };
+  for (let i = 0; i < keys.length; i += 50) {
+    const chunk = keys.slice(i, i + 50);
+    onProgress(t("st.linkedLoading", { n: out.length, total: keys.length }));
+    try {
+      (await jira.search(`key in (${chunk.join(",")})`, fieldList)).forEach(keep);
+    } catch (e) {
+      if (isUnreachable(e)) throw e;
+      // Нет прав или задача удалена — такие ключи плагин покажет в истории как «не загружена».
+      for (const k of chunk) {
+        try {
+          (await jira.search(`key = ${k}`, fieldList)).forEach(keep);
+        } catch (e2) {
+          if (isUnreachable(e2)) throw e2;
+        }
+      }
+    }
+  }
   return out;
 }
 
@@ -638,7 +748,7 @@ function jqlDate(ms) {
 
 // Версия набора полей задачи в базе. Растёт, когда mapIssue начинает сохранять новые поля:
 // инкрементальное обновление их у старых задач не добавит, поэтому один раз делаем полную выгрузку.
-const ISSUE_SCHEMA = 4;
+const ISSUE_SCHEMA = 5; // 5: приоритет и связи задач (Р2)
 
 // full = true — скачиваем задачи целиком, иначе только изменённые с прошлой синхронизации.
 //
@@ -683,6 +793,8 @@ export async function sync({ full = false, onProgress = () => {} } = {}) {
     "timespent",
     "aggregatetimespent",
     "resolutiondate",
+    "priority",
+    "issuelinks",
     fields.epicLink,
     fields.sprint
   ];
@@ -809,7 +921,82 @@ export async function sync({ full = false, onProgress = () => {} } = {}) {
   // Эпики, которые пользователь успел убрать из выбора во время синхронизации, обратно не пишем;
   // флаг «скрыт» — локальный, из Jira не приходит.
   const stored = new Map((await db.all(db.STORES.epics)).map((e) => [e.key, e]));
-  const epicsToPut = freshEpics.filter((e) => stored.has(e.key)).map((e) => ({ ...e, hidden: !!stored.get(e.key).hidden }));
+
+  // Итоговое состояние задач выбранных эпиков: база без пропавших + собранное.
+  const storedIssues = full ? new Map() : new Map((await db.all(db.STORES.issues)).map((i) => [i.key, i]));
+  const merged = new Map();
+  const gone = new Set(vanished);
+  for (const [k, i] of storedIssues) if (!gone.has(k)) merged.set(k, i);
+  for (const i of collected) merged.set(i.key, i);
+
+  // ---------- Р2: приоритеты, комментарии эпиков и историй, чужие задачи историй ----------
+  const cur = settings.get();
+  const storyT = flowlib.storyTypes(cur);
+  const isStory = (i) => flowlib.isExcludedType(i.typeName, storyT);
+
+  // Порядок приоритетов — для сортировки; не удалось — остаётся прежний.
+  let priorities = null;
+  try {
+    priorities = (await jira.priorities()).map(prio.fromField).filter(Boolean);
+  } catch (e) {
+    if (isUnreachable(e)) throw e;
+    console.warn("[OhMyGant] priorities unavailable", e && e.message ? e.message : e);
+  }
+
+  // Комментарии: у эпиков, изменившихся с прошлой синхронизации (новый комментарий сдвигает
+  // «Обновлено»), и у изменившихся историй; при «Скачать заново» — у всех. Истории без разбора
+  // (например, после смены «Типов историй») тоже дочитываем.
+  const collectedKeys = new Set(collected.map((i) => i.key));
+  const epicNeed = freshEpics
+    .filter((e) => stored.has(e.key))
+    .filter((e) => full || !stored.get(e.key).omg || stored.get(e.key).updated !== e.updated)
+    .map((e) => e.key);
+  const storyNeed = [...merged.values()].filter((i) => isStory(i) && (collectedKeys.has(i.key) || !i.omg)).map((i) => i.key);
+  let omgByKey = new Map();
+  let commentsError = "";
+  try {
+    const got = await collectOmg([...epicNeed, ...storyNeed], onProgress);
+    omgByKey = got.map;
+    if (got.failed.length) commentsError = t("err.comments", { msg: got.failed.slice(0, 10).join(", ") + (got.failed.length > 10 ? " …" : "") });
+  } catch (e) {
+    if (isUnreachable(e)) throw e;
+    commentsError = t("err.comments", { msg: e && e.message ? e.message : String(e) });
+  }
+  // Свежий разбор, иначе — прежний из базы (сбой запроса комментариев не стирает метки и заметки).
+  for (const i of collected) {
+    if (!isStory(i)) continue;
+    const o = omgByKey.get(i.key) || (storedIssues.get(i.key) && storedIssues.get(i.key).omg);
+    if (o) i.omg = o;
+  }
+  const omgPatched = [];
+  for (const k of storyNeed) {
+    if (collectedKeys.has(k) || !omgByKey.has(k)) continue;
+    const rec = { ...merged.get(k), omg: omgByKey.get(k) };
+    merged.set(k, rec);
+    omgPatched.push(rec);
+  }
+  const epicsToPut = freshEpics
+    .filter((e) => stored.has(e.key))
+    .map((e) => {
+      const omgRec = omgByKey.get(e.key) || stored.get(e.key).omg;
+      return { ...e, hidden: !!stored.get(e.key).hidden, ...(omgRec ? { omg: omgRec } : {}) };
+    });
+
+  // Чужие задачи историй — снимок; ошибка ответа не роняет синхронизацию, старый снимок остаётся.
+  let linked = null;
+  let linkedError = "";
+  try {
+    const linkKeys = linkedKeysToLoad({ issues: merged, isStory, linkType: cur.storyLinkType, epicKeys: keys });
+    linked = await collectLinked({ keys: linkKeys, isStory, fields, fieldList, onProgress });
+    for (const issue of linked) {
+      for (const s of issue._sprints || []) if (!sprintMap.has(s.id)) sprintMap.set(s.id, { ...s, source: "issue" });
+      delete issue._sprints;
+    }
+  } catch (e) {
+    if (isUnreachable(e)) throw e;
+    linked = null;
+    linkedError = t("err.linked", { msg: e && e.message ? e.message : String(e) });
+  }
 
   // ---------- состояние эпиков для истории (Б1) ----------
   // Считается по данным, которые сейчас будут записаны: база + собранное − пропавшее. Сбой расчёта
@@ -818,12 +1005,7 @@ export async function sync({ full = false, onProgress = () => {} } = {}) {
   let states = null;
   try {
     onProgress(t("st.forecasting"));
-    const byKey = new Map();
-    if (!full) {
-      const gone = new Set(vanished);
-      for (const i of await db.all(db.STORES.issues)) if (!gone.has(i.key)) byKey.set(i.key, i);
-    }
-    for (const i of collected) byKey.set(i.key, i);
+    const byKey = merged;
     const freshByKey = new Map(epicsToPut.map((e) => [e.key, e]));
     const s = settings.get();
     states = await analytics.portfolioStates({
@@ -847,7 +1029,9 @@ export async function sync({ full = false, onProgress = () => {} } = {}) {
   const ops = [];
   if (full) ops.push({ store: db.STORES.issues, clear: true });
   else if (vanished.length) ops.push({ store: db.STORES.issues, del: vanished });
-  ops.push({ store: db.STORES.issues, put: collected });
+  ops.push({ store: db.STORES.issues, put: [...collected, ...omgPatched] });
+  if (linked) ops.push({ store: db.STORES.linked, clear: true, put: linked });
+  if (priorities && priorities.length) ops.push({ store: db.STORES.meta, put: [{ k: "priorities", v: priorities }] });
   if (!othersError) ops.push({ store: db.STORES.others, clear: true, put: others });
   if (epicsToPut.length) ops.push({ store: db.STORES.epics, put: epicsToPut });
   if (tempo.rows) ops.push({ store: db.STORES.tempo, clear: true, put: tempo.rows });
@@ -894,6 +1078,10 @@ export async function sync({ full = false, onProgress = () => {} } = {}) {
     sprints: sprintMap.size,
     others: others.length,
     othersError,
+    comments: omgByKey.size,
+    commentsError,
+    linked: linked ? linked.length : null,
+    linkedError,
     sprintStats,
     tempoStats: tempo.stats,
     tempoError,

@@ -13,6 +13,8 @@
   --row-h: 34px;
   --name-w: 456px; /* колонка дерева одинакова на обеих вкладках */
   --col-w: 264px;
+  --view-bg: #e9f0fb; /* подложка группы ракурсов */
+  --view-fg: #2b5aa8;
 }
 
 * { box-sizing: border-box; }
@@ -92,6 +94,31 @@ input[type="search"] { min-width: 320px; }
 /* Вкладки-пиктограммы: «Поиск» (лупа), «Сводка» (график), «Настройки» (шестерёнка). */
 .tab.tab-icon { display: inline-flex; align-items: center; gap: 4px; padding-left: 9px; padding-right: 9px; }
 .tab.tab-icon svg { display: block; }
+/* Ракурсы диаграммы (Р1): пиктограммы одной семьёй на общей подложке, отделённые от соседних вкладок. */
+.view-group {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin: 0 7px;
+  padding: 2px;
+  border-radius: 6px;
+  background: var(--view-bg);
+}
+.view-group::before, .view-group::after {
+  content: "";
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  width: 1px;
+  background: var(--line);
+}
+.view-group::before { left: -6px; }
+.view-group::after { right: -6px; }
+.tab[hidden] { display: none; } /* .tab-icon задаёт inline-flex и иначе перебивает hidden */
+.view-group .tab { border-color: transparent; background: transparent; color: var(--view-fg); }
+.view-group .tab:hover { background: var(--panel); }
+.view-group .tab.active { background: var(--panel); border-color: #b3d4ff; color: var(--accent); box-shadow: 0 1px 2px rgba(9, 30, 66, 0.12); }
 .today { align-self: center; margin-left: 10px; padding: 0 6px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .lang { font-size: 18px; line-height: 1; padding: 2px 4px; }
@@ -325,6 +352,42 @@ table.gantt { border-collapse: separate; border-spacing: 0; }
 
 .twisty { border: none; background: none; padding: 0 6px 0 0; color: var(--muted); cursor: pointer; }
 .gnum { color: var(--muted); margin-right: 5px; font-weight: 400; }
+/* Пиктограмма приоритета Jira (Р6); если картинка не грузится — цветной кружок. */
+.prio-icon { width: 16px; height: 16px; vertical-align: -3px; margin-right: 4px; flex: none; }
+.prio-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin: 0 6px 0 3px; vertical-align: -1px; flex: none; }
+/* Ракурс «Эпик — история» (Р5): проект → эпик → история. */
+.indent.indent2 { width: 36px; }
+.s-project > .c-name { font-weight: 700; }
+.g-row.s-epic { background: var(--panel); }
+.g-row.s-epic > .c-name { font-weight: 600; }
+.s-label { margin-left: 2px; }
+.s-meta { margin-left: 8px; color: var(--muted); font-weight: 400; font-size: 11px; }
+.s-story-link { color: var(--text); text-decoration: none; }
+a.s-story-link:hover { color: var(--accent); text-decoration: underline; }
+.s-foreign { margin-left: 6px; padding: 0 5px; border-radius: 8px; background: #eae6ff; color: #403294; font-size: 10px; white-space: nowrap; }
+.s-missing { margin-left: 6px; color: var(--danger); font-size: 11px; cursor: help; }
+.pop-btn.s-proj-btn { margin-left: 6px; padding: 0 6px; font-size: 11px; line-height: 18px; font-weight: 400; }
+.pop-btn.s-rename { margin-left: 4px; font-size: 11px; font-weight: 400; }
+.bar.own-sprint { background: repeating-linear-gradient(135deg, transparent 0 4px, rgba(76, 154, 255, .18) 4px 8px); border: 1px dashed var(--bar); }
+.ti-foreign { font-size: 10px; color: #403294; white-space: nowrap; }
+.tooltip.tip-project { min-width: 300px; max-width: 380px; }
+.tip-project select, .tip-project input { width: 100%; margin: 2px 0 6px; }
+.s-proj-actions { display: flex; justify-content: flex-end; margin: 4px 0; }
+/* Заметки (Р4): строка под эпиком и историей, первые две строки текста. */
+.g-row.s-note { height: 1px; } /* явная высота: иначе строка забирает лишнее место растянутой таблицы; контент её всё равно растянет */
+.g-row.s-note > .c-name { padding-top: 2px; padding-bottom: 4px; background: var(--panel); font-weight: 400; }
+.s-note-wrap { display: flex; align-items: flex-start; }
+.s-note-wrap > .indent { flex: none; }
+.gantt td.s-note-cell { padding-top: 0; padding-bottom: 0; }
+.s-note-box { min-width: 0; flex: 1; font-size: 12px; line-height: 1.35; }
+.s-note-box.s-note-empty { color: var(--muted); opacity: .75; }
+.s-note-text { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; white-space: pre-line; }
+.s-note-meta { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 11px; }
+.s-note-stale { color: #a16207; font-weight: 600; }
+.pop-btn.s-note-edit, .pop-btn.s-note-hist, .pop-btn.s-note-add { padding: 0 3px; font-size: 11px; }
+.s-notes-toggle { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
+.tooltip.tip-note { min-width: 340px; max-width: 460px; }
+.s-note-input { width: 100%; }
 /* Ручной порядок эпиков (Р8): ручка перетаскивания и линия-указатель между эпиками. */
 .drag-handle {
   border: none;
@@ -703,6 +766,8 @@ textarea { font: inherit; padding: 5px 8px; border: 1px solid var(--line); borde
     --accent-soft: #1c3053;
     --bar: #1d4d8f;
     --bar-strong: #2a6fd6;
+    --view-bg: #1c2b40;
+    --view-fg: #85b8ff;
   }
   button { background: #2c333a; }
   button:hover { background: #343b43; }
