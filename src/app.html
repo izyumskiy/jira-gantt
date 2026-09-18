@@ -13,7 +13,7 @@
       </div>
 
       <nav class="tabs">
-        <!-- «Поиск» и «Сводка» — пиктограммами, чтобы экономить место на верхней плашке; подпись — в подсказке -->
+        <!-- «Поиск», «Сводка» и «Настройки» — пиктограммами, чтобы экономить место на верхней плашке; подпись — в подсказке -->
         <button class="tab tab-icon active" data-tab="search" data-i18n-title="tab.search" data-i18n-aria="tab.search">
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
         </button>
@@ -23,7 +23,9 @@
         <button class="tab" data-tab="epicPeople" data-i18n="tab.epicPeople"></button>
         <button class="tab" data-tab="people" data-i18n="tab.people"></button>
         <button class="tab" data-tab="team" data-i18n="tab.team"></button>
-        <button class="tab" data-tab="settings" data-i18n="tab.settings"></button>
+        <button class="tab tab-icon" data-tab="settings" data-i18n-title="tab.settings" data-i18n-aria="tab.settings">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1.08-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+        </button>
         <span id="today" class="today" data-i18n-title="app.today"></span>
       </nav>
 
