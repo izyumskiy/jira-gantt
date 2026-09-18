@@ -949,7 +949,7 @@ await settings.save({ infoSystems: [], fields: { plannedStart: "", plannedEnd: "
   const saved = { fields: { ...settings.get().fields }, useTempoTeams: settings.get().useTempoTeams, flowWeeks: settings.get().flowWeeks, lastSync: settings.get().lastSync };
   await settings.save({ fields: { ...saved.fields, epicLink: "customfield_10100", sprint: "customfield_10101", version: 5 }, useTempoTeams: false, flowWeeks: 4, lastSync: Date.now() - 3600000 });
   await dbm.clearAll();
-  await dbm.metaSet("issueSchema", 5); // текущая схема задач — иначе «Обновить» станет полной выгрузкой
+  await dbm.metaSet("issueSchema", 6); // текущая схема задач — иначе «Обновить» станет полной выгрузкой
   await dbm.putAll(dbm.STORES.epics, [{ key: "EP-A", summary: "Эпик А" }]);
   await dbm.putAll(dbm.STORES.issues, [
     mk("KEEP-1", "EP-A", "AAA", "Ivan", null, 1, "prog"),
@@ -2212,7 +2212,7 @@ check("пиктограмма 💬 есть и на «По эпикам и лю�
     { type: { name: "Blocks" }, inwardIssue: { key: "T-2", fields: { issuetype: { name: "Bug" } } } },
     { type: { name: "Relates" } }
   ]);
-  check("Р2: связи — тип, ключ и тип задачи на том конце, в любую сторону", JSON.stringify(links) === JSON.stringify([{ type: "Relates", key: "T-1", typeName: "Task" }, { type: "Blocks", key: "T-2", typeName: "Bug" }]));
+  check("Р2: связи — тип, подпись, ключ и тип задачи на том конце, в любую сторону", JSON.stringify(links) === JSON.stringify([{ type: "Relates", desc: "", key: "T-1", typeName: "Task" }, { type: "Blocks", desc: "", key: "T-2", typeName: "Bug" }]), JSON.stringify(links));
   const storyIs = (i) => flowlib.isExcludedType(i.typeName, ["user story"]);
   const iss = new Map([
     ["US-1", { key: "US-1", typeName: "User Story", links: [
@@ -2544,7 +2544,7 @@ check("пиктограмма 💬 есть и на «По эпикам и лю�
   settings.MIGRATIONS[1](m1);
   settings.MIGRATIONS[1](m2);
   check("Дефект: прежнее нетронутое умолчание «User Story» поднимается миграцией, своё значение не трогаем",
-    m1.storyTypes === settings.DEFAULTS.storyTypes && m2.storyTypes === "Epic Story" && settings.SCHEMA === 2);
+    m1.storyTypes === settings.DEFAULTS.storyTypes && m2.storyTypes === "Epic Story" && settings.SCHEMA >= 2);
   sv.render(box, hit, { storyTypesText: "Story" });
   box.querySelector(".gantt-bar .link").click();
   check("Дефект: при верном типе история под эпиком, подсказки нет", hit.storyTotal === 1 && ![...box.querySelectorAll(".s-nostories")].some((h) => h.textContent.includes(t("story.noneFound", { setting: "Story" }))) && box.querySelector('.s-story[data-story="D-1"]'));
@@ -2629,11 +2629,11 @@ check("пиктограмма 💬 есть и на «По эпикам и лю�
   document.body.append(box);
   const chosen = [];
   sv.resetCollapse();
-  sv.render(box, miss, { storyLinkText: "Relates", onSetLinkType: (n) => chosen.push(n) });
+  sv.render(box, miss, { storyLinkText: "Relates", onAddLinkType: (n) => chosen.push(n) });
   const hint = box.querySelector(".s-nostories");
   check("Дефект связей: подсказка — какие связи у историй и что в настройке", !!hint && hint.textContent.includes("Связано (2)") && hint.textContent.includes("Relates"), hint && hint.textContent);
   hint.querySelector(".s-add-type").click();
-  check("Дефект связей: кнопка «Считать связью» выбирает связь", JSON.stringify(chosen) === '["Связано"]');
+  check("Дефект связей: кнопка «Добавить связь» добавляет связь", JSON.stringify(chosen) === '["Связано"]');
   const hit = stories.buildStoryModel({ ...opt, linkType: "Связано" });
   sv.render(box, hit, { storyLinkText: "Связано" });
   box.querySelector(".gantt-bar .link").click();
@@ -2681,6 +2681,35 @@ check("пиктограмма 💬 есть и на «По эпикам и лю�
     !!grp && !!grp.querySelector("#btnRefresh svg") && !grp.querySelector("#btnRefresh").dataset.i18n && grp.querySelector("#btnRefresh").dataset.i18nTitle === "toolbar.refreshHint" &&
       grp.querySelector("#btnSyncMenu[aria-haspopup='menu']") && grp.querySelector("#syncMenu[hidden] #btnRefreshItem") && grp.querySelector("#syncMenu #btnReload") &&
       doc.querySelectorAll(".toolbar > button").length === 0);
+}
+
+// Задачи привязаны к истории разными связями: «relates to» и «is subtask of».
+{
+  const stories = await import("../src/js/stories.js");
+  const syncMod = await import("../src/js/sync.js");
+  const m = flowlib.linkMatcher("Relates, is subtask of");
+  check("Связи: подходят по названию типа и по подписи, без учёта регистра; пустая настройка — любая",
+    m({ type: "Relates" }) && m({ type: "Subtask", desc: "Is Subtask Of" }) && !m({ type: "Blocks", desc: "blocks" }) && flowlib.linkMatcher("")({ type: "X" }));
+  const ls = syncMod.linksOf([
+    { type: { name: "Subtask", inward: "is subtask of", outward: "has subtask" }, inwardIssue: { key: "DP-1", fields: { issuetype: { name: "Задача" } } } },
+    { type: { name: "Relates", inward: "relates to", outward: "relates to" }, outwardIssue: { key: "AO-1", fields: { issuetype: { name: "Задача" } } } }
+  ]);
+  check("Связи: подпись берётся с нужной стороны связи", ls[0].desc === "is subtask of" && ls[1].desc === "relates to", JSON.stringify(ls));
+  const EPS = [{ key: "S-E", summary: "Эпик", statusName: "В работе", statusCategory: "indeterminate" }];
+  const ISS = [
+    { ...mk("S-S", "S-E", "AAA", "Ivan", null, 0, "new"), typeName: "История", links: ls },
+    { ...mk("DP-1", "S-E", "AAA", "Ivan", 2, 4, "new"), typeName: "Задача", links: [] },
+    { ...mk("AO-1", "S-E", "AAA", "Ivan", 2, 2, "new"), typeName: "Задача", links: [] }
+  ];
+  const model = stories.buildStoryModel({ epics: EPS, issues: ISS, sprints, boards, storyTypes: ["история"], excludeTypes: ["история"], linkType: settings.DEFAULTS.storyLinkType });
+  check("Связи: по умолчанию у истории задачи и по «relates to», и по «is subtask of»", model.projects[0].epics[0].stories[0].count === 2);
+  check("Связи: догружаются чужие задачи и по «is subtask of»",
+    syncMod.linkedKeysToLoad({ issues: new Map([["S-S", ISS[0]]]), isStory: (i) => i.typeName === "История", linkType: "Relates, is subtask of", epicKeys: ["S-E"] }).sort().join() === "AO-1,DP-1");
+  const mg = { storyLinkType: "Relates" };
+  const mine = { storyLinkType: "Связано" };
+  settings.MIGRATIONS[2](mg);
+  settings.MIGRATIONS[2](mine);
+  check("Связи: нетронутое «Relates» поднимается миграцией до «Relates, is subtask of», своё не трогаем", mg.storyLinkType === "Relates, is subtask of" && mine.storyLinkType === "Связано" && settings.SCHEMA === 3);
 }
 
 const total = document.createElement("div");

@@ -136,10 +136,10 @@ export function render(container, model, opts = {}) {
     hint.append(el("strong", null, t("story.noTasks", { setting: opts.storyLinkText || "—" })), " ");
     hint.append(types.length ? t("story.noTasksTypes", { types: types.map((x) => `${x.name} (${x.n})`).join(", ") }) : t("story.noLinks"));
     for (const x of types) {
-      if (!opts.onSetLinkType || x.name === "—") continue;
+      if (!opts.onAddLinkType || x.name === "—") continue;
       const b = el("button", "primary s-add-type", t("story.useLink", { name: x.name }));
       b.type = "button";
-      b.onclick = () => opts.onSetLinkType(x.name);
+      b.onclick = () => opts.onAddLinkType(x.name);
       hint.append(" ", b);
     }
     container.append(hint);

@@ -80,6 +80,16 @@ export function excludedTypeNames(s) {
   return out;
 }
 
+// Связи задачи с историей (Р2): список из настройки «Связь задачи с историей» через запятую.
+// Связь подходит, если совпало название её типа в Jira («Relates») или подпись, которую Jira
+// показывает на странице задачи («relates to», «is subtask of»), — без учёта регистра.
+// Пустая настройка — подходит любая связь.
+export function linkMatcher(setting) {
+  const list = parseTypeList(setting);
+  if (!list.length) return () => true;
+  return (l) => !!l && (list.includes(String(l.type || "").trim().toLowerCase()) || list.includes(String(l.desc || "").trim().toLowerCase()));
+}
+
 export function isExcludedType(typeName, excluded) {
   return !!typeName && excluded.includes(String(typeName).trim().toLowerCase());
 }

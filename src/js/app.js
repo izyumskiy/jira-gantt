@@ -1548,10 +1548,12 @@ async function drawStories() {
       },
       storyTypesText: s.storyTypes,
       storyLinkText: s.storyLinkType,
-      // Кнопка из подсказки «у историй нет задач»: выбрать связь задачи с историей.
-      onSetLinkType: async (name) => {
-        await settings.save({ storyLinkType: name });
-        if ($("#storyLinkType")) $("#storyLinkType").value = name;
+      // Кнопка из подсказки «у историй нет задач»: добавить связь в «Связь задачи с историей».
+      onAddLinkType: async (name) => {
+        const list = String(settings.get().storyLinkType || "").split(/[,;\n]/).map((x) => x.trim()).filter(Boolean);
+        if (!list.some((x) => x.toLowerCase() === name.toLowerCase())) list.push(name);
+        await settings.save({ storyLinkType: list.join(", ") });
+        if ($("#storyLinkType")) $("#storyLinkType").value = settings.get().storyLinkType;
         status(t("story.linkSet", { name }));
         drawStories();
       },
