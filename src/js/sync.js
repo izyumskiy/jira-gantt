@@ -3,6 +3,7 @@ import * as jira from "./jira.js";
 import * as db from "./db.js";
 import * as settings from "./settings.js";
 import { t } from "./i18n.js";
+import { isDoneStatus } from "./status.js";
 
 // ---------- определение кастомных полей ----------
 
@@ -315,12 +316,16 @@ async function loadOthers({ collected, full, fields, fieldList, epicKeys, onProg
   const out = [];
   for (let i = 0; i < list.length; i += 25) {
     const chunk = list.slice(i, i + 25).map((l) => `"${jira.escapeJql(l)}"`).join(",");
+    // Канбан-задачи (без спринта, в категории «В работе») тоже нужны: они ложатся в текущую секцию.
     const jql =
-      `assignee in (${chunk}) AND (sprint in openSprints() OR sprint in futureSprints())${notTarget} ORDER BY key ASC`;
+      `assignee in (${chunk}) AND (sprint in openSprints() OR sprint in futureSprints() OR (sprint is EMPTY AND statusCategory = indeterminate))${notTarget} ORDER BY key ASC`;
     const issues = await jira.search(jql, fieldList, (n) => onProgress(t("st.othersLoading", { n: out.length + n })));
     for (const it of issues) {
       const m = mapIssue(it, fields);
-      if (!targetKeys.has(m.epicKey)) out.push(m);
+      if (targetKeys.has(m.epicKey)) continue;
+      // Без спринта и готова по правилу плагина (On Prod и т.п.) — не текущая работа.
+      if (m.sprintId == null && isDoneStatus(m.statusName, m.statusCategory)) continue;
+      out.push(m);
     }
   }
 

@@ -610,6 +610,56 @@ gantt.resetCollapse();
 }
 g3.remove();
 
+// Д1. задачи вне спринта, которые в работе (канбан), — в текущей секции
+{
+  const kb = [
+    mk("K-1", "EP-1", "AAA", "Anna", null, 4, "prog"), // в работе без спринта → текущая секция
+    mk("K-2", "EP-1", "AAA", "Anna", null, 2, "new"), // к выполнению → бэклог, как раньше
+    mk("K-3", "EP-1", "AAA", "Anna", null, 3, "prod"), // On Prod: категория «В работе», но готова
+    { ...mk("K-4", "EP-1", "AAA", "Anna", null, 5, "prog"), statusName: "Анализ" } // нестандартный статус категории «В работе»
+  ];
+  check("isOffSprintWork: в работе без спринта — да, On Prod и к выполнению — нет",
+    agg.isOffSprintWork(kb[0]) && agg.isOffSprintWork(kb[3]) && !agg.isOffSprintWork(kb[1]) && !agg.isOffSprintWork(kb[2]) &&
+    !agg.isOffSprintWork(mk("K-5", "EP-1", "AAA", "Anna", 2, 1, "prog")));
+  const km = agg.buildModel({ issues: kb, sprints, epics, boards, mode: "epicPeople" });
+  const kep = km.groups.find((g) => g.key === "EP-1");
+  const kcur = kep.cells.get(km.currentId);
+  check("в работе без спринта — в текущей секции, отрезком «Вне спринта» (и нестандартный статус тоже)",
+    km.currentId === "sec:0" && kcur?.count === 2 && kcur.bySprint.get(agg.OFF_SPRINT_ID)?.count === 2,
+    JSON.stringify({ cur: km.currentId, n: kcur?.count }));
+  check("к выполнению без спринта — в бэклоге; счётчик «без спринта» без задач в работе",
+    kep.backlog.count === 1 && kep.backlog.issues[0].key === "K-2" && kep.noSprint === 1, `${kep.backlog.count} / ${kep.noSprint}`);
+  check("On Prod без спринта не попадает ни в секцию, ни в бэклог",
+    ![...kcur.issues, ...kep.backlog.issues].some((i) => i.key === "K-3"));
+  check("задачи вне спринта помечены для списка, задачи бэклога — нет",
+    kcur.issues.every((i) => i.offSprint) && !kep.backlog.issues[0].offSprint);
+
+  const kOther = [{ ...mk("K-9", "EP-9", "XXX", "Anna", null, 6, "prog"), epicSummary: "Чужой" }];
+  const kp = agg.buildModel({ issues: kb, others: kOther, sprints, epics, boards, mode: "assignee" });
+  const anna = kp.groups.find((g) => g.key === "anna");
+  check("канбан-задача в чужом эпике — в «Прочих» текущей секции",
+    anna?.otherCells.get(kp.currentId)?.count === 1 && anna.projects.some((pr) => pr.key === "EP-9"), JSON.stringify(anna?.projects.map((pr) => pr.key)));
+  const kload = agg.personLoad(kp, kb, kOther);
+  check("загрузка текущей секции включает задачи вне спринта, по остатку",
+    kload.byName.get("anna")?.get(kp.currentId) === 15 * H, String((kload.byName.get("anna")?.get(kp.currentId) || 0) / H));
+  check("загрузка по остатку: доделанная задача с нулевым остатком не грузит",
+    agg.personLoad(kp, [{ ...mk("K-6", "EP-1", "AAA", "Boris", 2, 8, "prog"), remainingEstimate: 0 }], []).byName.get("boris")?.get(kp.currentId) === 0);
+
+  const gk = document.createElement("div");
+  document.body.append(gk);
+  renderOpen(gk, km, { mode: "epicPeople" });
+  const offBars = [...gk.querySelectorAll(".bar.nested.off-sprint")];
+  check("в ячейке текущей секции — отрезок «Вне спринта»", offBars.length === 1 && offBars[0].textContent.includes(t("gantt.offSprint")),
+    String(offBars.length));
+  offBars[0].click();
+  check("во всплывающем списке у таких задач — пиктограмма «вне спринта» с подсказкой",
+    document.querySelectorAll(".tip-issues .ti-offsprint").length === 2 &&
+      document.querySelector(".tip-issues .ti-offsprint").title === t("gantt.offSprintHint"));
+  document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+  gk.remove();
+  gantt.resetCollapse();
+}
+
 // 4d. загрузчик конфигурации — разбор и экспорт
 const pc = parseConfig(JSON.stringify({ baseUrl: "https://jira.example.local/", fields: { plannedStart: "customfield_10407" }, infoSystems: "1С CRM\nСБИС", epics: [" prj-1 ", "PRJ-2"], people: [{ name: "Иван" }, { bad: 1 }] }));
 check("parseConfig: поля, системы строкой, эпики с обрезкой, люди без имени отброшены",

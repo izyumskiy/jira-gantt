@@ -568,6 +568,12 @@ table.gantt { border-collapse: separate; border-spacing: 0; }
 }
 .bar.nested::before { opacity: .45; }
 .bar-sprint { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--muted); }
+/* Задачи вне спринта в работе (канбан): серый отрезок в штриховку — у них нет доски и цвета команды. */
+.bar.nested.off-sprint {
+  --tc: #a5adba;
+  background-image: repeating-linear-gradient(135deg, transparent 0 4px, rgba(107, 119, 140, .14) 4px 8px);
+}
+.issues-table .ti-offsprint { margin-left: 4px; color: #ff8b00; cursor: help; }
 .plabel-others { color: var(--muted); font-style: italic; }
 
 .g-row.team { background: color-mix(in srgb, var(--accent) 6%, var(--panel)); }
