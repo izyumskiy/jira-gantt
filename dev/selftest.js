@@ -15,6 +15,7 @@ import * as gantt from "../src/js/gantt.js";
 import { parseSprint, datesFromName, checkApis, searchEpics, epicKeysFrom, sync as runSync, backfillHistory } from "../src/js/sync.js";
 import * as jiraApi from "../src/js/jira.js";
 import * as analytics from "../src/js/analytics.js";
+import * as summary from "../src/js/summary.js";
 import { runForecast, workerAvailable } from "../src/js/forecastClient.js";
 import { classify, isDoneStatus } from "../src/js/status.js";
 import { collectPeople, mergeProfiles, parseSystems, systemsList, teamsList, normName, roleSummary } from "../src/js/team.js";
@@ -1135,6 +1136,100 @@ await settings.save({ infoSystems: [], fields: { plannedStart: "", plannedEnd: "
   check("Б3: версия восстановления отмечена", (await dbm.metaGet("backfillVersion", 0)) === 1);
   await settings.save(saved);
   await dbm.clearAll();
+}
+
+// Б4. правила сигналов: срабатывают на пороге и не срабатывают чуть ниже
+{
+  const DAYMS = 86400000;
+  const now = Date.now();
+  const th = { ...settings.DEFAULTS.summary };
+  const d = (days) => { const x = new Date(now + days * DAYMS); const p2 = (n) => String(n).padStart(2, "0"); return `${x.getFullYear()}-${p2(x.getMonth() + 1)}-${p2(x.getDate())}`; };
+  const stOf = (o = {}) => ({ epicKey: "EP-1", statusName: "В работе", statusCategory: "indeterminate", dueDate: d(90), total: 100, done: 40, remaining: 60, estTotal: 0, estDone: 0, carriedOver: 0, p50: d(40), p85: d(50), chance: 0.95, buffer: 5, reason: "", historyWeeks: 30, teams: [], ...o });
+  const run = (cur, base = null, extra = {}) => summary.computeSignals({ current: new Map(Object.entries(cur)), base: base ? new Map(Object.entries(base)) : null, thresholds: th, now, ...extra });
+  const has = (sigs, type, epicKey) => sigs.some((x) => x.type === type && (!epicKey || x.epicKey === epicKey));
+  const recent = [mk("RC-1", "EP-1", "AAA", "Ivan", 2, 1, "done")].map((i) => ({ ...i, resolved: new Date(now - 2 * DAYMS).toISOString() }));
+
+  check("Б4: цвет — зелёный от 85%, жёлтый от 50%, красный ниже или срок прошёл",
+    summary.colorOf(stOf({ chance: 0.85 }), th, now) === "green" && summary.colorOf(stOf({ chance: 0.84 }), th, now) === "yellow" &&
+      summary.colorOf(stOf({ chance: 0.5 }), th, now) === "yellow" && summary.colorOf(stOf({ chance: 0.49 }), th, now) === "red" &&
+      summary.colorOf(stOf({ dueDate: d(-2) }), th, now) === "red" && summary.colorOf(stOf({ dueDate: "" }), th, now) === "nodue" &&
+      summary.colorOf(stOf({ statusCategory: "done" }), th, now) === "done");
+
+  const base1 = { "EP-1": stOf() };
+  check("Б4: рост объёма на 5 задач — сигнал, на 4 (из 100) — нет",
+    has(run({ "EP-1": stOf({ total: 105, remaining: 65 }) }, base1, { issues: recent }), "scopeUp") && !has(run({ "EP-1": stOf({ total: 104, remaining: 64 }) }, base1, { issues: recent }), "scopeUp"));
+  check("Б4: рост объёма на 10% у маленького эпика", has(run({ "EP-1": stOf({ total: 11 }) }, { "EP-1": stOf({ total: 10 }) }, { issues: recent }), "scopeUp"));
+  check("Б4: сокращение объёма — информация", run({ "EP-1": stOf({ total: 94 }) }, base1, { issues: recent }).some((x) => x.type === "scopeDown" && x.severity === "info"));
+  check("Б4: сдвиг прогноза на 7 дней позже — внимание, на 6 — нет",
+    run({ "EP-1": stOf({ p85: d(57) }) }, base1, { issues: recent }).some((x) => x.type === "shiftLater" && x.severity === "warning" && x.params.days === 7) &&
+      !has(run({ "EP-1": stOf({ p85: d(56) }) }, base1, { issues: recent }), "shiftLater"));
+  check("Б4: прогноз раньше на неделю — информация", run({ "EP-1": stOf({ p85: d(43) }) }, base1, { issues: recent }).some((x) => x.type === "shiftEarlier" && x.severity === "info"));
+  check("Б4: изменён срок исполнения", has(run({ "EP-1": stOf({ dueDate: d(100) }) }, base1, { issues: recent }), "dueChanged"));
+  check("Б4: новые повторные переносы и прогресс", has(run({ "EP-1": stOf({ carriedOver: 2, done: 45 }) }, base1, { issues: recent }), "carryNew") && has(run({ "EP-1": stOf({ done: 45 }) }, base1, { issues: recent }), "progress"));
+  check("Б4: эпик добавлен / завершён", has(run({ "EP-1": stOf(), "EP-2": stOf({ epicKey: "EP-2" }) }, base1, { issues: recent }), "epicAdded", "EP-2") && has(run({ "EP-1": stOf({ statusCategory: "done", statusName: "Готово" }) }, base1), "epicDone"));
+  check("Б4: без базы блока «что изменилось» нет", !run({ "EP-1": stOf({ total: 200 }) }, null, { issues: recent }).some((x) => x.group === "changes"));
+
+  check("Б4: срок прошёл — критично", run({ "EP-1": stOf({ dueDate: d(-3) }) }, null, { issues: recent }).some((x) => x.type === "overdue" && x.severity === "critical" && x.params.days >= 2));
+  check("Б4: шанс 49% — критично, 50% — внимание, 85% — ничего",
+    has(run({ "EP-1": stOf({ chance: 0.49 }) }, null, { issues: recent }), "lowChance") && has(run({ "EP-1": stOf({ chance: 0.5 }) }, null, { issues: recent }), "riskChance") &&
+      !has(run({ "EP-1": stOf({ chance: 0.85 }) }, null, { issues: recent }), "riskChance"));
+  const wk = (b) => ({ buffer: b });
+  check("Б4: запас снижался 3 недели подряд — «запас тает»; с плато — нет",
+    has(run({ "EP-1": stOf() }, null, { issues: recent, weekly: new Map([["EP-1", [wk(5), wk(4), wk(3), wk(2.5)]]]) }), "melting") &&
+      !has(run({ "EP-1": stOf() }, null, { issues: recent, weekly: new Map([["EP-1", [wk(5), wk(4), wk(4), wk(3)]]]) }), "melting"));
+  check("Б4: готово 90% — близко к завершению, 89% при далёком прогнозе — нет",
+    has(run({ "EP-1": stOf({ done: 90, remaining: 10 }) }, null, { issues: recent }), "near") && !has(run({ "EP-1": stOf({ done: 89, remaining: 11 }) }, null, { issues: recent }), "near"));
+  check("Б4: прогноз 85% в пределах 2 недель — близко к завершению", has(run({ "EP-1": stOf({ p85: d(10) }) }, null, { issues: recent }), "near"));
+  check("Б4: 3 недели без закрытий: при 90% — «застрял на финише», при 40% — «застой»",
+    has(run({ "EP-1": stOf({ done: 90, remaining: 10 }) }), "stuckFinish") && has(run({ "EP-1": stOf() }), "stall") && !has(run({ "EP-1": stOf() }, null, { issues: recent }), "stall"));
+  check("Б4: хронические переносы", has(run({ "EP-1": stOf({ carriedOver: 3 }) }, null, { issues: recent }), "chronicCarry"));
+
+  const H = 3600;
+  const loadFix = { capacity: 80 * H, sections: [{ id: "sec:0", caption: "текущий" }, { id: "sec:1", caption: "+1" }], byName: new Map([["ivan", new Map([["sec:0", 100 * H]])], ["olga", new Map([["sec:0", 80 * H]])]]) };
+  const people = [mk("P-1", "EP-1", "AAA", "Ivan", 2, 1, "prog"), mk("P-2", "EP-1", "AAA", "Olga", 2, 1, "prog")];
+  const ov = run({ "EP-1": stOf() }, null, { issues: [...recent, ...people], load: loadFix }).filter((x) => x.type === "overload");
+  check("Б4: перегруз — по имени, только выше 100%", ov.length === 1 && ov[0].person === "Ivan" && ov[0].params.pct === 125, JSON.stringify(ov.map((x) => x.params)));
+
+  const teamQA = { id: "m:QA", name: "QA" };
+  const teamOf = (p) => (["petr", "Petr"].includes(p.name) || p.login === "petr" ? teamQA : null);
+  const idleLoad = { capacity: 80 * H, sections: [{ id: "sec:0", caption: "текущий" }, { id: "sec:1", caption: "+1" }], byName: new Map([["petr", new Map([["sec:0", 20 * H]])]]) };
+  const backlogTask = mk("BL-1", "EP-1", "AAA", "Petr", null, 4, "new");
+  check("Б4: простой рядом с опозданием: команда загружена на 13%, у жёлтого эпика её задачи в бэклоге",
+    run({ "EP-1": stOf({ chance: 0.6 }) }, null, { issues: [...recent, backlogTask], load: idleLoad, teamOf, teamSize: () => 1 }).some((x) => x.type === "idleNearLate" && x.params.team === "QA" && x.params.pct === 13) &&
+      !has(run({ "EP-1": stOf({ chance: 0.95 }) }, null, { issues: [...recent, backlogTask], load: idleLoad, teamOf, teamSize: () => 1 }), "idleNearLate"));
+
+  const flowSpread = [];
+  for (let w = 0; w < 4; w++) for (let e = 0; e < 5; e++) flowSpread.push({ key: `SP-${w}-${e}`, resolved: new Date(now - (w * 7 + 1) * DAYMS).toISOString(), assigneeLogin: "petr", assigneeName: "Petr", epicKey: `EP-S${e}` });
+  check("Б4: распыление: 5 задач в неделю на 5 эпиков (1 на эпик) — сигнал",
+    run({ "EP-1": stOf() }, null, { issues: recent, flowRows: flowSpread, teamOf }).some((x) => x.type === "spread" && x.params.epics === 5 && x.params.perEpic === 1) &&
+      !has(run({ "EP-1": stOf() }, null, { issues: recent, flowRows: flowSpread, teamOf, thresholds: { ...th, spreadFlow: 1 } }), "spread"));
+
+  const tm = (last) => [{ id: "t:1", name: "1C", share: 0.3, last }];
+  check("Б4: узкое место — команда замыкает ≥50% прогонов в двух эпиках",
+    has(run({ "EP-1": stOf({ teams: tm(60) }), "EP-2": stOf({ epicKey: "EP-2", teams: tm(50) }) }, null, { issues: recent }), "bottleneck") &&
+      !has(run({ "EP-1": stOf({ teams: tm(60) }), "EP-2": stOf({ epicKey: "EP-2", teams: tm(49) }) }, null, { issues: recent }), "bottleneck"));
+
+  const firedModel = { columns: [{ id: "sec:0", sprints: [{ id: 2 }] }], groups: [] };
+  const firedIssues = [mk("FI-1", "EP-1", "AAA", "Ivan", 2, 1, "prog"), mk("FI-2", "EP-1", "AAA", "Ivan", null, 1, "new"), mk("FI-3", "EP-1", "AAA", "Ivan", 1, 1, "prog")];
+  check("Б4: задачи у уволенных — критично, закрытые спринты не считаются",
+    run({ "EP-1": stOf() }, null, { issues: [...recent, ...firedIssues], profiles: [{ name: "ivan", status: "fired" }], model: firedModel }).some((x) => x.type === "firedTasks" && x.severity === "critical" && x.params.n === 2));
+  check("Б4: задачи без исполнителя в текущем спринте",
+    run({ "EP-1": stOf() }, null, { issues: [...recent, { ...mk("UA-1", "EP-1", "AAA", null, 2, 1, "prog"), assigneeKey: "" }], model: firedModel }).some((x) => x.type === "unassigned" && x.params.n === 1));
+
+  const q = run({ "EP-1": stOf({ dueDate: "", reason: "short", historyWeeks: 3, p85: "" }) }, null, {
+    issues: [...recent, mk("NE-1", "EP-1", "AAA", "Ivan", 2, 0, "prog"), mk("NE-2", "EP-1", "AAA", "Ivan", 2, 0, "prog")],
+    model: { columns: [], groups: [{ label: "Anna", team: { id: "" } }] },
+    lastSync: now - 10 * DAYMS,
+    apiLimited: true
+  });
+  check("Б4: качество данных — нет срока, нет оценок, мало истории, люди без команды, устаревшие данные, ограничения API",
+    ["noDue", "noEstimate", "shortHistory", "noTeam", "stale", "apiLimited"].every((type) => has(q, type)), q.map((x) => x.type).join(","));
+
+  const many = run({ "EP-1": stOf({ dueDate: d(-5) }), "EP-2": stOf({ epicKey: "EP-2", chance: 0.6 }), "EP-3": stOf({ epicKey: "EP-3", chance: 0.1 }) }, null, { issues: recent });
+  const top = summary.attention(many, 2);
+  check("Б4: «Требует внимания» — сначала критичные, по величине, без информационных, не больше лимита",
+    top.length === 2 && top.every((x) => x.severity === "critical") && summary.attention(many, 10).every((x) => x.severity !== "info"), top.map((x) => x.type).join(","));
+  check("Б4: у сигнала устойчивый ключ", many.every((x) => typeof x.id === "string" && x.id.startsWith(x.type)));
 }
 
 // А1. модуль расчётов: одни и те же числа для списка, карточки и сводки
