@@ -61,6 +61,13 @@ export function isDone(issue) {
   return isDoneStatus(issue.statusName, issue.statusCategory);
 }
 
+// Дата закрытия задачи: дата завершения; если задача готова по статусу, а даты нет (On Prod вне
+// категории «Готово» и т.п.), — дата последнего обновления. Незакрытая — "".
+export function closedAt(issue) {
+  if (issue.resolved && isDone(issue)) return issue.resolved;
+  return isDone(issue) ? issue.updated || issue.resolved || "" : "";
+}
+
 // ---------- спринты и время ----------
 
 const DAY = 86400000;

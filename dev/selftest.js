@@ -927,6 +927,68 @@ await settings.save({ infoSystems: [], fields: { plannedStart: "", plannedEnd: "
   await dbm.clearAll();
 }
 
+// Б0. подготовка данных: дата создания, число спринтов, дата завершения эпика, пропавшие задачи
+{
+  check("Б0: дата закрытия — дата завершения, у готовых без неё — дата обновления, у открытых — пусто",
+    agg.closedAt({ ...mk("Z-1", "EP-1", "AAA", "Ivan", 2, 1, "done"), resolved: "2026-05-01", updated: "2026-06-01" }) === "2026-05-01" &&
+      agg.closedAt({ ...mk("Z-2", "EP-1", "AAA", "Ivan", 2, 1, "prod"), resolved: "", updated: "2026-06-02" }) === "2026-06-02" &&
+      agg.closedAt({ ...mk("Z-3", "EP-1", "AAA", "Ivan", 2, 1, "prog"), resolved: "", updated: "2026-06-03" }) === "");
+
+  const orig = window.fetch;
+  const saved = { fields: { ...settings.get().fields }, useTempoTeams: settings.get().useTempoTeams, flowWeeks: settings.get().flowWeeks, lastSync: settings.get().lastSync };
+  await settings.save({ fields: { ...saved.fields, epicLink: "customfield_10100", sprint: "customfield_10101", version: 5 }, useTempoTeams: false, flowWeeks: 4, lastSync: Date.now() - 3600000 });
+  await dbm.clearAll();
+  await dbm.metaSet("issueSchema", 4);
+  await dbm.putAll(dbm.STORES.epics, [{ key: "EP-A", summary: "Эпик А" }]);
+  await dbm.putAll(dbm.STORES.issues, [
+    mk("KEEP-1", "EP-A", "AAA", "Ivan", null, 1, "prog"),
+    mk("GONE-1", "EP-A", "AAA", "Ivan", null, 1, "prog"),
+    mk("ELSE-1", "EP-Z", "AAA", "Ivan", null, 1, "prog")
+  ]);
+  const json = (o, status = 200) => new Response(JSON.stringify(o), { status, headers: { "Content-Type": "application/json" } });
+  const status = { name: "В работе", statusCategory: { key: "indeterminate" } };
+  const fieldsOf = (extra = {}) => ({ summary: "Задача", project: { key: "AAA" }, assignee: { name: "ivan", key: "ivan", displayName: "Ivan" }, status, issuetype: { name: "Task" }, updated: new Date().toISOString(), customfield_10100: "EP-A", ...extra });
+  let keysFail = false;
+  window.fetch = async (url, opt = {}) => {
+    const u = String(url);
+    const b = opt.body ? JSON.parse(opt.body) : {};
+    if (u.includes("/rest/api/2/myself")) return json({ name: "ivan" });
+    if (u.includes("/rest/agile/1.0/board")) return json({ values: [], isLast: true });
+    if (u.includes("/rest/api/2/search")) {
+      const jql = b.jql || "";
+      if (jql.includes("key in (EP-A)")) return json({ issues: [{ key: "EP-A", fields: { summary: "Эпик А", status: { name: "Готово", statusCategory: { key: "done" } }, project: { key: "AAA" }, resolutiondate: "2026-09-01T10:00:00.000+0300" } }], total: 1 });
+      if (jql.includes("in (EP-A)") && jql.includes("updated >=")) {
+        return json({ issues: [{ key: "NEW-1", fields: fieldsOf({ created: "2026-08-01T09:00:00.000+0300", customfield_10101: [{ id: 11, name: "S1", state: "closed" }, { id: 12, name: "S2", state: "closed" }, { id: 13, name: "S3", state: "active" }] }) }], total: 1 });
+      }
+      if (jql.includes("in (EP-A)")) {
+        if (keysFail) return json({ errorMessages: ["bad jql"] }, 400);
+        return json({ issues: [{ key: "KEEP-1" }, { key: "NEW-1" }], total: 2 });
+      }
+      return json({ issues: [], total: 0 });
+    }
+    return json({}, 404);
+  };
+  let res = null;
+  let err = null;
+  try { res = await runSync({ full: false }); } catch (e) { err = e; }
+  const keysNow = (await dbm.all(dbm.STORES.issues)).map((x) => x.key).sort().join(",");
+  check("Б0: «Обновить» удаляет задачи, пропавшие из выбранных эпиков; задачи других эпиков не трогает",
+    !err && keysNow === "ELSE-1,KEEP-1,NEW-1" && res.removed === 1, err ? err.message : `${keysNow} / ${res && res.removed}`);
+  const newIssue = await dbm.getOne(dbm.STORES.issues, "NEW-1");
+  check("Б0: у задачи сохранены дата создания и число спринтов", newIssue?.created?.startsWith("2026-08-01") && newIssue.sprintCount === 3, JSON.stringify({ c: newIssue?.created, n: newIssue?.sprintCount }));
+  check("Б0: у эпика сохранена дата завершения", (await dbm.getOne(dbm.STORES.epics, "EP-A"))?.resolved?.startsWith("2026-09-01"));
+
+  await dbm.putAll(dbm.STORES.issues, [mk("GONE-2", "EP-A", "AAA", "Ivan", null, 1, "prog")]);
+  keysFail = true;
+  err = null;
+  try { res = await runSync({ full: false }); } catch (e) { err = e; }
+  check("Б0: запрос ключей не прошёл — ничего не удаляется", !err && !!(await dbm.getOne(dbm.STORES.issues, "GONE-2")) && res.removed === 0, err ? err.message : String(res && res.removed));
+
+  window.fetch = orig;
+  await settings.save({ fields: saved.fields, useTempoTeams: saved.useTempoTeams, flowWeeks: saved.flowWeeks, lastSync: saved.lastSync });
+  await dbm.clearAll();
+}
+
 // А1. модуль расчётов: одни и те же числа для списка, карточки и сводки
 {
   const exc = flowlib.parseTypeList("User Story");

@@ -58,7 +58,7 @@ async function ensureFields() {
 function epicFieldList() {
   const f = settings.get().fields;
   return [
-    "summary", "project", "status", "updated", "created", "duedate", "labels", "timespent",
+    "summary", "project", "status", "updated", "created", "resolutiondate", "duedate", "labels", "timespent",
     // Оценка самого эпика («экспресс-оценка») — те же поля, что у задач.
     "timeoriginalestimate", "timeestimate",
     f.epicAssignee || "assignee", f.epicReporter || "reporter",
@@ -154,6 +154,7 @@ function mapIssue(issue, fields, epicKeyFallback) {
     statusCategory: f.status?.statusCategory?.key || "",
     typeName: f.issuetype?.name || "",
     updated: f.updated || "",
+    created: f.created || "", // объём эпика в прошлых неделях — для восстановления истории
     resolved: f.resolutiondate || "", // дата завершения — для потока и диагностики
     // Списания: с подзадачами (aggregatetimespent), если Jira отдала, иначе по самой задаче.
     timeSpent: Number(f.aggregatetimespent ?? f.timespent) || 0,
@@ -162,6 +163,8 @@ function mapIssue(issue, fields, epicKeyFallback) {
     storyPoints: fields.storyPoints ? f[fields.storyPoints] ?? null : null,
     sprintId: sp.current ? sp.current.id : null,
     sprintName: sp.current ? sp.current.name : "",
+    // Сколько спринтов задача прошла (поле Sprint хранит все) — для правила повторных переносов.
+    sprintCount: sp.all.length,
     _sprints: sp.all
   };
 }
@@ -212,6 +215,7 @@ function mapEpic(i) {
     statusCategory: i.fields.status?.statusCategory?.key || "",
     statusColor: i.fields.status?.statusCategory?.colorName || "",
     created: dateOf(i.fields.created),
+    resolved: i.fields.resolutiondate || "", // дата завершения эпика — для проверки точности прогнозов
     dueDate: dateOf(i.fields.duedate),
     assigneeKey: userOf(i.fields[f.epicAssignee || "assignee"]).key,
     assigneeName: userOf(i.fields[f.epicAssignee || "assignee"]).name,
@@ -565,7 +569,7 @@ function jqlDate(ms) {
 
 // Версия набора полей задачи в базе. Растёт, когда mapIssue начинает сохранять новые поля:
 // инкрементальное обновление их у старых задач не добавит, поэтому один раз делаем полную выгрузку.
-const ISSUE_SCHEMA = 3;
+const ISSUE_SCHEMA = 4;
 
 // full = true — скачиваем задачи целиком, иначе только изменённые с прошлой синхронизации.
 //
@@ -604,6 +608,7 @@ export async function sync({ full = false, onProgress = () => {} } = {}) {
     "status",
     "issuetype",
     "updated",
+    "created",
     "timeoriginalestimate",
     "timeestimate",
     "timespent",
@@ -634,6 +639,33 @@ export async function sync({ full = false, onProgress = () => {} } = {}) {
       issues = await jira.search(alt, fieldList, (n) => onProgress(t("st.issuesLoading", { n: collected.length + n })));
     }
     collected.push(...issues.map((it) => mapIssue(it, fields)));
+  }
+
+  // «Обновить» догружает только изменённые задачи и не видит вынесенных из эпика или удалённых:
+  // они остались бы со старым эпиком и завышали объём и остаток. Лёгким запросом берём ключи всех
+  // задач выбранных эпиков и удаляем из базы тех, кого в ответе нет. Ошибка ответа — не удаляем ничего.
+  let vanished = [];
+  if (!full) {
+    try {
+      const alive = new Set(collected.map((i) => i.key));
+      for (let i = 0; i < keys.length; i += 50) {
+        const chunk = keys.slice(i, i + 50);
+        let rows;
+        try {
+          rows = await jira.search(`cf[${jira.cfId(fields.epicLink)}] in (${chunk.join(",")})`, ["summary"]);
+        } catch (e) {
+          if (isUnreachable(e)) throw e;
+          rows = await jira.search(`"Epic Link" in (${chunk.join(",")})`, ["summary"]);
+        }
+        for (const r of rows) alive.add(r.key);
+      }
+      const selected = new Set(keys);
+      vanished = (await db.all(db.STORES.issues)).filter((i) => selected.has(i.epicKey) && !alive.has(i.key)).map((i) => i.key);
+    } catch (e) {
+      if (isUnreachable(e)) throw e;
+      vanished = [];
+      console.warn("[OhMyGant] vanished issues check failed", e && e.message ? e.message : e);
+    }
   }
 
   // Спринты из задач — основа; ниже их перекроют свежие данные из Agile API.
@@ -712,6 +744,7 @@ export async function sync({ full = false, onProgress = () => {} } = {}) {
   const epicsToPut = freshEpics.filter((e) => stored.has(e.key)).map((e) => ({ ...e, hidden: !!stored.get(e.key).hidden }));
   const ops = [];
   if (full) ops.push({ store: db.STORES.issues, clear: true });
+  else if (vanished.length) ops.push({ store: db.STORES.issues, del: vanished });
   ops.push({ store: db.STORES.issues, put: collected });
   if (!othersError) ops.push({ store: db.STORES.others, clear: true, put: others });
   if (epicsToPut.length) ops.push({ store: db.STORES.epics, put: epicsToPut });
@@ -726,6 +759,7 @@ export async function sync({ full = false, onProgress = () => {} } = {}) {
   onProgress(t("st.done"));
   return {
     issues: collected.length,
+    removed: vanished.length,
     sprints: sprintMap.size,
     others: others.length,
     othersError,
