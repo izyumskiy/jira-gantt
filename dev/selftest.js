@@ -1679,12 +1679,22 @@ check("подписи легенды короткие", document.querySelector("
 check("на «По эпикам» цифры скрыты — жёлтого баллона «осталось» нет", document.querySelectorAll("#g1 .badge.b-left").length === 0);
 check("у исполнителей жёлтого баллона нет", document.querySelectorAll("#g2 .badge.b-left").length === 0);
 const ivanRow = [...document.querySelectorAll("#g2 .g-row.group")].find((r) => r.querySelector(".glabel").textContent === "Ivan");
-const ivanSplit = ivanRow.querySelectorAll(".c-cell")[0].querySelector(".bar-split");
-check("полоса человека разделена на жёлтую и серую части", !!ivanSplit && ivanSplit.querySelectorAll(".part").length === 2 &&
+const ivanCell0 = ivanRow.querySelectorAll(".c-cell")[0];
+const ivanSplit = ivanCell0.querySelector(".bar-split");
+check("полоса человека разделена на песочную и серую части, углы скруглены", !!ivanSplit && getComputedStyle(ivanSplit).borderRadius === "8px" && ivanSplit.querySelectorAll(".part").length === 2 &&
   !!ivanSplit.querySelector(".part-target") && !!ivanSplit.querySelector(".part-other"));
-check("в жёлтой части — целевые (2 · 1.5д), в серой — прочие (1 · 1д)",
-  ivanSplit.querySelector(".part-target").textContent === "21.5д" && ivanSplit.querySelector(".part-other").textContent === "11д",
+check("в частях — только число задач: 2 целевых и 1 прочая; оценки в них нет",
+  ivanSplit.querySelector(".part-target").textContent === "2" && ivanSplit.querySelector(".part-other").textContent === "1" && !ivanSplit.querySelector(".part .bar-sum"),
   `${ivanSplit.querySelector(".part-target").textContent} | ${ivanSplit.querySelector(".part-other").textContent}`);
+const ivanTotal = ivanCell0.querySelector(".bar-total");
+check("общая оценка секции — круглой меткой справа ЗА полосой (1.5д + 1д)",
+  ivanTotal?.textContent === "2.5д" && getComputedStyle(ivanTotal).borderRadius === "8px" && getComputedStyle(ivanTotal).borderTopWidth === "0px" && !ivanSplit.contains(ivanTotal) && ivanTotal.previousElementSibling === ivanSplit,
+  `${ivanTotal?.textContent} / ${getComputedStyle(ivanTotal).borderRadius}`);
+check("метки оценок одной ширины — суммы выровнены по строкам",
+  new Set([...document.querySelectorAll("#g2 .bar-total")].map((x) => Math.round(x.getBoundingClientRect().width))).size === 1);
+check("в подсказках частей — их оценки, в метке — общая",
+  ivanSplit.querySelector(".part-target").title.includes("1.5д") && ivanSplit.querySelector(".part-other").title.includes("1д") && ivanTotal.title.includes("2.5д"),
+  ivanTotal.title);
 const tShare = parseFloat(ivanSplit.querySelector(".part-target").style.flexBasis);
 check("ширины частей пропорциональны оценке (12ч против 8ч → 60%)", tShare === 60, String(tShare));
 check("в секции 1 у Ivan только жёлтая часть на всю ширину",
@@ -1762,6 +1772,7 @@ check("строки команд на вкладке по людям", teamRows.
   check("перегруженная секция обведена красным", cells[0].querySelector(".bar-split")?.classList.contains("overload"), cells[0].querySelector(".bar-split")?.className);
   check("в подсказке — нагрузка и ёмкость", (cells[0].querySelector(".bar-split")?.title || "").includes("2.5д") && cells[0].querySelector(".bar-split").title.includes("1д"), cells[0].querySelector(".bar-split")?.title);
   check("секция в пределах ёмкости не обведена", !cells[1].querySelector(".bar-split")?.classList.contains("overload"));
+  check("обводка перегрузки — на полосе, метка оценки вне её", !cells[0].querySelector(".bar-total")?.classList.contains("overload") && !cells[0].querySelector(".bar-split").contains(cells[0].querySelector(".bar-total")));
   await settings.save({ sprintDays: 10 });
   renderOpen(gO, m2, { mode: "assignee" });
   check("при ёмкости 10д перегрузки нет", gO.querySelectorAll(".bar.overload").length === 0);

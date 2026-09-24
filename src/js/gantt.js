@@ -195,22 +195,29 @@ function splitBar(target, other) {
   if (!tc && !oc) return null;
   const bar = el("div", "bar bar-split");
   let share = ts + os ? ts / (ts + os) : tc / (tc + oc);
-  if (tc && oc) share = Math.min(0.8, Math.max(0.2, share)); // обеим частям нужно место под цифры
+  if (tc && oc) share = Math.min(0.85, Math.max(0.15, share)); // обеим частям нужно место под число задач
   if (tc) {
     const part = el("div", "part part-target");
     part.style.flexBasis = oc ? `${Math.round(share * 100)}%` : "100%";
-    part.title = t("gantt.targetPart");
-    part.append(...numbers(tc, ts));
+    part.title = `${t("gantt.targetPart")}: ${tc} · ${fmtEstimate(ts)}`;
+    part.append(el("span", "bar-count", String(tc)));
     bar.append(part);
   }
   if (oc) {
     const part = el("div", "part part-other");
     part.style.flexBasis = tc ? `${Math.round((1 - share) * 100)}%` : "100%";
-    part.title = t("gantt.otherPart");
-    part.append(...numbers(oc, os));
+    part.title = `${t("gantt.otherPart")}: ${oc} · ${fmtEstimate(os)}`;
+    part.append(el("span", "bar-count", String(oc)));
     bar.append(part);
   }
-  return bar;
+  // В частях — только число задач; общая оценка обеих частей — круглой меткой справа ЗА полосой:
+  // полоса остаётся цельным прямоугольником, метки выровнены по всем строкам, а обводка перегрузки
+  // обходит только полосу.
+  const total = el("span", "bar-total", fmtEstimate(ts + os));
+  total.title = t("gantt.totalSum", { sum: fmtEstimate(ts + os), target: fmtEstimate(ts), other: fmtEstimate(os) });
+  const row = el("div", "bar-row");
+  row.append(bar, total);
+  return row;
 }
 
 // Вложенная строка (исполнитель или эпик): тонкий голубой отрезок на каждый спринт секции.
@@ -663,15 +670,17 @@ export function render(container, model, opts) {
       const cell = g.cells.get(sec.id);
       if (mode === "assignee") {
         const other = g.otherCells.get(sec.id);
-        const split = splitBar(cell, other);
-        if (split) {
+        const row = splitBar(cell, other);
+        if (row) {
           // Перегрузка спринта: суммарные оценки человека за секцию больше ёмкости спринта.
+          // Обводка — на самой полосе, не на метке оценки.
           const load = (cell ? cell.sum : 0) + (other ? other.sum : 0);
           if (capacity > 0 && load > capacity) {
+            const split = row.querySelector(".bar-split");
             split.classList.add("overload");
             split.title = t("gantt.overload", { sum: fmtEstimate(load), cap: fmtEstimate(capacity) });
           }
-          td.append(split);
+          td.append(row);
         }
       } else if (cell && cell.count) {
         td.append(groupBar(cell, model.maxCell, `${g.label} · ${sectionTitle(sec)}`));
