@@ -2886,6 +2886,74 @@ check("пиктограмма 💬 есть и на «По эпикам и лю�
   box.remove();
 }
 
+// Заметки на «По эпикам»: строка под эпиком, ✎ и «Сохранить как заметку» в окне 💬.
+{
+  const notesMod = await import("../src/js/notes.js");
+  const ago = (d) => new Date(Date.now() - d * day).toISOString();
+  const epicsN = [
+    { key: "EP-1", summary: "Личный кабинет", statusName: "В работе", statusCategory: "indeterminate", omg: { project: null, notes: [{ id: "1", text: "Старая", created: ago(40), author: "Иван" }, { id: "2", text: "Бэкенд готов на 80%", created: ago(30), author: "Пётр" }] } },
+    { key: "EP-2", summary: "Биллинг", statusName: "В работе", statusCategory: "indeterminate" }
+  ];
+  const mN = agg.buildModel({ issues, others: [], sprints, epics: epicsN, boards, mode: "epicPeople" });
+  const box = document.createElement("div");
+  document.body.append(box);
+  const added = [];
+  const toggles = [];
+  const notes = { show: true, staleDays: 14, onToggle: (on) => toggles.push(on), onNoteAdded: async (kind, key, note) => added.push([kind, key, note]) };
+  renderOpen(box, mN, { mode: "epicPeople", notes });
+  const noteRows = [...box.querySelectorAll(".s-note")];
+  check("По эпикам: строка заметки под эпиком с заметкой; у эпика без неё строки нет",
+    noteRows.map((r) => r.dataset.note).join() === "EP-1" && noteRows[0].previousElementSibling.querySelector(".glabel").textContent.startsWith("EP-1"), noteRows.map((r) => r.dataset.note).join());
+  check("По эпикам: в строке — текст, автор, дата, пометка «заметке N дн.» и «История (1)»",
+    noteRows[0].textContent.includes("Бэкенд готов") && noteRows[0].querySelector(".s-note-who").textContent.includes("Пётр") &&
+      noteRows[0].querySelector(".s-note-stale")?.textContent === t("note.stale", { n: 30 }) && noteRows[0].querySelector(".s-note-hist")?.textContent === t("note.history", { n: 1 }));
+  check("По эпикам: строка заметки занимает все колонки шкалы", noteRows[0].children.length === mN.columns.length + 2);
+  const cbN = box.querySelector(".gantt-bar .s-notes-toggle input");
+  check("По эпикам: на панели галочка «Заметки», включена", !!cbN && cbN.checked);
+  cbN.checked = false;
+  cbN.dispatchEvent(new Event("change"));
+  check("По эпикам: снятая галочка сообщает наружу", JSON.stringify(toggles) === "[false]");
+  renderOpen(box, mN, { mode: "epicPeople", notes: { ...notes, show: false } });
+  check("По эпикам: при выключенных заметках строк нет", !box.querySelector(".s-note"));
+
+  // 💬 → «Сохранить как заметку»: комментарий уходит с кодовым словом и становится заметкой.
+  renderOpen(box, mN, { mode: "epicPeople", notes });
+  const sent = [];
+  notesMod.api.addComment = async (key, text) => {
+    sent.push([key, text]);
+    return { id: "9", body: text, created: "2026-09-24T10:00:00.000+0300", author: { displayName: "Менеджер" } };
+  };
+  const plain = [];
+  gantt.commentsApi.add = async (key, text) => plain.push([key, text]);
+  gantt.commentsApi.list = async () => [];
+  const row1 = [...box.querySelectorAll(".g-row.group")].find((r) => r.querySelector(".glabel").textContent.startsWith("EP-1"));
+  row1.querySelector(".cmt-btn").click();
+  await new Promise((r) => setTimeout(r, 30));
+  const pop = document.querySelector(".tooltip.tip-comments");
+  const chk = pop.querySelector(".cmt-asnote");
+  check("💬: в окне комментариев есть «Сохранить как заметку», по умолчанию снята", !!chk && !chk.checked && pop.textContent.includes(t("cmt.asNote")));
+  const taC = pop.querySelector(".cmt-input");
+  taC.value = "Обычный комментарий";
+  taC.dispatchEvent(new Event("input"));
+  pop.querySelector(".cmt-save").click();
+  await new Promise((r) => setTimeout(r, 30));
+  check("💬: без галочки — обычный комментарий, заметка не добавляется",
+    JSON.stringify(plain) === JSON.stringify([["EP-1", "Обычный комментарий"]]) && !sent.length && !added.length);
+  taC.value = "Риск: ждём доступы";
+  taC.dispatchEvent(new Event("input"));
+  chk.checked = true;
+  pop.querySelector(".cmt-save").click();
+  await new Promise((r) => setTimeout(r, 30));
+  check("💬: с галочкой — комментарий с кодовым словом (omg comment) и заметка с автором из Jira",
+    JSON.stringify(sent) === JSON.stringify([["EP-1", "(omg comment)\nРиск: ждём доступы"]]) && added[0]?.[0] === "epic" && added[0][1] === "EP-1" && added[0][2].text === "Риск: ждём доступы" && added[0][2].author === "Менеджер",
+    JSON.stringify([sent, added]));
+  check("💬: после сохранения заметкой поле очищено и галочка снята", taC.value === "" && !chk.checked && pop.querySelector(".cmt-note").textContent === t("cmt.savedNote"));
+  document.querySelector(".tooltip .tip-close")?.click();
+  renderOpen(box, mN, { mode: "epicPeople" });
+  check("По эпикам: без заметок в опциях ни строк, ни галочки, а 💬 без «заметки»", !box.querySelector(".s-note") && !box.querySelector(".s-notes-toggle"));
+  box.remove();
+}
+
 const total = document.createElement("div");
 total.className = failures ? "t-fail" : "t-ok";
 total.textContent = failures ? `${failures} FAILED` : "ALL PASSED";
