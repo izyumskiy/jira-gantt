@@ -11,10 +11,10 @@ import * as prio from "./priority.js";
 import * as omg from "./omg.js";
 import { fmtEstimate } from "./agg.js";
 import { NO_PROJECT, projectOf } from "./stories.js";
-import { addComment as jiraAddComment } from "./jira.js";
+import { api, noteRow, showNoteEditor, popoverHead } from "./notes.js";
 
-// Запись в Jira — через это, чтобы самопроверка могла подменить её заглушкой.
-export const api = { addComment: (key, text) => jiraAddComment(key, text) };
+// Запись в Jira — через общий модуль заметок: самопроверка подменяет её заглушкой.
+export { api, showNoteEditor };
 
 const el = gantt.el;
 const NONE = "__none__";
@@ -364,7 +364,7 @@ export function render(container, model, opts = {}) {
     if (edue) gantt.addDueLine(str, edue, false);
     tbody.append(addGuides(str, guides, eKey(en)));
     const note = noteOf(sn.story.omg);
-    if (note) tbody.append(addGuides(noteRow({ target, note, model, opts, indent: "indent indent2", due: edue }), guides, eKey(en)));
+    if (note) tbody.append(addGuides(noteRow({ target, note, cells: model.columns.length + 1, opts, indent: "indent indent2", due: edue }), guides, eKey(en)));
   };
 
   model.projects.forEach((p) => {
@@ -400,7 +400,7 @@ export function render(container, model, opts = {}) {
       const target = { kind: "epic", key: en.key, label: en.label, rec: en.epic.omg };
       const actions = [];
       if (opts.onProjectSet) actions.push(projectButton(en, projectNames, opts));
-      actions.push(gantt.commentButton(en.key, en.label));
+      actions.push(gantt.commentButton(en.key, en.label, { kind: "epic", opts }));
       if (opts.onNoteAdded) actions.push(actionBtn("s-note-add", "✎", t("note.edit"), (a) => showNoteEditor(a, target, opts)));
       etr.append(
         nameCell({
@@ -422,7 +422,7 @@ export function render(container, model, opts = {}) {
       const eg = { level: 1, key: eKey(en) };
       const epicBlock = !ec || !!enote; // у эпика есть строки ниже — линия эпика нужна
       tbody.append(addGuides(etr, epicBlock ? [pg, { ...eg, start: true }] : [pg], epicBlock ? eKey(en) : pKey(p)));
-      if (enote) tbody.append(addGuides(noteRow({ target, note: enote, model, opts, indent: "indent", due: edue }), [pg, eg], eKey(en)));
+      if (enote) tbody.append(addGuides(noteRow({ target, note: enote, cells: model.columns.length + 1, opts, indent: "indent", due: edue }), [pg, eg], eKey(en)));
       if (ec) return;
 
       const open = en.stories.filter((sn) => !(sn.status && sn.status.id === "done"));
@@ -473,135 +473,6 @@ export function render(container, model, opts = {}) {
   wrap.append(table);
   container.append(wrap);
   restoreScroll();
-}
-
-// ---------- заметки (Р4) ----------
-
-function fmtDateTime(iso) {
-  const d = new Date(iso);
-  if (!iso || Number.isNaN(+d)) return "";
-  const p = (n) => String(n).padStart(2, "0");
-  return `${p(d.getDate())}.${p(d.getMonth() + 1)}.${String(d.getFullYear()).slice(-2)}`;
-}
-
-// Строка заметки — только когда заметка есть: первые две строки текста, автор и дата, полный текст
-// при наведении; ✎ и «История (N)»; старше порога — пометка «заметке N дн.».
-function noteRow({ target, note, model, opts, indent, due }) {
-  const tr = el("tr", "g-row s-note");
-  tr.dataset.note = target.key;
-  const td = el("td", "c-name");
-  const wrap = el("div", "s-note-wrap");
-  wrap.append(el("span", indent));
-  const box = el("div", "s-note-box");
-  const text = el("div", "s-note-text", note.text);
-  text.title = note.text;
-  const meta = el("div", "s-note-meta");
-  meta.append(el("span", "s-note-who", [note.author, fmtDateTime(note.created)].filter(Boolean).join(" · ")));
-  const age = omg.noteAgeDays(note);
-  const stale = Number(opts.staleDays) > 0 ? Number(opts.staleDays) : 14;
-  if (age != null && age > stale) {
-    const s = el("span", "s-note-stale", t("note.stale", { n: age }));
-    s.title = t("note.staleHint", { n: stale });
-    meta.append(s);
-  }
-  const ed = el("button", "pop-btn link s-note-edit", "✎");
-  ed.type = "button";
-  ed.title = t("note.edit");
-  ed.setAttribute("aria-label", t("note.edit"));
-  ed.onclick = (ev) => {
-    ev.stopPropagation();
-    showNoteEditor(ed, target, opts);
-  };
-  meta.append(ed);
-  const hist = omg.noteHistory(target.rec);
-  if (hist.length) {
-    const h = el("button", "pop-btn link s-note-hist", t("note.history", { n: hist.length }));
-    h.type = "button";
-    h.onclick = (ev) => {
-      ev.stopPropagation();
-      showNoteHistory(h, target);
-    };
-    meta.append(h);
-  }
-  box.append(text, meta);
-  wrap.append(box);
-  td.append(wrap);
-  tr.append(td);
-  for (let i = 0; i <= model.columns.length; i++) tr.append(el("td", "c-cell s-note-cell"));
-  if (due) gantt.addDueLine(tr, due, false);
-  return tr;
-}
-
-// Правка: форма с текстом последней заметки; «Сохранить в Jira» публикует новый комментарий
-// (omg comment) в ту же задачу, старая заметка остаётся в истории.
-export function showNoteEditor(anchor, target, opts) {
-  const box = el("div", "tooltip tip-note");
-  popoverHead(box, t("note.editTitle", { key: target.key }), target.label);
-  const cur = omg.latestNote(target.rec);
-  const ta = el("textarea", "cmt-input s-note-input");
-  ta.rows = 5;
-  ta.value = cur ? cur.text : "";
-  ta.placeholder = t("note.placeholder");
-  const save = el("button", "primary s-note-save", t("story.publish"));
-  save.type = "button";
-  const msg = el("div", "small muted s-note-msg", t("note.notifyWarn"));
-  const actions = el("div", "s-proj-actions");
-  actions.append(save);
-  box.append(ta, actions, msg);
-  save.onclick = async () => {
-    const text = ta.value.trim();
-    if (!text) {
-      msg.textContent = t("note.empty");
-      return;
-    }
-    save.disabled = true;
-    msg.textContent = t("story.publishing");
-    let res;
-    try {
-      res = await api.addComment(target.key, omg.noteComment(text));
-    } catch (e) {
-      const noRight = e && (e.code === 401 || e.code === 403);
-      const err = t("note.publishError", { key: target.key, msg: e && e.message ? e.message : String(e) }) + (noRight ? ` ${t("story.noPermission")}` : "");
-      msg.textContent = err;
-      save.disabled = false;
-      if (opts.notify) opts.notify(err, "error");
-      return;
-    }
-    // Автор и дата — из ответа Jira; если ответа нет — текущие.
-    const note = omg.noteFromComment(res) || { id: "", text, created: new Date().toISOString(), author: "" };
-    gantt.closeTooltip();
-    if (opts.onNoteAdded) await opts.onNoteAdded(target.kind, target.key, note);
-  };
-  gantt.openPopover(box, anchor);
-  ta.focus();
-  return box;
-}
-
-function showNoteHistory(anchor, target) {
-  const box = el("div", "tooltip tip-note");
-  popoverHead(box, t("note.historyTitle", { key: target.key }), target.label);
-  const list = el("div", "cmt-list");
-  for (const n of omg.noteHistory(target.rec)) {
-    const item = el("div", "cmt-item");
-    const meta = el("div", "cmt-meta");
-    meta.append(el("span", "cmt-author", n.author || t("dash")), el("span", "muted", fmtDateTime(n.created)));
-    item.append(meta, el("div", "cmt-body", n.text));
-    list.append(item);
-  }
-  box.append(list);
-  gantt.openPopover(box, anchor);
-  return box;
-}
-
-function popoverHead(box, title, sub = "") {
-  const head = el("div", "tip-head");
-  const strong = el("strong", null, title);
-  if (sub) strong.append(el("div", "tip-sub-title", sub));
-  const close = el("button", "tip-close", "×");
-  close.title = t("tip.close");
-  close.onclick = gantt.closeTooltip;
-  head.append(strong, close);
-  box.append(head);
 }
 
 // ---------- смена проекта эпика (Р3) ----------

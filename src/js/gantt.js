@@ -6,6 +6,8 @@ import { t } from "./i18n.js";
 import { fmtEstimate, NO_DATES_ID, BACKLOG_ID, OFF_SPRINT_ID, sprintCapacity } from "./agg.js";
 import * as settings from "./settings.js";
 import { cfId, escapeJql, comments as jiraComments, addComment as jiraAddComment, userSearch as jiraUserSearch } from "./jira.js";
+import * as omg from "./omg.js";
+import { noteRow, noteToShow, notesToggle, publishNote, publishError } from "./notes.js";
 
 // Комментарии эпика — через это, чтобы самопроверка могла подменить Jira заглушкой.
 export const commentsApi = {
@@ -377,13 +379,14 @@ export function keepScroll(container) {
 }
 
 // Панель над диаграммой: «Развернуть всё» / «Свернуть всё», легенды доли готовых, вехи и команд.
-export function chartBar(model, { withDue = true, onExpand, onCollapse }) {
+export function chartBar(model, { withDue = true, onExpand, onCollapse, notes = null }) {
   const bar = el("div", "gantt-bar");
   const expand = el("button", "link", t("gantt.expandAll"));
   const collapse = el("button", "link", t("gantt.collapseAll"));
   expand.onclick = onExpand;
   collapse.onclick = onCollapse;
   bar.append(expand, collapse);
+  if (notes && notes.onToggle) bar.append(notesToggle(notes));
   const doneLegend = el("span", "legend legend-done");
   doneLegend.append(el("i", "swatch swatch-done"), el("span", null, t("gantt.legendDone")));
   bar.append(doneLegend);
@@ -596,6 +599,7 @@ export function render(container, model, opts) {
   container.append(
     chartBar(model, {
       withDue: epicLike,
+      notes: epicLike ? opts.notes : null,
       onExpand: () => {
         collapsed[mode].clear();
         render(container, model, opts);
@@ -650,7 +654,7 @@ export function render(container, model, opts) {
     label.onclick = (e) => showTooltip(e.currentTarget, g, mode, model, profile);
     name.append(twisty, label);
     if (g.status && g.status.name) name.append(lozenge(g.status));
-    if (epicLike && g.key) name.append(commentButton(g.key, g.label));
+    if (epicLike && g.key) name.append(commentButton(g.key, g.label, { kind: "epic", opts: opts.notes }));
     const critical = model.childKind === "person" && g.key && criticalOn.has(g.key) ? criticalPeople(g, model) : null;
     if (model.childKind === "person" && g.key) {
       const cb = criticalButton(g, model, () => render(container, model, opts));
@@ -696,6 +700,23 @@ export function render(container, model, opts) {
     const due = epicLike ? dueInfo(g, model) : null;
     if (due) addDueLine(tr, due, true);
     tbody.append(tr);
+    // Заметка эпика — своей строкой под ним, как на «Эпик — история».
+    if (epicLike && g.key && opts.notes) {
+      const rec = g.epic ? g.epic.omg : null;
+      const n = noteToShow(rec, opts.notes);
+      if (n) {
+        tbody.append(
+          noteRow({
+            target: { kind: "epic", key: g.key, label: g.label, rec },
+            note: n,
+            cells: model.columns.length + extraCols,
+            opts: opts.notes,
+            indent: "indent",
+            due
+          })
+        );
+      }
+    }
 
     if (isCollapsed) return;
     for (const p of g.projects) {
@@ -845,13 +866,14 @@ export function lozenge(status) {
 
 // ---------- комментарии эпика (в Jira) ----------
 
-export function commentButton(key, label) {
+// notes — { kind, opts } объекта, если из этого окна можно сохранить комментарий как заметку.
+export function commentButton(key, label, notes = null) {
   const btn = el("button", "cmt-btn", "💬");
   btn.type = "button";
   btn.title = t("cmt.button");
   btn.onclick = (e) => {
     e.stopPropagation();
-    showComments(e.currentTarget, key, label);
+    showComments(e.currentTarget, key, label, notes);
   };
   return btn;
 }
@@ -863,7 +885,7 @@ function fmtDateTime(iso) {
   return `${p(d.getDate())}.${p(d.getMonth() + 1)}.${String(d.getFullYear()).slice(-2)} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
-function showComments(anchor, key, label) {
+function showComments(anchor, key, label, notes = null) {
   closeTooltip();
   tip = el("div", "tooltip tip-comments");
   const head = el("div", "tip-head");
@@ -891,6 +913,17 @@ function showComments(anchor, key, label) {
     mentionsOnInput();
   };
   form.append(ta, save, note);
+  // Комментарий можно сохранить заметкой: тогда он публикуется с кодовым словом (omg comment)
+  // и сразу появляется строкой заметки на диаграмме.
+  const asNote = el("input");
+  asNote.type = "checkbox";
+  asNote.className = "cmt-asnote";
+  if (notes && notes.opts && notes.opts.onNoteAdded) {
+    const label2 = el("label", "cmt-asnote-row");
+    label2.title = t("cmt.asNoteHint");
+    label2.append(asNote, el("span", null, t("cmt.asNote")));
+    form.append(label2);
+  }
   tip.append(form);
 
   // Упоминания через @: список пользователей Jira под полем, вставка разметки [~логин].
@@ -1015,6 +1048,21 @@ function showComments(anchor, key, label) {
     if (!text) return;
     save.disabled = true;
     note.textContent = t("cmt.saving");
+    // Заметкой — через общий модуль: комментарий уходит с кодовым словом, заметка встаёт на диаграмму.
+    if (asNote.checked && notes && notes.opts && notes.opts.onNoteAdded) {
+      try {
+        const added = await publishNote(key, text);
+        ta.value = "";
+        asNote.checked = false;
+        note.textContent = t("cmt.savedNote");
+        await load();
+        await notes.opts.onNoteAdded(notes.kind || "epic", key, added);
+      } catch (e) {
+        note.textContent = publishError(key, e);
+        save.disabled = false;
+      }
+      return;
+    }
     try {
       await commentsApi.add(key, text);
       ta.value = "";

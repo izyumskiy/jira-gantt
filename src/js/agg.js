@@ -484,6 +484,7 @@ export function buildModel({ issues: allIssues, others = [], sprints, epics, boa
         label: groupLabelOf(issue),
         status: epic ? { name: epic.statusName || "", category: epic.statusCategory || "", id: cls.id } : null,
         statusRank: cls ? cls.rank : 0,
+        epic: epic || null, // запись эпика — для заметок и карточек
         dueDate: epic ? epic.dueDate || "" : "", // срок исполнения эпика
         milestone: epicMilestone(epic), // веха на диаграмме: срок исполнения или плановое завершение (Р7)
         login: mode === "assignee" ? issue.assigneeLogin || "" : "",

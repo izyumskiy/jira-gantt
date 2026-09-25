@@ -1407,7 +1407,8 @@ async function drawGantt(mode, container) {
       db.all(db.STORES.tempo)
     ]);
     let target = container;
-    const excludeTypes = flowlib.excludedTypes(settings.get());
+    const s = settings.get();
+    const excludeTypes = flowlib.excludedTypes(s);
     let epicsShown = epics;
     let issuesShown = issues;
     if (mode === "epicPeople") {
@@ -1442,6 +1443,21 @@ async function drawGantt(mode, container) {
     });
     const opts = { mode, profiles, personLoad: analytics.personLoad(model, issues, others, excludeTypes) };
     if (mode === "epicPeople") {
+      // Заметки эпиков — как на «Эпик — история»: строка под эпиком, ✎ и 💬 → «Сохранить как заметку».
+      opts.notes = {
+        show: s.storyShowNotes !== false,
+        staleDays: s.noteStaleDays,
+        notify: (m, kind) => status(m, kind),
+        onToggle: async (on) => {
+          await settings.save({ storyShowNotes: on });
+          drawGantt("epicPeople", $("#page-epicPeople"));
+        },
+        onNoteAdded: async (kind, key, note) => {
+          await addLocalNote(kind, key, note);
+          status(t("note.saved", { key }));
+          drawGantt("epicPeople", $("#page-epicPeople"));
+        }
+      };
       // Ручной порядок хранится по всем выбранным эпикам, включая скрытые: скрытый эпик держит место.
       const stored = await db.metaGet(sync.EPIC_ORDER_KEY, null);
       const manual = Array.isArray(stored) && stored.length > 0;

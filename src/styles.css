@@ -540,6 +540,7 @@ button.s-pr:hover .s-pr-text { color: var(--accent); text-decoration: underline;
 .s-note-stale { color: #a16207; font-weight: 600; }
 .pop-btn.s-note-edit, .pop-btn.s-note-hist, .pop-btn.s-note-add { padding: 0 3px; font-size: 11px; }
 .s-notes-toggle { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
+.cmt-asnote-row { display: inline-flex; align-items: center; gap: 6px; margin-top: 6px; font-size: 12px; cursor: pointer; }
 .tooltip.tip-note { min-width: 340px; max-width: 460px; }
 .s-note-input { width: 100%; }
 /* Ручной порядок эпиков (Р8): ручка перетаскивания и линия-указатель между эпиками. */
