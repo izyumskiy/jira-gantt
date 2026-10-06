@@ -831,6 +831,9 @@ button.s-pr:hover .s-pr-text { color: var(--accent); text-decoration: underline;
 .bar.nested::before { opacity: .45; }
 .bar-sprint { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--muted); }
 /* Задачи вне спринта в работе (канбан): серый отрезок в штриховку — у них нет доски и цвета команды. */
+/* Задачи без спринта, поставленные по плановому началу: отрезок в точку, без цвета команды. */
+.bar.nested.planned { --tc: #8993a4; background: repeating-linear-gradient(90deg, color-mix(in srgb, #8993a4 22%, var(--panel)) 0 6px, var(--panel) 6px 9px); }
+.ti-planned { margin-left: 4px; color: var(--muted); cursor: help; }
 .bar.nested.off-sprint {
   --tc: #a5adba;
   background-image: repeating-linear-gradient(135deg, transparent 0 4px, rgba(107, 119, 140, .14) 4px 8px);
@@ -945,11 +948,13 @@ textarea { font: inherit; padding: 5px 8px; border: 1px solid var(--line); borde
     --bar-strong: #2a6fd6;
     --view-bg: #1c2b40;
     --view-fg: #85b8ff;
-    --proj-bg: #2a2f35;
-    --mono-done: #85b7eb;
-    --mono-rest: #1f3a5c;
-    --mono-cap: #3a6aa0;
-    --guide: #4a525b;
+    /* «Эпик — история» в тёмной теме: остаток почти сливается с фоном, сделанное мягче,
+       направляющие дерева темнее — иначе они складываются в сетку. */
+    --proj-bg: #262b31;
+    --mono-done: #6fa8e6;
+    --mono-rest: #24384f;
+    --mono-cap: #41607f;
+    --guide: #3a434d;
     --part-target: #4a3f22;
     --part-target-fg: #f5d565;
     --part-other: #363c44;

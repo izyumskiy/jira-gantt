@@ -239,6 +239,9 @@ function mapIssue(issue, fields, epicKeyFallback) {
     originalEstimate: f.timeoriginalestimate ?? null,
     remainingEstimate: f.timeestimate ?? null,
     storyPoints: fields.storyPoints ? f[fields.storyPoints] ?? null : null,
+    // Плановые даты задачи: по плановому началу задача без спринта встаёт на шкалу (см. agg).
+    plannedStart: fields.plannedStart ? dateOf(f[fields.plannedStart]) : "",
+    plannedEnd: fields.plannedEnd ? dateOf(f[fields.plannedEnd]) : "",
     sprintId: sp.current ? sp.current.id : null,
     sprintName: sp.current ? sp.current.name : "",
     // Сколько спринтов задача прошла (поле Sprint хранит все) — для правила повторных переносов.
@@ -750,7 +753,7 @@ function jqlDate(ms) {
 
 // Версия набора полей задачи в базе. Растёт, когда mapIssue начинает сохранять новые поля:
 // инкрементальное обновление их у старых задач не добавит, поэтому один раз делаем полную выгрузку.
-const ISSUE_SCHEMA = 6; // 5: приоритет и связи задач (Р2); 6: подпись связи («is subtask of»)
+const ISSUE_SCHEMA = 7; // 5: приоритет и связи (Р2); 6: подпись связи; 7: плановые даты задач
 
 // full = true — скачиваем задачи целиком, иначе только изменённые с прошлой синхронизации.
 //
@@ -801,6 +804,8 @@ export async function sync({ full = false, onProgress = () => {} } = {}) {
     fields.sprint
   ];
   if (fields.storyPoints) fieldList.push(fields.storyPoints);
+  if (fields.plannedStart) fieldList.push(fields.plannedStart);
+  if (fields.plannedEnd) fieldList.push(fields.plannedEnd);
 
   const keys = epics.map((e) => e.key);
   const collected = [];

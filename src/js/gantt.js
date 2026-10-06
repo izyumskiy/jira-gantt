@@ -3,7 +3,7 @@
 // жёлтую (целевые эпики) и серую (прочие эпики) части пропорционально объёму. Вложенные строки
 // рисуются тонкими голубыми отрезками — по одному на каждый спринт секции.
 import { t } from "./i18n.js";
-import { fmtEstimate, NO_DATES_ID, BACKLOG_ID, OFF_SPRINT_ID, sprintCapacity } from "./agg.js";
+import { fmtEstimate, NO_DATES_ID, BACKLOG_ID, OFF_SPRINT_ID, PLANNED_ID, sprintCapacity } from "./agg.js";
 import * as settings from "./settings.js";
 import { cfId, escapeJql, comments as jiraComments, addComment as jiraAddComment, userSearch as jiraUserSearch } from "./jira.js";
 import * as omg from "./omg.js";
@@ -236,6 +236,16 @@ export function nestedCell(cell, section, model, rowLabel) {
     bar.title = `${s.name} · ${team.name} · ${doneText}`;
     bar.append(el("span", "bar-sprint", s.name), ...numbers(part.count, part.sum));
     bar.onclick = (e) => showIssues(e.currentTarget, `${rowLabel} · ${s.name}`, part.issues);
+    stack.append(bar);
+  }
+  // Задачи без спринта, поставленные на шкалу по плановому началу, — отдельный отрезок.
+  const plan = cell.bySprint.get(PLANNED_ID);
+  if (plan) {
+    const bar = el("div", "bar nested planned clickable");
+    const doneText = applyDone(bar, plan.issues);
+    bar.title = `${t("gantt.planned")} · ${t("gantt.plannedHint")} · ${doneText}`;
+    bar.append(el("span", "bar-sprint", t("gantt.planned")), ...numbers(plan.count, plan.sum));
+    bar.onclick = (e) => showIssues(e.currentTarget, `${rowLabel} · ${t("gantt.planned")}`, plan.issues);
     stack.append(bar);
   }
   // Задачи вне спринта, которые в работе (канбан), — отдельный отрезок без цвета команды.
@@ -1287,6 +1297,11 @@ export function showIssues(anchor, title, issues) {
     if (it.offSprint) {
       const mark = el("span", "ti-offsprint", "⊘");
       mark.title = t("gantt.offSprintHint");
+      keyCell.append(mark);
+    }
+    if (it.planned) {
+      const mark = el("span", "ti-planned", "◷");
+      mark.title = t("gantt.plannedIssue", { date: it.planned });
       keyCell.append(mark);
     }
     // Чужая задача истории (ракурс «Эпик — история»): из другого эпика или без эпика.
