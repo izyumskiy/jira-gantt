@@ -2472,12 +2472,25 @@ check("пиктограмма 💬 есть и на «По эпикам и лю�
   const noteRows = [...box.querySelectorAll(".s-note")];
   check("Р4: строка заметки — только там, где заметка есть (эпик, история N-S1); у проекта — нет", noteRows.map((r) => r.dataset.note).join() === "N-E,N-S1" && !box.querySelector(".s-project + .s-note"), noteRows.map((r) => r.dataset.note).join());
   const epicNote = noteRows[0];
+  const s2Row = box.querySelector('.s-story[data-story="N-S2"]');
   check("Р4: заметка эпика — текст (первые две строки), автор, дата, полный текст при наведении",
     epicNote.querySelector(".s-note-text").textContent.startsWith("Первая строка") && epicNote.querySelector(".s-note-text").title.includes("третья") && epicNote.querySelector(".s-note-who").textContent.includes("Пётр") &&
       getComputedStyle(epicNote.querySelector(".s-note-text")).webkitLineClamp === "2");
   check("Р4: заметка старше порога помечена «заметке N дн.»", epicNote.querySelector(".s-note-stale")?.textContent === t("note.stale", { n: 20 }) && !noteRows[1].querySelector(".s-note-stale"));
   check("Р4: заметка истории — только у своей истории", noteRows[1].textContent.includes("Заметка истории") && !noteRows[0].textContent.includes("Заметка истории"));
-  const s2Row = box.querySelector('.s-story[data-story="N-S2"]');
+  // Бабл: карточка правее своего уровня дерева, хвостик вверх, у строки-владельца убран разделитель.
+  const nbox = epicNote.querySelector(".s-note-box");
+  const eRow = box.querySelector('.s-epic[data-epic="N-E"]');
+  const shift = Math.round(nbox.getBoundingClientRect().left - eRow.querySelector(".s-title").getBoundingClientRect().left);
+  check("Р4: заметка-бабл сдвинута правее названия своей строки", shift >= 24 && shift <= 60, String(shift));
+  check("Р4: у бабла хвостик вверх — рамка и заливка",
+    getComputedStyle(nbox, "::before").borderBottomWidth === "9px" && getComputedStyle(nbox, "::after").borderBottomWidth === "8px",
+    `${getComputedStyle(nbox, "::before").borderBottomWidth} / ${getComputedStyle(nbox, "::after").borderBottomWidth}`);
+  const sRow = box.querySelector('.s-story[data-story="N-S1"]');
+  check("Р4: строка с заметкой помечена has-note — разделитель до бабла убран",
+    eRow.classList.contains("has-note") && sRow.classList.contains("has-note") &&
+      getComputedStyle(eRow.querySelector("td")).borderBottomColor === "rgba(0, 0, 0, 0)");
+  check("Р4: у строки без заметки разделитель на месте", !s2Row.classList.contains("has-note") && getComputedStyle(s2Row.querySelector("td")).borderBottomColor !== "rgba(0, 0, 0, 0)");
   check("Р4: нет заметки — строки нет, добавить можно ✎ в действиях строки", !!s2Row.querySelector(".s-actions .s-note-add") && s2Row.nextElementSibling?.dataset.note !== "N-S2");
   check("Р4: «История (N)» — только когда есть прежние заметки", epicNote.querySelector(".s-note-hist")?.textContent === t("note.history", { n: 1 }) && !noteRows[1].querySelector(".s-note-hist"));
   epicNote.querySelector(".s-note-hist").click();
@@ -2764,7 +2777,7 @@ check("пиктограмма 💬 есть и на «По эпикам и лю�
   const leftOf = (sel) => [...box.querySelectorAll(sel)].map((r) => Math.round(r.querySelector(".s-title .prio-icon, .s-title .prio-dot, .s-title .plabel").getBoundingClientRect().left));
   const storyLefts = new Set(leftOf(".s-story"));
   const ind = box.querySelector(".s-story .indent2");
-  check("Вид: при узкой колонке отступы не сжимаются, строки историй выровнены", storyLefts.size === 1 && Math.round(ind.getBoundingClientRect().width) === 36, `${[...storyLefts]} / ${ind.getBoundingClientRect().width}`);
+  check("Вид: при узкой колонке отступы не сжимаются, строки историй выровнены", storyLefts.size === 1 && Math.round(ind.getBoundingClientRect().width) === 44, `${[...storyLefts]} / ${ind.getBoundingClientRect().width}`);
   tblN.style.removeProperty("--name-w");
   gantt.applyNameWidth(tblN, "epicStories");
   const th = box.querySelector("thead th.c-sprint.current");
@@ -2908,6 +2921,13 @@ check("пиктограмма 💬 есть и на «По эпикам и лю�
     noteRows[0].textContent.includes("Бэкенд готов") && noteRows[0].querySelector(".s-note-who").textContent.includes("Пётр") &&
       noteRows[0].querySelector(".s-note-stale")?.textContent === t("note.stale", { n: 30 }) && noteRows[0].querySelector(".s-note-hist")?.textContent === t("note.history", { n: 1 }));
   check("По эпикам: строка заметки занимает все колонки шкалы", noteRows[0].children.length === mN.columns.length + 2);
+  const gRow = noteRows[0].previousElementSibling;
+  const gBox = noteRows[0].querySelector(".s-note-box");
+  check("По эпикам: заметка — такой же бабл: сдвиг правее названия, хвостик вверх, разделитель убран",
+    gRow.classList.contains("has-note") && getComputedStyle(gRow.querySelector("td")).borderBottomColor === "rgba(0, 0, 0, 0)" &&
+      getComputedStyle(gBox, "::before").borderBottomWidth === "9px" &&
+      Math.round(gBox.getBoundingClientRect().left - gRow.querySelector(".glabel").getBoundingClientRect().left) >= 16,
+    String(Math.round(gBox.getBoundingClientRect().left - gRow.querySelector(".glabel").getBoundingClientRect().left)));
   const cbN = box.querySelector(".gantt-bar .s-notes-toggle input");
   check("По эпикам: на панели галочка «Заметки», включена", !!cbN && cbN.checked);
   cbN.checked = false;
