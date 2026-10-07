@@ -22,6 +22,8 @@
   --mono-rest: #b5d4f4;
   --mono-cap: #85b7eb;
   --guide: #c9ced8; /* направляющие дерева и разделитель эпиков */
+  --row-hover: #f4f7fb; /* строка под мышью; её же берёт подложка кнопок строки */
+  --sbar-hover: var(--accent); /* контур полосы под мышью */
   /* Полоса человека («По людям»): приглушённые песочный и серый, метка общей оценки. */
   --part-target: #f7d9a0;
   --part-target-fg: #633806;
@@ -428,7 +430,7 @@ body.col-resizing { cursor: col-resize; user-select: none; }
 .g-row.group > .c-name { font-weight: 600; }
 .g-row.group { background: #fbfcfd; }
 .g-row.proj > .c-name { background: var(--panel); }
-.g-row:hover > td { background: #f4f7fb; }
+.g-row:hover > td { background: var(--row-hover); }
 
 .twisty { border: none; background: none; padding: 0 6px 0 0; color: var(--muted); cursor: pointer; }
 .gnum { color: var(--muted); margin-right: 5px; font-weight: 400; }
@@ -445,7 +447,7 @@ body.col-resizing { cursor: col-resize; user-select: none; }
 .g-row.s-project .s-title { font-weight: 700; }
 .g-row.s-epic { background: var(--panel); }
 .g-row.s-epic .s-title { font-weight: 600; }
-.g-row:hover { --row-bg: #f4f7fb; }
+.g-row:hover { --row-bg: var(--row-hover); }
 .s-meta { color: var(--muted); font-weight: 400; font-size: 11px; }
 .s-story-link { color: var(--text); text-decoration: none; }
 a.s-story-link:hover { color: var(--accent); text-decoration: underline; }
@@ -507,7 +509,7 @@ button.s-pr:hover .s-pr-text { color: var(--accent); text-decoration: underline;
 .sbar-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--mono-cap); }
 .sbar-dot.done { background: var(--mono-done); }
 .sbar-num { font-size: 10px; line-height: 12px; color: var(--muted); text-align: right; white-space: nowrap; }
-.sbar:hover .sbar-track { outline: 1px solid var(--accent); outline-offset: 1px; }
+.sbar:hover .sbar-track { outline: 1px solid var(--sbar-hover); outline-offset: 1px; }
 .sbar:hover .sbar-num { color: var(--text); }
 .sbar.own-sprint { cursor: help; }
 .sbar.own-sprint .sbar-track { height: 2px; background: repeating-linear-gradient(90deg, var(--mono-cap) 0 4px, transparent 4px 7px); }
@@ -958,6 +960,8 @@ textarea { font: inherit; padding: 5px 8px; border: 1px solid var(--line); borde
     --mono-rest: #2b3644;
     --mono-cap: #9a7336;
     --guide: #39434f;
+    --row-hover: #272e34;
+    --sbar-hover: #f0b429;
     --part-target: #4a3f22;
     --part-target-fg: #f5d565;
     --part-other: #363c44;
@@ -984,7 +988,7 @@ textarea { font: inherit; padding: 5px 8px; border: 1px solid var(--line); borde
   .gantt thead th, .gantt thead .c-name { background: #262c31; }
   .g-row.group { background: #252b30; }
   .g-row.proj.epic-target > .c-name { background: #3b3620; }
-  .item:hover, .g-row:hover > td { background: #272e34; }
+  .item:hover { background: var(--row-hover); }
   .badge { background: #333a41; }
   .lozenge { background: #3c4147; color: #c7d1db; }
   .lozenge.lz-s-new { background: #352c63; color: #b8acf6; }
