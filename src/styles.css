@@ -436,7 +436,9 @@ body.col-resizing { cursor: col-resize; user-select: none; }
 .prio-icon { width: 16px; height: 16px; vertical-align: -3px; margin-right: 4px; flex: none; }
 .prio-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin: 0 6px 0 3px; vertical-align: -1px; flex: none; }
 /* Ракурс «Эпик — история» (Р5): проект → эпик → история. */
-.indent.indent2 { width: 36px; }
+/* Истории сдвинуты от эпика заметнее обычного шага — так дерево «проект → эпик → история»
+   читается с одного взгляда, а направляющая эпика (30px) остаётся слева от их названий. */
+.indent.indent2 { width: 44px; }
 /* Строка проекта: лёгкая подложка на всю ширину, от названия до бэклога. */
 .g-row.s-project { --row-bg: var(--proj-bg); }
 .g-row.s-project > td, .gantt .g-row.s-project > td.c-backlog { background: var(--proj-bg); }
@@ -948,13 +950,14 @@ textarea { font: inherit; padding: 5px 8px; border: 1px solid var(--line); borde
     --bar-strong: #2a6fd6;
     --view-bg: #1c2b40;
     --view-fg: #85b8ff;
-    /* «Эпик — история» в тёмной теме: остаток почти сливается с фоном, сделанное мягче,
-       направляющие дерева темнее — иначе они складываются в сетку. */
-    --proj-bg: #262b31;
-    --mono-done: #6fa8e6;
-    --mono-rest: #24384f;
-    --mono-cap: #41607f;
-    --guide: #3a434d;
+    /* «Эпик — история» в тёмной теме: тёплый янтарь на холодном фоне. Сделанное — янтарное и
+       единственное тёплое пятно на экране, остаток и подложка проекта уходят в холодный синий,
+       направляющие дерева холодные и тусклые — иначе складываются в сетку. */
+    --proj-bg: #1f2833;
+    --mono-done: #e2a139;
+    --mono-rest: #2b3644;
+    --mono-cap: #9a7336;
+    --guide: #39434f;
     --part-target: #4a3f22;
     --part-target-fg: #f5d565;
     --part-other: #363c44;

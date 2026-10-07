@@ -2764,7 +2764,7 @@ check("пиктограмма 💬 есть и на «По эпикам и лю�
   const leftOf = (sel) => [...box.querySelectorAll(sel)].map((r) => Math.round(r.querySelector(".s-title .prio-icon, .s-title .prio-dot, .s-title .plabel").getBoundingClientRect().left));
   const storyLefts = new Set(leftOf(".s-story"));
   const ind = box.querySelector(".s-story .indent2");
-  check("Вид: при узкой колонке отступы не сжимаются, строки историй выровнены", storyLefts.size === 1 && Math.round(ind.getBoundingClientRect().width) === 36, `${[...storyLefts]} / ${ind.getBoundingClientRect().width}`);
+  check("Вид: при узкой колонке отступы не сжимаются, строки историй выровнены", storyLefts.size === 1 && Math.round(ind.getBoundingClientRect().width) === 44, `${[...storyLefts]} / ${ind.getBoundingClientRect().width}`);
   tblN.style.removeProperty("--name-w");
   gantt.applyNameWidth(tblN, "epicStories");
   const th = box.querySelector("thead th.c-sprint.current");
