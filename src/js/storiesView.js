@@ -365,7 +365,10 @@ export function render(container, model, opts = {}) {
     if (edue) gantt.addDueLine(str, edue, false);
     tbody.append(addGuides(str, guides, eKey(en)));
     const note = noteOf(sn.story.omg);
-    if (note) tbody.append(addGuides(noteRow({ target, note, cells: model.columns.length + 1, opts, indent: "indent indent2", due: edue }), guides, eKey(en)));
+    if (note) {
+      str.classList.add("has-note"); // заметка «прилипает» к своей истории: разделитель между ними убираем
+      tbody.append(addGuides(noteRow({ target, note, cells: model.columns.length + 1, opts, indent: "indent indent2", due: edue }), guides, eKey(en)));
+    }
   };
 
   model.projects.forEach((p) => {
@@ -423,7 +426,10 @@ export function render(container, model, opts = {}) {
       const eg = { level: 1, key: eKey(en) };
       const epicBlock = !ec || !!enote; // у эпика есть строки ниже — линия эпика нужна
       tbody.append(addGuides(etr, epicBlock ? [pg, { ...eg, start: true }] : [pg], epicBlock ? eKey(en) : pKey(p)));
-      if (enote) tbody.append(addGuides(noteRow({ target, note: enote, cells: model.columns.length + 1, opts, indent: "indent", due: edue }), [pg, eg], eKey(en)));
+      if (enote) {
+        etr.classList.add("has-note");
+        tbody.append(addGuides(noteRow({ target, note: enote, cells: model.columns.length + 1, opts, indent: "indent", due: edue }), [pg, eg], eKey(en)));
+      }
       if (ec) return;
 
       const open = en.stories.filter((sn) => !(sn.status && sn.status.id === "done"));

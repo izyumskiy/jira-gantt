@@ -715,6 +715,7 @@ export function render(container, model, opts) {
       const rec = g.epic ? g.epic.omg : null;
       const n = noteToShow(rec, opts.notes);
       if (n) {
+        tr.classList.add("has-note"); // заметка «прилипает» к строке эпика
         tbody.append(
           noteRow({
             target: { kind: "epic", key: g.key, label: g.label, rec },
