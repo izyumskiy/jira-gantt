@@ -173,6 +173,7 @@ function sectionBar(cell, lvl, title, model, { start = false } = {}) {
   }
   b.append(el("span", "sbar-num", `${cell.count} · ${fmtEstimate(cell.sum)}`));
   const sprints = model && cell.bySprint ? [...cell.bySprint.keys()].map((id) => model.sprintById.get(id)).filter(Boolean).map((s) => `${s.name} · ${model.teamOf(s).name}`) : [];
+  if (cell.bySprint && cell.bySprint.has("planned")) sprints.push(t("gantt.plannedHint"));
   b.title = [title, t("gantt.doneShare", { done: doneN, total: cell.issues.length }), ...sprints].join("\n");
   b.onclick = (ev) => gantt.showIssues(ev.currentTarget, title, cell.issues);
   return b;

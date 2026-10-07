@@ -949,7 +949,7 @@ await settings.save({ infoSystems: [], fields: { plannedStart: "", plannedEnd: "
   const saved = { fields: { ...settings.get().fields }, useTempoTeams: settings.get().useTempoTeams, flowWeeks: settings.get().flowWeeks, lastSync: settings.get().lastSync };
   await settings.save({ fields: { ...saved.fields, epicLink: "customfield_10100", sprint: "customfield_10101", version: 5 }, useTempoTeams: false, flowWeeks: 4, lastSync: Date.now() - 3600000 });
   await dbm.clearAll();
-  await dbm.metaSet("issueSchema", 6); // текущая схема задач — иначе «Обновить» станет полной выгрузкой
+  await dbm.metaSet("issueSchema", 7); // текущая схема задач — иначе «Обновить» станет полной выгрузкой
   await dbm.putAll(dbm.STORES.epics, [{ key: "EP-A", summary: "Эпик А" }]);
   await dbm.putAll(dbm.STORES.issues, [
     mk("KEEP-1", "EP-A", "AAA", "Ivan", null, 1, "prog"),
@@ -2952,6 +2952,57 @@ check("пиктограмма 💬 есть и на «По эпикам и лю�
   renderOpen(box, mN, { mode: "epicPeople" });
   check("По эпикам: без заметок в опциях ни строк, ни галочки, а 💬 без «заметки»", !box.querySelector(".s-note") && !box.querySelector(".s-notes-toggle"));
   box.remove();
+}
+
+// Задачи без спринта с плановыми датами: встают в секцию по плановому началу (все три ракурса).
+{
+  const stories = await import("../src/js/stories.js");
+  const plan = (key, epic, who, hours, plannedStart, st = "new") => ({ ...mk(key, epic, "AAA", who, null, hours, st), plannedStart, plannedEnd: "" });
+  const EPS = [{ key: "EP-1", summary: "Личный кабинет", statusName: "В работе", statusCategory: "indeterminate" }];
+  const set = [
+    plan("P-NOW", "EP-1", "Ivan", 2, ymd(2)), // плановое начало в текущей секции
+    plan("P-NEXT", "EP-1", "Ivan", 3, ymd(16)), // в следующей
+    plan("P-PAST", "EP-1", "Ivan", 4, ymd(-30)), // в прошлом → текущая секция
+    plan("P-WORK", "EP-1", "Ivan", 5, ymd(16), "prog"), // в работе → правило не действует
+    plan("P-DONE", "EP-1", "Ivan", 6, ymd(16), "done"), // готова → не на шкале
+    { ...mk("P-NONE", "EP-1", "AAA", "Ivan", null, 7, "new"), plannedStart: "" } // без дат → бэклог
+  ];
+  check("План: плановое начало берётся только у задач без спринта, не в работе и не готовых",
+    agg.plannedStartOf(set[0]) === ymd(2) && agg.plannedStartOf(set[3]) === "" && agg.plannedStartOf(set[4]) === "" && agg.plannedStartOf({ ...set[0], sprintId: 2 }) === "");
+  const m = agg.buildModel({ issues: set, others: [], sprints, epics: EPS, boards, mode: "epicPeople" });
+  const g = m.groups.find((x) => x.key === "EP-1");
+  const keysIn = (secId) => [...(g.cells.get(secId)?.issues || [])].map((i) => i.key).sort().join();
+  check("План: задача с плановым началом в текущей секции и задача из прошлого — обе в текущей секции (рядом с канбан-задачей в работе)",
+    keysIn(m.currentId) === "P-NOW,P-PAST,P-WORK", keysIn(m.currentId));
+  check("План: задача с плановым началом в следующей секции — в ней", keysIn(m.columns[1].id) === "P-NEXT", keysIn(m.columns[1].id));
+  check("План: задача в работе осталась отрезком «Вне спринта», готовая и беcплановая — не на шкале",
+    g.cells.get(m.currentId).bySprint.get(agg.OFF_SPRINT_ID)?.issues.map((i) => i.key).join() === "P-WORK" &&
+      ![...g.cells.values()].some((c) => c.issues.some((i) => i.key === "P-DONE" || i.key === "P-NONE")));
+  check("План: без плановых дат задача по-прежнему в бэклоге", g.backlog.issues.map((i) => i.key).join() === "P-NONE");
+  check("План: отрезок на шкале помечен отдельно, задача в списке — тоже",
+    !!g.cells.get(m.currentId).bySprint.get(agg.PLANNED_ID) && g.cells.get(m.currentId).issues.find((i) => i.key === "P-NOW").planned === ymd(2));
+  const box = document.createElement("div");
+  document.body.append(box);
+  renderOpen(box, m, { mode: "epicPeople" });
+  const pbar = box.querySelector(".bar.nested.planned");
+  check("План: на «По эпикам» — отрезок «По плану» с подсказкой", !!pbar && pbar.textContent.includes(t("gantt.planned")) && pbar.title.includes(t("gantt.plannedHint")));
+  pbar.click();
+  check("План: в списке задач такой отрезок помечает задачи знаком ◷", document.querySelector(".tooltip.tip-issues .ti-planned")?.title.includes(ymd(2)));
+  document.querySelector(".tooltip .tip-close")?.click();
+  box.remove();
+
+  const mA = agg.buildModel({ issues: set, others: [{ ...plan("O-1", "EP-9", "Ivan", 2, ymd(16)), epicSummary: "Миграция" }], sprints, epics: EPS, boards, mode: "assignee" });
+  const ivan = mA.groups.find((x) => x.label === "Ivan");
+  check("План: на «По людям» правило работает и для задач вне целевых эпиков",
+    ivan.cells.get(mA.currentId).issues.map((i) => i.key).sort().join() === "P-NOW,P-PAST,P-WORK" && ivan.otherCells.get(mA.columns[1].id)?.issues.map((i) => i.key).join() === "O-1",
+    `${ivan.cells.get(mA.currentId).issues.map((i) => i.key).join()} / ${ivan.otherCells.get(mA.columns[1].id)?.issues.map((i) => i.key).join()}`);
+  const load = agg.personLoad(mA, set, []);
+  check("План: такие задачи входят в загрузку человека", (load.byName.get("ivan")?.get(mA.currentId) || 0) > 0);
+
+  const mS = stories.buildStoryModel({ epics: EPS, issues: [...set, { ...mk("P-S", "EP-1", "AAA", "Ivan", null, 0, "new"), typeName: "История", links: [{ type: "Relates", key: "P-NEXT", typeName: "Задача" }] }], sprints, boards, storyTypes: ["история"], excludeTypes: ["история"], linkType: "Relates" });
+  const sn = mS.projects[0].epics[0].stories[0];
+  check("План: на «Эпик — история» задача истории встаёт в секцию по плановому началу",
+    sn.cells.get(mS.columns[1].id)?.issues.map((i) => i.key).join() === "P-NEXT", [...sn.cells.keys()].join());
 }
 
 const total = document.createElement("div");

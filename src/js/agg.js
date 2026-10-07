@@ -160,6 +160,18 @@ export function sprintStepDays(sprints) {
 }
 
 export const NO_DATES_ID = "sec:nodate";
+// Отрезок задач, размещённых по плановым датам (без спринта).
+export const PLANNED_ID = "planned";
+// Насколько шкала может вырасти ради плановых дат за пределы последнего спринта с задачами.
+const PLANNED_EXTRA_SECTIONS = 6;
+
+// Плановое начало задачи, если по нему её нужно ставить на шкалу: задача не в спринте, не в работе
+// (такие идут в текущую секцию отдельным правилом) и не готова.
+export function plannedStartOf(issue) {
+  if (!issue || issue.sprintId != null) return "";
+  if (isDone(issue) || isOffSprintWork(issue)) return "";
+  return issue.plannedStart || "";
+}
 
 // Секции от текущего спринта в будущее; хвост секций без задач отбрасываем, а пустые
 // секции между занятыми оставляем — шкала времени должна быть честной.
@@ -218,6 +230,16 @@ export function timeline(sprints, issues, now = Date.now()) {
   const hasIssues = (sec) => sec.sprints.some((s) => used.has(s.id));
   let last = 0;
   for (const sec of byIndex.values()) if (hasIssues(sec)) last = Math.max(last, sec.index);
+  // Задачи без спринта, но с плановым началом, тоже занимают место на шкале: если их плановая
+  // секция дальше последнего спринта, шкала продлевается — но не больше чем на несколько секций,
+  // иначе одна задача с датой через год растянула бы диаграмму.
+  const limit = last + PLANNED_EXTRA_SECTIONS;
+  for (const i of issues) {
+    const d = dayOf(plannedStartOf(i));
+    if (d == null) continue;
+    const idx = Math.max(0, Math.floor((d - origin) / step));
+    last = Math.max(last, Math.min(idx, limit));
+  }
 
   const sections = [];
   for (let i = 0; i <= last; i++) {
@@ -393,6 +415,20 @@ export function isOffSprintWork(issue) {
   return issue.sprintId == null && issue.statusCategory === "indeterminate" && !isDone(issue);
 }
 
+// Секция задачи, размещаемой по плановому началу: та, в чьи даты оно попадает; если плановое начало
+// в прошлом (раньше конца текущей секции) — текущая. Позже последней секции шкалы — null, такая
+// задача остаётся в бэклоге.
+export function plannedSectionId(issue, columns, currentId) {
+  const start = plannedStartOf(issue);
+  const d = start ? startOfDay(ts(start) ?? NaN) : null;
+  if (!start || d == null || Number.isNaN(d)) return null;
+  const dated = columns.filter((c) => c.start != null);
+  if (!dated.length) return null;
+  if (d < dated[0].end) return currentId || dated[0].id;
+  const hit = dated.find((c) => d >= c.start && d < c.end);
+  return hit ? hit.id : null;
+}
+
 // Краткая карточка задачи для списков.
 export function briefOf(issue, est, done) {
   return {
@@ -405,7 +441,9 @@ export function briefOf(issue, est, done) {
     sprintId: issue.sprintId ?? null,
     estimate: est,
     done,
-    offSprint: isOffSprintWork(issue)
+    offSprint: isOffSprintWork(issue),
+    // Задача без спринта, поставленная на шкалу по плановому началу.
+    planned: plannedStartOf(issue) || ""
   };
 }
 
@@ -550,6 +588,15 @@ export function buildModel({ issues: allIssues, others = [], sprints, epics, boa
         }
         continue;
       }
+      // Не в спринте и не в работе, но с плановым началом — в секцию по этой дате.
+      const planSec = plannedSectionId(issue, columns, currentId);
+      if (planSec) {
+        for (const bag of [g.cells, p.cells]) {
+          if (!bag.has(planSec)) bag.set(planSec, emptyCell());
+          addTo(bag.get(planSec), PLANNED_ID, est, brief);
+        }
+        continue;
+      }
       // Выполненную задачу вне спринта считать нечего — в бэклог идут только незакрытые.
       if (!done) {
         g.noSprint += 1;
@@ -584,16 +631,18 @@ export function buildModel({ issues: allIssues, others = [], sprints, epics, boa
       const oe = g.otherEpics.get(ek);
       oe.count += 1;
       oe.sum += est;
-      // Прочие без спринта учитываем, только если они в работе (канбан) — в текущей секции.
+      // Прочие без спринта учитываем, если они в работе (канбан) — в текущей секции — или стоят
+      // на шкале по плановому началу.
       const offSprint = !!currentId && isOffSprintWork(issue);
-      if (issue.sprintId == null && !offSprint) continue;
-      if (!offSprint) {
+      const planSec = offSprint ? null : plannedSectionId(issue, columns, currentId);
+      if (issue.sprintId == null && !offSprint && !planSec) continue;
+      if (!offSprint && !planSec) {
         const team = teamsInfo.of(sprintById.get(issue.sprintId));
         if (team.id) g.teamVotes.set(team.id, (g.teamVotes.get(team.id) || 0) + 1);
       }
-      const secId = offSprint ? currentId : sectionOfSprint.get(issue.sprintId);
+      const secId = offSprint ? currentId : planSec || sectionOfSprint.get(issue.sprintId);
       if (!secId) continue;
-      const partId = offSprint ? OFF_SPRINT_ID : issue.sprintId;
+      const partId = offSprint ? OFF_SPRINT_ID : planSec ? PLANNED_ID : issue.sprintId;
       const brief = briefOf(issue, est, isDone(issue));
       if (!g.otherCells.has(secId)) g.otherCells.set(secId, emptyCell());
       addTo(g.otherCells.get(secId), partId, est, brief);
@@ -761,7 +810,8 @@ export function personLoad(model, issues, others, excludeTypes = []) {
   const byName = new Map();
   for (const i of [...issues, ...others]) {
     if (!i.assigneeName || isExcludedType(i.typeName, excludeTypes)) continue;
-    const secId = isOffSprintWork(i) && inLoad.has(model.currentId) ? model.currentId : sectionOf.get(i.sprintId);
+    const planSec = plannedSectionId(i, model.columns, model.currentId);
+    const secId = isOffSprintWork(i) && inLoad.has(model.currentId) ? model.currentId : planSec || sectionOf.get(i.sprintId);
     if (!secId) continue;
     const key = normPerson(i.assigneeName);
     if (!byName.has(key)) byName.set(key, new Map());

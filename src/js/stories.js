@@ -74,6 +74,12 @@ function addIssue(node, issue, brief, ctx) {
       agg.addTo(cellOf(ctx.currentId), agg.OFF_SPRINT_ID, brief.estimate, brief);
       return;
     }
+    // Не в спринте и не в работе, но с плановым началом — в секцию по этой дате.
+    const planSec = agg.plannedSectionId(issue, ctx.columns, ctx.currentId);
+    if (planSec) {
+      agg.addTo(cellOf(planSec), agg.PLANNED_ID, brief.estimate, brief);
+      return;
+    }
     if (!brief.done) {
       node.noSprint += 1;
       agg.addTo(node.backlog, null, brief.estimate, brief);
@@ -126,7 +132,7 @@ export function buildStoryModel({
   const base = agg.buildModel({ issues: [], others: [], sprints, epics: [], boards, mode: "epicPeople", timelineIssues: timelineIssues || [...issues, ...linked] });
   const sectionOfSprint = new Map();
   for (const sec of base.columns) for (const s of sec.sprints) sectionOfSprint.set(s.id, sec.id);
-  const ctx = { currentId: base.currentId, sectionOfSprint };
+  const ctx = { currentId: base.currentId, sectionOfSprint, columns: base.columns };
 
   const isStory = (i) => isExcludedType(i.typeName, storyTypes);
   const isEpicType = (typeName) => String(typeName || "").trim().toLowerCase() === "epic";
