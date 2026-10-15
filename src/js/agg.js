@@ -434,6 +434,7 @@ export function briefOf(issue, est, done) {
   return {
     key: issue.key,
     summary: issue.summary || "",
+    priority: issue.priority || null, // пиктограмма приоритета во всплывающем списке задач
     statusName: issue.statusName || "",
     statusCategory: issue.statusCategory || "",
     assigneeName: issue.assigneeName || "",
@@ -469,7 +470,7 @@ export function epicMilestone(epic) {
 // На «По эпикам» их задачи не участвуют ни в полосах, ни в подсказках, ни в отборе людей (Р9): история —
 // контейнер, её оценка дублирует оценки задач. «По людям» по-прежнему показывает все задачи человека.
 // excludeTypeNames — те же типы в написании из настроек, для JQL-ссылок подсказки.
-export function buildModel({ issues: allIssues, others = [], sprints, epics, boards = [], tempo = [], profiles = [], mode, timelineIssues = null, excludeTypes = [], excludeTypeNames = [] }) {
+export function buildModel({ issues: allIssues, others = [], sprints, epics, boards = [], tempo = [], profiles = [], priorities = [], mode, timelineIssues = null, excludeTypes = [], excludeTypeNames = [] }) {
   const epicLike = mode !== "assignee"; // группы — эпики
   const issues = mode === "epicPeople" && excludeTypes.length ? allIssues.filter((i) => !isExcludedType(i.typeName, excludeTypes)) : allIssues;
   // «По людям» — про загрузку: берём остаток, если он проставлен, иначе исходную оценку.
@@ -741,6 +742,7 @@ export function buildModel({ issues: allIssues, others = [], sprints, epics, boa
     teamOf: teamsInfo.of,
     teamOfSprint: (id) => teamsInfo.of(sprintById.get(id)),
     sprintById,
+    priorities, // порядок приоритетов Jira — для пиктограмм в списках задач
     targetKeys: epics.map((e) => e.key),
     // Типы, исключённые из подсчётов: подсказка «По эпикам» добавляет их в JQL, чтобы числа совпадали с Jira.
     excludeTypeNames: mode === "epicPeople" ? excludeTypeNames : [],

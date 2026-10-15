@@ -1752,6 +1752,10 @@ check("по клику на полосу EP-1 в секции 0 — 3 задач
 check("задачи отсортированы по ключу", issueRows.map((r) => r.querySelector(".ti-key").textContent).join(",") === "A-1,A-2,A-7", issueRows.map((r) => r.querySelector(".ti-key").textContent).join(","));
 check("ключ и название ведут в Jira в новой вкладке", issueRows.every((r) => r.querySelector(".ti-key a")?.target === "_blank" && r.querySelector(".ti-key a").href.endsWith("/browse/" + r.querySelector(".ti-key").textContent)));
 check("готовая задача помечена", issueRows.find((r) => r.querySelector(".ti-key").textContent === "A-1")?.classList.contains("issue-done"));
+check("во всплывашке слева от ключа — пиктограмма приоритета", issueRows.every((r) => {
+  const ic = r.querySelector(".ti-key").firstElementChild;
+  return ic && (ic.classList.contains("prio-icon") || ic.classList.contains("prio-dot")) && ic.nextElementSibling?.classList.contains("tip-link");
+}));
 check("заголовок окна — эпик и спринты секции", document.querySelector(".tooltip.tip-issues strong").textContent.includes("Sprint 2") && document.querySelector(".tooltip.tip-issues strong").textContent.includes("EP-1"));
 check("окно не закрылось от собственного клика", !!document.querySelector(".tooltip.tip-issues"));
 backlogBar.click();
@@ -1759,6 +1763,33 @@ issueRows = [...document.querySelectorAll(".tooltip.tip-issues .issues-table tr"
 check("клик по бэклогу — задача A-6", issueRows.length === 1 && issueRows[0].querySelector(".ti-key").textContent === "A-6");
 document.querySelector(".tip-close").click();
 check("окно закрывается крестиком", !document.querySelector(".tooltip"));
+
+// Пиктограмма приоритета во всплывающем списке задач: картинка Jira у задачи с приоритетом,
+// запасной кружок — у задачи без него (цвет берётся из порядка приоритетов модели).
+{
+  const PR = [{ id: "1", name: "Highest", iconUrl: "data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==" }, { id: "4", name: "Low", iconUrl: "" }];
+  const issP = [
+    { ...mk("P-1", "EP-1", "AAA", "Ivan", 2, 4), priority: { id: "1", name: "Highest", iconUrl: "data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==" } },
+    mk("P-2", "EP-1", "AAA", "Ivan", 2, 2)
+  ];
+  const mp = agg.buildModel({ issues: issP, others: [], sprints, epics, boards, priorities: PR, mode: "epicPeople" });
+  check("порядок приоритетов доехал до модели", mp.priorities === PR);
+  const boxP = document.createElement("div");
+  document.body.append(boxP);
+  renderOpen(boxP, mp, { mode: "epicPeople" });
+  boxP.querySelector(".g-row.group .c-cell .bar-group").click();
+  const rowsP = [...document.querySelectorAll(".tooltip.tip-issues .issues-table tr")];
+  const iconOf = (key) => rowsP.find((r) => r.querySelector(".ti-key").textContent === key)?.querySelector(".ti-key").firstElementChild;
+  const img = iconOf("P-1");
+  const dot = iconOf("P-2");
+  check("во всплывашке у задачи с приоритетом — картинка Jira с названием в подсказке",
+    img?.tagName === "IMG" && img.classList.contains("prio-icon") && img.src === "data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==" && img.title === "Highest",
+    `${img?.tagName} / ${img?.title}`);
+  check("без приоритета — запасной кружок, цвет из порядка приоритетов",
+    dot?.classList.contains("prio-dot") && dot.style.background !== "" && dot.title === t("prio.none"), dot?.style.background);
+  document.querySelector(".tip-close").click();
+  boxP.remove();
+}
 const teamRows = [...document.querySelectorAll("#g2 .g-row.team .tlabel")].map((n) => n.textContent);
 check("строки команд на вкладке по людям", teamRows.join(",") === "Alpha,Beta", teamRows.join(","));
 {

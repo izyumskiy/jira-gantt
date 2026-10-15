@@ -7,6 +7,7 @@ import { fmtEstimate, NO_DATES_ID, BACKLOG_ID, OFF_SPRINT_ID, PLANNED_ID, sprint
 import * as settings from "./settings.js";
 import { cfId, escapeJql, comments as jiraComments, addComment as jiraAddComment, userSearch as jiraUserSearch } from "./jira.js";
 import * as omg from "./omg.js";
+import * as prio from "./priority.js";
 import { noteRow, noteToShow, notesToggle, publishNote, publishError } from "./notes.js";
 
 // Комментарии эпика — через это, чтобы самопроверка могла подменить Jira заглушкой.
@@ -581,7 +582,15 @@ export function chartHead(model, rerender, { title, hint = "", widthKey = "", co
   return thead;
 }
 
+// Порядок приоритетов Jira для списков задач: всплывашка вызывается без модели, поэтому
+// порядок запоминает тот ракурс, который рисуется (без него запасные кружки были бы все серые).
+let prioOrder = [];
+export function setPriorityOrder(order) {
+  prioOrder = order || [];
+}
+
 export function render(container, model, opts) {
+  setPriorityOrder(model.priorities);
   const { mode, profiles = [], highlightChild = "", onChildClick = null, personLoad = null } = opts;
   const epicLike = mode !== "assignee";
   // Профили людей (вкладка «Команда») — по нормализованному имени.
@@ -1294,7 +1303,7 @@ export function showIssues(anchor, title, issues) {
   for (const it of sorted) {
     const tr = el("tr", it.done ? "issue-done" : "");
     const keyCell = el("td", "ti-key");
-    keyCell.append(maybeLink(it.key, browseUrl(it.key), "tip-link"));
+    keyCell.append(prio.icon(it.priority || null, prioOrder, t), maybeLink(it.key, browseUrl(it.key), "tip-link"));
     if (it.offSprint) {
       const mark = el("span", "ti-offsprint", "⊘");
       mark.title = t("gantt.offSprintHint");

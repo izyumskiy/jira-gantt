@@ -221,6 +221,7 @@ function nameHead() {
 }
 
 export function render(container, model, opts = {}) {
+  gantt.setPriorityOrder(model.priorities);
   const restoreScroll = gantt.keepScroll(container);
   container.textContent = "";
   if (!model.projects.length) {
