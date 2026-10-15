@@ -949,6 +949,8 @@ textarea { font: inherit; padding: 5px 8px; border: 1px solid var(--line); borde
 .tip-sub-title { font-weight: 400; font-size: 12px; color: var(--muted); }
 .tooltip.tip-issues { min-width: 420px; max-width: 640px; }
 .issues-table .ti-key { white-space: nowrap; vertical-align: top; padding-right: 8px; font-weight: 600; }
+/* Пиктограмма приоритета Jira слева от ключа: у запасного кружка свои поля — здесь они лишние. */
+.issues-table .ti-key .prio-dot { margin: 0 5px 0 0; }
 .issues-table .ti-summary { width: 100%; }
 .issues-table .ti-summary-link { color: var(--text); text-decoration: none; }
 .issues-table .ti-summary-link:hover { color: var(--accent); text-decoration: underline; }

@@ -1397,14 +1397,15 @@ function epicMatchesFilter(epic, filter) {
 
 async function drawGantt(mode, container) {
   try {
-    const [issues, others, sprints, epics, boards, profiles, tempo] = await Promise.all([
+    const [issues, others, sprints, epics, boards, profiles, tempo, priorities] = await Promise.all([
       db.all(db.STORES.issues),
       db.all(db.STORES.others),
       db.all(db.STORES.sprints),
       db.all(db.STORES.epics),
       db.all(db.STORES.boards),
       db.all(db.STORES.people),
-      db.all(db.STORES.tempo)
+      db.all(db.STORES.tempo),
+      db.metaGet("priorities", [])
     ]);
     let target = container;
     const s = settings.get();
@@ -1435,6 +1436,7 @@ async function drawGantt(mode, container) {
       boards,
       tempo,
       profiles,
+      priorities: priorities || [],
       mode,
       timelineIssues: [...issues, ...others],
       // На «По эпикам» истории не считаются (Р9), как в списке, карточке и «Сводке».
