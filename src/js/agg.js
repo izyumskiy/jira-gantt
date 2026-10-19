@@ -513,41 +513,46 @@ export function buildModel({ issues: allIssues, others = [], sprints, epics, boa
     return i.assigneeName || t("gantt.noAssignee");
   };
 
+  const newGroup = (gk, label, login) => {
+    const epic = epicLike ? epicById.get(gk) : null;
+    const cls = epic ? classify(epic.statusName, epic.statusCategory) : null;
+    return {
+      key: gk,
+      label,
+      status: epic ? { name: epic.statusName || "", category: epic.statusCategory || "", id: cls.id } : null,
+      statusRank: cls ? cls.rank : 0,
+      epic: epic || null, // запись эпика — для заметок и карточек
+      dueDate: epic ? epic.dueDate || "" : "", // срок исполнения эпика
+      milestone: epicMilestone(epic), // веха на диаграмме: срок исполнения или плановое завершение (Р7)
+      login,
+      team: null,
+      teamVotes: new Map(),
+      count: 0,
+      done: 0,
+      other: 0,
+      sum: 0,
+      noSprint: 0,
+      // Реальные названия статусов из загруженных задач — из них строятся ссылки на JQL.
+      doneStatuses: new Set(),
+      openStatuses: new Set(),
+      cells: new Map(),
+      // Бэклог: задачи без спринта и не в статусе «Готово».
+      backlog: emptyCell(),
+      projects: new Map(),
+      // Прочие эпики человека: итоги, ячейки по секциям и разбивка по эпикам.
+      otherCount: 0,
+      otherSum: 0,
+      otherCells: new Map(),
+      otherEpics: new Map()
+    };
+  };
+  // Эпики показываем все, что выбраны на «Поиске», даже если задач в них нет: пустая строка
+  // честнее отсутствия — видно, что эпик заведён, а работа по нему ещё не началась.
+  if (epicLike) for (const e of epics) if (e.key) groups.set(e.key, newGroup(e.key, epicLabel(e.key), ""));
+
   for (const issue of issues) {
     const gk = groupKeyOf(issue);
-    if (!groups.has(gk)) {
-      const epic = epicLike ? epicById.get(gk) : null;
-      const cls = epic ? classify(epic.statusName, epic.statusCategory) : null;
-      groups.set(gk, {
-        key: gk,
-        label: groupLabelOf(issue),
-        status: epic ? { name: epic.statusName || "", category: epic.statusCategory || "", id: cls.id } : null,
-        statusRank: cls ? cls.rank : 0,
-        epic: epic || null, // запись эпика — для заметок и карточек
-        dueDate: epic ? epic.dueDate || "" : "", // срок исполнения эпика
-        milestone: epicMilestone(epic), // веха на диаграмме: срок исполнения или плановое завершение (Р7)
-        login: mode === "assignee" ? issue.assigneeLogin || "" : "",
-        team: null,
-        teamVotes: new Map(),
-        count: 0,
-        done: 0,
-        other: 0,
-        sum: 0,
-        noSprint: 0,
-        // Реальные названия статусов из загруженных задач — из них строятся ссылки на JQL.
-        doneStatuses: new Set(),
-        openStatuses: new Set(),
-        cells: new Map(),
-        // Бэклог: задачи без спринта и не в статусе «Готово».
-        backlog: emptyCell(),
-        projects: new Map(),
-        // Прочие эпики человека: итоги, ячейки по секциям и разбивка по эпикам.
-        otherCount: 0,
-        otherSum: 0,
-        otherCells: new Map(),
-        otherEpics: new Map()
-      });
-    }
+    if (!groups.has(gk)) groups.set(gk, newGroup(gk, groupLabelOf(issue), mode === "assignee" ? issue.assigneeLogin || "" : ""));
     const g = groups.get(gk);
     const est = estOf(issue);
     const done = isDone(issue);
