@@ -1790,6 +1790,26 @@ check("окно закрывается крестиком", !document.querySelec
   document.querySelector(".tip-close").click();
   boxP.remove();
 }
+
+// Эпики из «Поиска» показываем все, даже без задач — и на «По эпикам», и на «Эпик — история».
+{
+  const storiesMod = await import("../src/js/stories.js");
+  const EMPTY = { key: "EP-77", summary: "Пустой эпик", statusName: "Сделать", statusCategory: "new", dueDate: ymd(20) };
+  const mE = agg.buildModel({ issues, others, sprints, epics: [...epics, EMPTY], boards, mode: "epicPeople" });
+  const gE = mE.groups.find((g) => g.key === "EP-77");
+  check("По эпикам: эпик без задач есть в модели, итоги нулевые", !!gE && gE.count === 0 && gE.sum === 0 && gE.label.includes("Пустой эпик"), gE ? `${gE.count} / ${gE.sum}` : "нет группы");
+  check("По эпикам: у эпика без задач остались статус и веха срока", gE?.status?.name === "Сделать" && gE?.milestone?.kind === "due", `${gE?.status?.id} / ${gE?.milestone?.kind}`);
+  const boxE = document.createElement("div");
+  document.body.append(boxE);
+  renderOpen(boxE, mE, { mode: "epicPeople" });
+  const rowE = [...boxE.querySelectorAll(".g-row.group")].find((r) => r.querySelector(".glabel")?.textContent.includes("EP-77"));
+  check("По эпикам: строка пустого эпика нарисована и полос в ней нет", !!rowE && !rowE.querySelector(".c-cell .bar") && !rowE.nextElementSibling?.classList.contains("proj"));
+  check("По эпикам: эпики с задачами на месте", boxE.querySelectorAll(".g-row.group").length === mE.groups.length);
+  boxE.remove();
+  const mS = storiesMod.buildStoryModel({ epics: [...epics, EMPTY], issues, sprints, boards, storyTypes: ["история"], excludeTypes: ["история"] });
+  const keysS = mS.projects.flatMap((p) => p.epics.map((e) => e.key));
+  check("Эпик — история: эпик без задач тоже показан", keysS.includes("EP-77"), keysS.join());
+}
 const teamRows = [...document.querySelectorAll("#g2 .g-row.team .tlabel")].map((n) => n.textContent);
 check("строки команд на вкладке по людям", teamRows.join(",") === "Alpha,Beta", teamRows.join(","));
 {
