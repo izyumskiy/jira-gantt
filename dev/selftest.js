@@ -179,6 +179,25 @@ check("подпись секции — диапазон дат", /^\d{2}\.\d{2} 
   check("сдвиг команд: спринт, закончившийся до сегодня, на график не попадает", secOf(16) === "—", secOf(16));
 }
 
+// 2d. спринт с промахом в дате конца не уезжает в соседнюю колонку
+{
+  const at = (offsetDays, h = 10) => { const x = new Date(); x.setHours(h, 0, 0, 0); x.setDate(x.getDate() + offsetDays); return x.toISOString(); };
+  const sp = [
+    { id: 24, name: "24.2026 WEB", state: "ACTIVE", startDate: at(-3), endDate: at(10), boardId: 1 },
+    // Конец промахнулся на спринт вперёд: 28 дней вместо 14 — середина уезжает за границу секции.
+    { id: 25, name: "25.2026 WEB", state: "FUTURE", startDate: at(11), endDate: at(39), boardId: 1 },
+    { id: 26, name: "26.2026 WEB", state: "FUTURE", startDate: at(25), endDate: at(38), boardId: 1 },
+    { id: 35, name: "25.2026 DEVOPS", state: "FUTURE", startDate: at(11), endDate: at(24), boardId: 2 },
+    { id: 36, name: "26.2026 DEVOPS", state: "FUTURE", startDate: at(25), endDate: at(38), boardId: 2 }
+  ];
+  const spIssues = sp.map((x) => mk(`T-${x.id}`, "EP-1", "AAA", "Ivan", x.id, 1));
+  const cols = agg.timeline(sp, spIssues);
+  const secOf = (id) => cols.find((c) => c.sprints.some((x) => x.id === id))?.id || "—";
+  check("кривой спринт встаёт туда же, где спринт того же номера у других команд", secOf(25) === secOf(35), `${secOf(25)} / ${secOf(35)}`);
+  check("следующие спринты обеих команд — в следующей секции", secOf(26) === secOf(36) && secOf(26) !== secOf(25), `${secOf(26)} / ${secOf(36)} / ${secOf(25)}`);
+  check("шаг шкалы кривой спринт не сбил", agg.sprintStepDays(sp) === 14, String(agg.sprintStepDays(sp)));
+}
+
 // 2c. шкала одинакова на вкладках и не зависит от фильтров
 {
   const all = [...issues, ...others];
