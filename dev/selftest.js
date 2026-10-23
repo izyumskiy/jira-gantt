@@ -1791,6 +1791,39 @@ check("окно закрывается крестиком", !document.querySelec
   boxP.remove();
 }
 
+// Удалённый в Jira спринт: поштучная проверка отвечает 404 — такой спринт выкидываем из базы,
+// иначе он навсегда остаётся точкой в шапке секции (шкала строится по всем незакрытым спринтам).
+{
+  const syncMod = await import("../src/js/sync.js");
+  const origFetch = window.fetch;
+  const json = (obj, status = 200) => new Response(JSON.stringify(obj), { status, headers: { "Content-Type": "application/json" } });
+  const live = { id: 11, name: "Спринт 11", state: "ACTIVE", startDate: "2026-10-01T10:00:00.000+03:00", endDate: "2026-10-15T10:00:00.000+03:00", originBoardId: 3 };
+  const mapOf = () => new Map([
+    [11, { id: 11, name: "Спринт 11", state: "ACTIVE", startDate: live.startDate, endDate: live.endDate, boardId: 3, source: "db" }],
+    [12, { id: 12, name: "Спринт 12", state: "FUTURE", startDate: null, endDate: null, boardId: 3, source: "db" }]
+  ]);
+  // Доска недоступна (её тоже могли удалить) — спринты проверяются поштучно.
+  window.fetch = async (url) => {
+    const u = String(url);
+    if (u.includes("/rest/agile/1.0/board/")) return json({ errorMessages: ["gone"] }, 404);
+    if (u.includes("/rest/agile/1.0/sprint/11")) return json(live);
+    if (u.includes("/rest/agile/1.0/sprint/12")) return json({ errorMessages: ["Sprint does not exist"] }, 404);
+    return json({}, 404);
+  };
+  const map = mapOf();
+  const st = await syncMod.refreshSprints(map);
+  check("спринт с 404 выброшен из набора, живой остался", [...map.keys()].join() === "11" && st.gone === 1 && st.goneIds.join() === "12", `${[...map.keys()].join()} / ${st.gone} / ${st.goneIds.join()}`);
+  check("удалённый спринт не считается ошибкой перечитывания", st.agileFailed === 0 && st.agileOk === 1, `${st.agileFailed} / ${st.agileOk}`);
+  // Agile API закрыт целиком: 404 на каждый спринт — удалять нельзя, это не удаление, а отказ.
+  window.fetch = async () => json({ errorMessages: ["no agile"] }, 404);
+  const map2 = mapOf();
+  const st2 = await syncMod.refreshSprints(map2);
+  check("при недоступном Agile API спринты не удаляются, а числятся неперечитанными",
+    [...map2.keys()].join() === "11,12" && st2.gone === 0 && st2.goneIds.length === 0 && st2.agileFailed === 2,
+    `${[...map2.keys()].join()} / ${st2.gone} / ${st2.agileFailed}`);
+  window.fetch = origFetch;
+}
+
 // Эпики из «Поиска» показываем все, даже без задач — и на «По эпикам», и на «Эпик — история».
 {
   const storiesMod = await import("../src/js/stories.js");

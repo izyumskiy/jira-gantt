@@ -1193,7 +1193,8 @@ async function runSync(full) {
           dated: st.withDates,
           undated: st.noDates,
           named: st.fromName ? t("st.sprintsFromName", { n: st.fromName }) : "",
-          failed: st.agileFailed ? t("st.sprintsFailed", { n: st.agileFailed }) : ""
+          failed: st.agileFailed ? t("st.sprintsFailed", { n: st.agileFailed }) : "",
+          gone: st.gone ? t("st.sprintsGone", { n: st.gone }) : ""
         })
       );
       if (st.boardsFailed.length) lines.push(t("st.boardsFailed", { list: st.boardsFailed.join("; ") }));
