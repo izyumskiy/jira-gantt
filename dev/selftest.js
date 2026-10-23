@@ -179,6 +179,25 @@ check("подпись секции — диапазон дат", /^\d{2}\.\d{2} 
   check("сдвиг команд: спринт, закончившийся до сегодня, на график не попадает", secOf(16) === "—", secOf(16));
 }
 
+// 2d. спринт с промахом в дате конца не уезжает в соседнюю колонку
+{
+  const at = (offsetDays, h = 10) => { const x = new Date(); x.setHours(h, 0, 0, 0); x.setDate(x.getDate() + offsetDays); return x.toISOString(); };
+  const sp = [
+    { id: 24, name: "24.2026 WEB", state: "ACTIVE", startDate: at(-3), endDate: at(10), boardId: 1 },
+    // Конец промахнулся на спринт вперёд: 28 дней вместо 14 — середина уезжает за границу секции.
+    { id: 25, name: "25.2026 WEB", state: "FUTURE", startDate: at(11), endDate: at(39), boardId: 1 },
+    { id: 26, name: "26.2026 WEB", state: "FUTURE", startDate: at(25), endDate: at(38), boardId: 1 },
+    { id: 35, name: "25.2026 DEVOPS", state: "FUTURE", startDate: at(11), endDate: at(24), boardId: 2 },
+    { id: 36, name: "26.2026 DEVOPS", state: "FUTURE", startDate: at(25), endDate: at(38), boardId: 2 }
+  ];
+  const spIssues = sp.map((x) => mk(`T-${x.id}`, "EP-1", "AAA", "Ivan", x.id, 1));
+  const cols = agg.timeline(sp, spIssues);
+  const secOf = (id) => cols.find((c) => c.sprints.some((x) => x.id === id))?.id || "—";
+  check("кривой спринт встаёт туда же, где спринт того же номера у других команд", secOf(25) === secOf(35), `${secOf(25)} / ${secOf(35)}`);
+  check("следующие спринты обеих команд — в следующей секции", secOf(26) === secOf(36) && secOf(26) !== secOf(25), `${secOf(26)} / ${secOf(36)} / ${secOf(25)}`);
+  check("шаг шкалы кривой спринт не сбил", agg.sprintStepDays(sp) === 14, String(agg.sprintStepDays(sp)));
+}
+
 // 2c. шкала одинакова на вкладках и не зависит от фильтров
 {
   const all = [...issues, ...others];
@@ -1789,6 +1808,39 @@ check("окно закрывается крестиком", !document.querySelec
     dot?.classList.contains("prio-dot") && dot.style.background !== "" && dot.title === t("prio.none"), dot?.style.background);
   document.querySelector(".tip-close").click();
   boxP.remove();
+}
+
+// Удалённый в Jira спринт: поштучная проверка отвечает 404 — такой спринт выкидываем из базы,
+// иначе он навсегда остаётся точкой в шапке секции (шкала строится по всем незакрытым спринтам).
+{
+  const syncMod = await import("../src/js/sync.js");
+  const origFetch = window.fetch;
+  const json = (obj, status = 200) => new Response(JSON.stringify(obj), { status, headers: { "Content-Type": "application/json" } });
+  const live = { id: 11, name: "Спринт 11", state: "ACTIVE", startDate: "2026-10-01T10:00:00.000+03:00", endDate: "2026-10-15T10:00:00.000+03:00", originBoardId: 3 };
+  const mapOf = () => new Map([
+    [11, { id: 11, name: "Спринт 11", state: "ACTIVE", startDate: live.startDate, endDate: live.endDate, boardId: 3, source: "db" }],
+    [12, { id: 12, name: "Спринт 12", state: "FUTURE", startDate: null, endDate: null, boardId: 3, source: "db" }]
+  ]);
+  // Доска недоступна (её тоже могли удалить) — спринты проверяются поштучно.
+  window.fetch = async (url) => {
+    const u = String(url);
+    if (u.includes("/rest/agile/1.0/board/")) return json({ errorMessages: ["gone"] }, 404);
+    if (u.includes("/rest/agile/1.0/sprint/11")) return json(live);
+    if (u.includes("/rest/agile/1.0/sprint/12")) return json({ errorMessages: ["Sprint does not exist"] }, 404);
+    return json({}, 404);
+  };
+  const map = mapOf();
+  const st = await syncMod.refreshSprints(map);
+  check("спринт с 404 выброшен из набора, живой остался", [...map.keys()].join() === "11" && st.gone === 1 && st.goneIds.join() === "12", `${[...map.keys()].join()} / ${st.gone} / ${st.goneIds.join()}`);
+  check("удалённый спринт не считается ошибкой перечитывания", st.agileFailed === 0 && st.agileOk === 1, `${st.agileFailed} / ${st.agileOk}`);
+  // Agile API закрыт целиком: 404 на каждый спринт — удалять нельзя, это не удаление, а отказ.
+  window.fetch = async () => json({ errorMessages: ["no agile"] }, 404);
+  const map2 = mapOf();
+  const st2 = await syncMod.refreshSprints(map2);
+  check("при недоступном Agile API спринты не удаляются, а числятся неперечитанными",
+    [...map2.keys()].join() === "11,12" && st2.gone === 0 && st2.goneIds.length === 0 && st2.agileFailed === 2,
+    `${[...map2.keys()].join()} / ${st2.gone} / ${st2.agileFailed}`);
+  window.fetch = origFetch;
 }
 
 // Эпики из «Поиска» показываем все, даже без задач — и на «По эпикам», и на «Эпик — история».

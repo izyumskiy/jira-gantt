@@ -680,8 +680,8 @@ function toLocalIso(d) {
 
 // Обновление спринтов. Возвращает сводку — она уходит в строку статуса, чтобы было видно,
 // что именно перечитано и почему у спринта нет дат.
-async function refreshSprints(sprintMap) {
-  const stats = { boardsOk: 0, boardsFailed: [], boardsSkipped: 0, agileOk: 0, agileFailed: 0, fromName: 0, withDates: 0, noDates: 0 };
+export async function refreshSprints(sprintMap) {
+  const stats = { boardsOk: 0, boardsFailed: [], boardsSkipped: 0, agileOk: 0, agileFailed: 0, gone: 0, goneIds: [], fromName: 0, withDates: 0, noDates: 0 };
   const configured = String(settings.get().boardId || "");
   const boardIds = new Set();
   if (configured) boardIds.add(configured);
@@ -708,6 +708,9 @@ async function refreshSprints(sprintMap) {
   // Поштучно — все незакрытые спринты без дат (в т.ч. отданные доской без дат) и те, до которых
   // доска не дотянулась. Смена дат в Jira не меняет задачи, поэтому это единственный надёжный путь.
   const stale = [...sprintMap.values()].filter((s) => s.state !== "CLOSED" && (!s.startDate || s.source !== "board"));
+  // Спринт, которого больше нет в Jira, отвечает 404. Его нельзя просто оставить в базе: шкала
+  // строится по всем незакрытым спринтам, и удалённый так и будет давать точку команды в шапке.
+  const missing = [];
   for (let i = 0; i < stale.length; i += 5) {
     await Promise.all(
       stale.slice(i, i + 5).map(async (s) => {
@@ -719,11 +722,27 @@ async function refreshSprints(sprintMap) {
           }
         } catch (e) {
           if (isUnreachable(e)) throw e;
+          if (e && e.kind === "http" && e.code === 404) {
+            missing.push(s);
+            return;
+          }
           stats.agileFailed += 1;
           console.warn("[OhMyGant] sprint refresh failed", s.id, s.name, e);
         }
       })
     );
+  }
+  // Удаляем только если Agile API вообще отвечает: иначе 404 может означать закрытый доступ, и
+  // тогда мы бы вычистили живые спринты. Не подтверждённые — обычные «не удалось перечитать».
+  if (missing.length && stats.agileOk > 0) {
+    for (const s of missing) {
+      sprintMap.delete(s.id);
+      stats.goneIds.push(s.id);
+      console.warn("[OhMyGant] sprint gone from Jira, removed", s.id, s.name);
+    }
+    stats.gone = missing.length;
+  } else {
+    stats.agileFailed += missing.length;
   }
 
   // Запасной вариант: даты из названия спринта.
@@ -862,11 +881,14 @@ export async function sync({ full = false, onProgress = () => {} } = {}) {
     for (const s of issue._sprints || []) sprintMap.set(s.id, { ...s, source: "issue" });
     delete issue._sprints;
   }
-  // Инкрементальный синк тянет только изменённые задачи, поэтому уже сохранённые спринты
-  // берём из базы: их даты тоже надо обновить, хотя задачи в них могли не меняться.
-  if (!full) {
-    for (const s of await db.all(db.STORES.sprints)) if (!sprintMap.has(s.id)) sprintMap.set(s.id, s);
-  }
+  // Уже сохранённые спринты берём из базы: инкрементальный синк тянет только изменённые задачи,
+  // поэтому иначе их даты не обновились бы. При полной перезагрузке это тоже нужно — спринт, из
+  // которого убрали все задачи, не придёт ни из одной из них, а проверить его (жив ли он ещё в
+  // Jira) надо: удалённые отсюда и вычищаются.
+  // source: "db" — «в этот раз ещё не подтверждён»: доска перекроет его своим ответом, а что
+  // останется — пойдёт на поштучную проверку (иначе спринт, сохранённый доской месяц назад и с тех
+  // пор удалённый, так и не был бы проверен).
+  for (const s of await db.all(db.STORES.sprints)) if (!sprintMap.has(s.id)) sprintMap.set(s.id, { ...s, source: "db" });
 
   // Задачи людей вне целевых эпиков. Ошибка ответа здесь не должна ронять основную загрузку:
   // сообщаем о ней отдельно, а старый снимок оставляем.
@@ -1044,7 +1066,7 @@ export async function sync({ full = false, onProgress = () => {} } = {}) {
   if (tempo.rows) ops.push({ store: db.STORES.tempo, clear: true, put: tempo.rows });
   if (flow.rows) ops.push({ store: db.STORES.flow, clear: true, put: flow.rows });
   if (boards) ops.push({ store: db.STORES.boards, put: boards });
-  ops.push({ store: db.STORES.sprints, put: [...sprintMap.values()] });
+  ops.push({ store: db.STORES.sprints, del: sprintStats.goneIds, put: [...sprintMap.values()] });
   ops.push({ store: db.STORES.meta, put: [{ k: "issueSchema", v: ISSUE_SCHEMA }, { k: "lastApiLimited", v: !!apiStats.limited }] });
   if (states) {
     const week = flowlib.weekKey(syncId);

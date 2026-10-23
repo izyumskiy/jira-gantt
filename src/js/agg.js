@@ -218,7 +218,11 @@ export function timeline(sprints, issues, now = Date.now()) {
     }
     // Всё, что идёт сегодня, — в «текущем»; остальное — по середине спринта относительно отсчёта.
     const isRunning = a <= today && (b == null || today <= b);
-    const mid = b != null && b > a ? (a + b) / 2 : a;
+    // Длину считаем не больше шага шкалы: у спринта с промахом в дате конца (в Jira это не редкость —
+    // конец на спринт вперёд) середина уезжает вправо, и он встаёт в колонку рядом со спринтом того же
+    // номера у других команд. У нормального спринта длина и так не больше шага, для него ничего не меняется.
+    const len = b != null && b > a ? Math.min(b - a, step) : 0;
+    const mid = a + len / 2;
     const index = isRunning ? 0 : Math.max(0, Math.floor((mid - origin) / step));
     if (!byIndex.has(index)) {
       byIndex.set(index, { id: `sec:${index}`, index, start: origin + index * step, end: origin + (index + 1) * step, sprints: [] });
