@@ -23,9 +23,20 @@ const RECENT_MS = 8 * 7 * DAY; // кто закрывал задачи эпик�
 
 const isBt = (status, s) => acceptance.btStatuses(s).includes(String(status || "").trim().toLowerCase());
 
+// Окно задач-заглушек: спринты с датами → { from, to, days (рабочих) } или null.
+export function stubWindow(stubs, sprints) {
+  const byId = new Map(sprints.map((sp) => [sp.id, sp]));
+  const list = stubs.map((i) => byId.get(i.sprintId)).filter((sp) => sp && sp.startDate && sp.endDate);
+  if (!list.length) return null;
+  const from = Math.min(...list.map((sp) => Date.parse(sp.startDate)));
+  const to = Math.max(...list.map((sp) => Date.parse(sp.endDate)));
+  const days = workcal.workdaysBetween(from, to);
+  return days > 0 ? { from, to, days } : null;
+}
+
 // Входы расчёта. Чистая функция: данные плагина → аргументы portfolioForecast и сведения для факторов.
 // adj — действующие поправки LLM (adjustments.effective, у блокировок уже есть weeks) или null.
-export function buildInputs({ targetKey, epics, issues, flowRows, tempo = [], profiles = [], s, accItems = [], today = Date.now(), adj = null }) {
+export function buildInputs({ targetKey, epics, issues, flowRows, tempo = [], profiles = [], sprints = [], s, accItems = [], today = Date.now(), adj = null }) {
   const target = epics.find((e) => e.key === targetKey);
   if (!target) return { reason: "noEpic" };
   if (isDoneStatus(target.statusName, target.statusCategory)) return { reason: "done" };
@@ -81,12 +92,15 @@ export function buildInputs({ targetKey, epics, issues, flowRows, tempo = [], pr
   const customer = normName(target.reporterName);
   const acc = accItems.length ? acceptance.customerStats(accItems, customer) : null;
   const open = accItems.find((x) => x.key === targetKey && x.end == null);
+  // Нет завершённых приёмок ни у кого — бизнес-тест закладывается по окну задач-заглушек эпика:
+  // от начала первого их спринта до конца последнего (менеджеры ставят заглушки на время БТ).
+  const stubWin = stubWindow(issues.filter((i) => tStubs.includes(i.key)), sprints);
   const btSince = inBt ? (open ? open.start : today) : null;
   const tgt = portfolio.find((x) => x.key === targetKey);
   Object.assign(tgt, {
     inBt: btSince,
     inBtElapsed: btSince != null ? workcal.workdaysBetween(btSince, today) : 0,
-    acceptance: acc && acc.all.length ? { own: acc.own, all: acc.all, n: acc.n } : null,
+    acceptance: acc && acc.all.length ? { own: acc.own, all: acc.all, n: acc.n } : stubWin ? { own: [], all: [stubWin.days], n: 0 } : null,
     btFactor: adj ? adj.btFactor : 1,
     blockers: adj ? adj.blockers.filter((b) => b.weeks > 0).map((b) => ({ weeks: b.weeks, p: b.p })) : [],
     offDays: adj ? adjustments.absenceDays(adj.absence) : []
@@ -103,7 +117,7 @@ export function buildInputs({ targetKey, epics, issues, flowRows, tempo = [], pr
       cal: workcal.current(),
       overrides: { calendarOff: s.calendarOff || [], calendarWork: s.calendarWork || [] }
     },
-    meta: { target, teams: tTeams, teamName, teamOf, history, remaining: tRemaining, stubs: tStubs, acc, customerName: target.reporterName || "", btSince, accEmpty: !accItems.length, adj }
+    meta: { target, teams: tTeams, teamName, teamOf, history, remaining: tRemaining, stubs: tStubs, acc: acc && acc.all.length ? acc : null, stubWindow: stubWin, customerName: target.reporterName || "", btSince, accEmpty: !accItems.length, adj }
   };
 }
 
@@ -135,8 +149,12 @@ export function buildFactors({ res, meta, flowRows, today = Date.now(), s }) {
     blockers: res.contributions.blockers,
     acceptance: {
       ...(acc
-        ? { customer: meta.customerName, n: acc.n, median: acc.median, p95: acc.p95, returnRate: acc.returnRate == null ? null : Math.round(acc.returnRate * 100), noHistory: acc.n === 0, btSince: meta.btSince }
-        : { customer: meta.customerName, none: true }),
+        ? { customer: meta.customerName, n: acc.n, median: acc.median, p95: acc.p95, returnRate: acc.returnRate == null ? null : Math.round(acc.returnRate * 100), noHistory: acc.n === 0 }
+        : meta.stubWindow
+          ? { customer: meta.customerName, stubs: { from: meta.stubWindow.from, to: meta.stubWindow.to, days: meta.stubWindow.days } }
+          : { customer: meta.customerName, none: true }),
+      btSince: meta.btSince,
+      loadError: meta.accError || "",
       factor: adj && adj.btFactor !== 1 ? adj.btFactor : null,
       factorReason: adj && adj.btFactor !== 1 ? adj.btFactorReason : "",
       absence: adj ? adj.absence.filter((a) => a.p >= adjustments.ABSENCE_MIN_P).map((a) => ({ from: a.from, to: a.to, reason: a.reason })) : []
@@ -164,7 +182,9 @@ export function templateText(f) {
   else if (f.blockers) out.push(t("ai.tplBlockers", { days: f.blockers }));
   else out.push(t("ai.tplBlockersNone"));
   const a = f.acceptance;
+  if (a.loadError) out.push(t("ai.tplAccError"));
   if (a.none) out.push(t("ai.tplNoAcceptance"));
+  else if (a.stubs) out.push(t("ai.tplAccStubs", { from: fmt(a.stubs.from), to: fmt(a.stubs.to), days: a.stubs.days }));
   else if (a.noHistory) out.push(t("ai.tplAccGeneral", { customer: a.customer || t("dash") }));
   else out.push(t("ai.tplAcc", { customer: a.customer, n: a.n, median: a.median, p95: a.p95, ret: a.returnRate }));
   if (a.factor) out.push(t("ai.tplBtFactor", { f: a.factor, reason: a.factorReason || t("dash") }));
@@ -295,7 +315,7 @@ export async function analyze(epicKey, { today = Date.now(), withLlm = false } =
   } catch (e) {
     accError = e && e.message ? e.message : String(e);
   }
-  const common = { targetKey: epicKey, epics, issues, flowRows, tempo, profiles, s, accItems, today };
+  const common = { targetKey: epicKey, epics, issues, flowRows, tempo, profiles, sprints, s, accItems, today };
   const base = buildInputs(common);
   if (base.reason) throw new Error(t(`ai.reason.${base.reason}`));
 
@@ -327,6 +347,7 @@ export async function analyze(epicKey, { today = Date.now(), withLlm = false } =
   }
   const input = adj ? buildInputs({ ...common, adj }) : base;
   input.meta.llmError = llmError;
+  input.meta.accError = accError;
   const res = await runPortfolio(input.args);
   if (!res) throw new Error(t("ai.reason.noHistory"));
   const factors = buildFactors({ res, meta: input.meta, flowRows, today, s });

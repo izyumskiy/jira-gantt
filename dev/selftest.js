@@ -3488,6 +3488,19 @@ check("пиктограмма 💬 есть и на «По эпикам и лю�
     f.shares.length === 1 && f.shares[0].team === "A" && f.shares[0].people.join() === "Ivan" && f.last[0].team === "A" && f.acceptance.n === 2 && f.remaining.stubs === 1,
     JSON.stringify(f.shares));
   check("US-5: без LLM — шаблонное объяснение, блокировки «не оценивались»", text.includes(t("ai.tplNoBlockers")) && text.length > 40);
+  // Без истории приёмок — бизнес-тест по окну задач-заглушек (спринт заглушки T-3: 2 недели).
+  const spStub = { id: 77, startDate: "2026-11-30T00:00:00", endDate: "2026-12-14T00:00:00" };
+  const ISSw = ISS.map((i) => (i.key === "T-3" ? { ...i, sprintId: 77 } : i));
+  const inW = ai.buildInputs({ targetKey: "AI-1", epics: EPS, issues: ISSw, flowRows: rows, profiles, sprints: [spStub], s: sAi, accItems: [], today });
+  const tW = inW.args.epics.find((e) => e.key === "AI-1");
+  const resW = pf.portfolioForecast({ ...inW.args, runs: 500 });
+  inW.meta.accError = "HTTP 400";
+  const fW = ai.buildFactors({ res: resW, meta: inW.meta, flowRows: rows, today, s: sAi });
+  check("US-3: истории приёмок нет — бизнес-тест по окну заглушек, готовность позже разработки",
+    tW.acceptance && tW.acceptance.all.join() === "10" && resW.done.p95 > resW.dev.p95 && fW.acceptance.stubs && fW.acceptance.stubs.days === 10, JSON.stringify(tW.acceptance));
+  check("US-3: ошибка загрузки приёмок — в объяснении", aiView.factorLines(fW).some((l) => l.includes("HTTP 400")) && ai.templateText(fW).includes(t("ai.tplAccError")));
+  check("US-3: ни приёмок, ни заглушек в спринтах — бизнес-тест не заложен",
+    ai.buildInputs({ targetKey: "AI-1", epics: EPS, issues: ISS, flowRows: rows, profiles, s: sAi, accItems: [], today }).args.epics.find((e) => e.key === "AI-1").acceptance === null);
   const rec = { key: "AI-1", at: 1000, res, factors: f, text };
   const btn = aiView.aiButton("AI-1", { results: new Map([["AI-1", rec]]), lastSync: 2000, onAnalyze: () => {} });
   check("US-5: пиктограмма — есть результат, устарел после синхронизации", btn.classList.contains("has") && btn.classList.contains("stale") && btn.title.includes(t("ai.stale")));
@@ -3521,6 +3534,18 @@ check("пиктограмма 💬 есть и на «По эпикам и лю�
   gantt.addAiMarks(r2, mkRec(m0, m0 + 10 * W, m0 - W), nowModel, 0);
   check("US-6: эпик в БТ — штриховка от даты входа (прошедшее плотнее), флажок за шкалой",
     r2.querySelectorAll(".ai-bt.past").length >= 1 && r2.querySelector(".ai-bt").style.left === "0%" && r2.querySelector(".ai-flag.edge-right"));
+  document.body.append(r1);
+  flag.dispatchEvent(new MouseEvent("mouseenter"));
+  const preview = document.querySelector(".tip-ai");
+  flag.click();
+  const pinnedTip = document.querySelector(".tip-ai.pinned");
+  flag.dispatchEvent(new MouseEvent("mouseleave", { relatedTarget: document.body }));
+  check("US-6: наведение — предпросмотр; щелчок по флажку закрепляет окно с «Копировать», уход мыши его не закрывает",
+    preview && !preview.classList.contains("pinned") && pinnedTip && pinnedTip.querySelector(".ai-copy") && document.querySelector(".tip-ai.pinned") === pinnedTip);
+  gantt.closeTooltip();
+  r1.remove();
+  check("US-6: текст для копирования — объяснение, факторы, дата анализа",
+    aiView.explanationText(rec, 0).startsWith(rec.text) && aiView.explanationText(rec, 0).includes(`• ${aiView.factorLines(rec.factors)[0]}`));
   const r3 = row();
   gantt.addAiMarks(r3, mkRec(c0 + DAYMS, c0 + 2 * DAYMS), model, 5000);
   check("US-6: устаревший анализ — отметки помечены", r3.querySelector(".ai-flag.stale") && r3.querySelector(".ai-bt.stale"));

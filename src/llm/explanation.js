@@ -21,7 +21,11 @@ export function facts(f) {
     release_days: f.release,
     blockers_days: f.blockersAssessed ? f.blockers : null,
     blockers: f.blockerList || [],
-    acceptance: { ...f.acceptance, btSince: f.acceptance.btSince ? ymd(f.acceptance.btSince) : null },
+    acceptance: {
+      ...f.acceptance,
+      btSince: f.acceptance.btSince ? ymd(f.acceptance.btSince) : null,
+      stubs: f.acceptance.stubs ? { ...f.acceptance.stubs, from: ymd(f.acceptance.stubs.from), to: ymd(f.acceptance.stubs.to) } : undefined
+    },
     holidays_workdays: f.holidays,
     spread_days: f.spread,
     notes: f.notes || []

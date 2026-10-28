@@ -50,7 +50,9 @@ export function factorLines(f) {
   }
   if (f.llmStubs) lines.push(t("ai.fLlmStubs", { n: f.llmStubs }));
   const a = f.acceptance;
+  if (a.loadError) lines.push(t("ai.fAccError", { msg: a.loadError }));
   if (a.none) lines.push(t("ai.fAccNone"));
+  else if (a.stubs) lines.push(t("ai.fAccStubs", { from: fmtDay(a.stubs.from), to: fmtDay(a.stubs.to), days: a.stubs.days }));
   else if (a.noHistory) lines.push(t("ai.fAccGeneral", { customer: a.customer || t("dash") }));
   else lines.push(t("ai.fAcc", { customer: a.customer, n: a.n, median: a.median, p95: a.p95, ret: a.returnRate }));
   if (a.btSince) lines.push(t("ai.fInBt", { since: fmtDay(a.btSince) }));
@@ -73,6 +75,29 @@ export function explanation(rec, lastSync) {
   const src = rec.textByLlm ? ` · ${t("ai.textLlm")}` : rec.textError ? ` · ${t("ai.textTemplate", { msg: rec.textError })}` : "";
   box.append(el("div", "ai-at muted small", t("ai.at", { at: fmtDay(rec.at) }) + src + (isStale(rec, lastSync) ? ` · ${t("ai.stale")}` : "")));
   return box;
+}
+
+// Объяснение простым текстом — для копирования.
+export function explanationText(rec, lastSync) {
+  const src = rec.textByLlm ? ` · ${t("ai.textLlm")}` : "";
+  return [rec.text, "", ...factorLines(rec.factors).map((l) => `• ${l}`), "", t("ai.at", { at: fmtDay(rec.at) }) + src + (isStale(rec, lastSync) ? ` · ${t("ai.stale")}` : "")].join("\n");
+}
+
+// Кнопка «Копировать»: объяснение в буфер обмена, подпись меняется на «Скопировано».
+export function copyButton(rec, lastSync) {
+  const btn = el("button", "ai-copy", t("ai.copy"));
+  btn.type = "button";
+  btn.onclick = async (e) => {
+    e.stopPropagation();
+    try {
+      await navigator.clipboard.writeText(explanationText(rec, lastSync));
+      btn.textContent = t("ai.copied");
+    } catch {
+      btn.textContent = t("ai.copyFailed");
+    }
+    setTimeout(() => (btn.textContent = t("ai.copy")), 1500);
+  };
+  return btn;
 }
 
 // Поправки LLM списком: у каждой — «Не учитывать» (отметка хранится и действует в следующих анализах).
@@ -124,7 +149,9 @@ export function cardBlock(rec, { lastSync, onRecalc, onNew, onToggle, hasKey = f
     if (hasKey) onNew(fresh);
     else hint.textContent = t("ai.noKey");
   };
-  row.append(btn, fresh, hint);
+  row.append(btn, fresh);
+  if (rec) row.append(copyButton(rec, lastSync));
+  row.append(hint);
   box.append(row);
   return box;
 }

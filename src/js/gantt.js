@@ -7,7 +7,7 @@ import { fmtEstimate, NO_DATES_ID, BACKLOG_ID, OFF_SPRINT_ID, PLANNED_ID, sprint
 import * as flowlib from "./flow.js";
 import * as settings from "./settings.js";
 import { cfId, escapeJql, comments as jiraComments, addComment as jiraAddComment, userSearch as jiraUserSearch } from "./jira.js";
-import { aiButton, explanation, isStale } from "./aiView.js";
+import { aiButton, explanation, isStale, copyButton } from "./aiView.js";
 import * as omg from "./omg.js";
 import * as prio from "./priority.js";
 import { noteRow, noteToShow, notesToggle, publishNote, publishError } from "./notes.js";
@@ -364,20 +364,48 @@ export function addDueLine(row, info, withFlag) {
 // AI-анализ (US-6): отметка P95 готовности и жёлтая штриховка бизнес-теста в строке эпика.
 // Штриховка — от P95 конца разработки (эпик в БТ — от даты входа) до P95 готовности. Лежит поверх
 // полос — накрывает и задачи-заглушки, — но пропускает щелчки: полосы остаются кликабельными.
-// Объяснение — по наведению на флажок 95%.
+// Объяснение — по наведению на флажок 95% (мышь можно увести в окно); щелчок по флажку закрепляет
+// окно: прокрутка, выделение, «Копировать», закрытие — ×, Esc или щелчок мимо.
 export function addAiMarks(row, rec, model, lastSync) {
   const stale = isStale(rec, lastSync) ? " stale" : "";
   const done = rec.res.done.p95;
   const btSince = rec.factors.acceptance && rec.factors.acceptance.btSince;
   const from = btSince != null ? btSince : rec.res.dev.p95;
   const today = dayStart(new Date().toISOString());
+  const pinned = () => !!tip && tip.classList.contains("pinned");
+  const show = (node, pin) => {
+    const box = el("div", "tooltip tip-ai" + (pin ? " pinned" : ""));
+    const head = el("div", "tip-head");
+    head.append(el("strong", null, `${t("ai.title")} · ${rec.key}`));
+    if (pin) {
+      const close = el("button", "tip-close", "×");
+      close.title = t("tip.close");
+      close.onclick = closeTooltip;
+      const tools = el("span", "tip-tools");
+      tools.append(copyButton(rec, lastSync), close);
+      head.append(tools);
+    }
+    box.append(head, explanation(rec, lastSync));
+    if (!pin) {
+      box.append(el("div", "muted small ai-pin-hint", t("ai.pinHint")));
+      box.onmouseleave = (e) => {
+        if (!pinned() && !node.contains(e.relatedTarget)) closeTooltip();
+      };
+    }
+    openPopover(box, node);
+  };
   const hover = (node) => {
     node.onmouseenter = () => {
-      const box = el("div", "tooltip tip-ai");
-      box.append(explanation(rec, lastSync));
-      openPopover(box, node);
+      if (!pinned()) show(node, false);
     };
-    node.onmouseleave = closeTooltip;
+    // Уход мыши в само окно его не закрывает — текст можно дочитать и прокрутить.
+    node.onmouseleave = (e) => {
+      if (!pinned() && !(tip && tip.contains(e.relatedTarget))) closeTooltip();
+    };
+    node.onclick = (e) => {
+      e.stopPropagation();
+      show(node, true);
+    };
   };
   const piece = (td, sec, a, b, cls) => {
     if (b <= a) return;
