@@ -310,6 +310,26 @@
             <span data-i18n="set.btHistoryMonths"></span>
             <input id="btHistoryMonths" type="number" min="3" max="60" step="1" />
           </label>
+          <label class="field narrow">
+            <span data-i18n="set.llmProvider"></span>
+            <select id="llmProvider">
+              <option value="chatgpt">ChatGPT (OpenAI)</option>
+              <option value="deepseek">DeepSeek</option>
+            </select>
+          </label>
+          <label class="field">
+            <span data-i18n="set.llmKey"></span>
+            <input id="llmKey" type="password" autocomplete="off" />
+            <small class="muted" data-i18n="set.llmKeyHint"></small>
+          </label>
+          <label class="field">
+            <span data-i18n="set.llmModel"></span>
+            <input id="llmModel" type="text" />
+          </label>
+          <div class="row">
+            <button id="btnLlmCheck" data-i18n="set.llmCheck"></button>
+            <span id="llmStatus" class="muted"></span>
+          </div>
         </div>
 
         <div class="card">

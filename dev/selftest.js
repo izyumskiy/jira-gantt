@@ -3530,6 +3530,45 @@ check("пиктограмма 💬 есть и на «По эпикам и лю�
   gantt.closeTooltip();
 }
 
+// US-7. Подключение LLM (openspec/changes/add-llm-connection): fetch подменяется заглушкой.
+{
+  const llm = await import("../src/llm/client.js");
+  const sL = { ...settings.get(), llmProvider: "deepseek", llmKeys: { deepseek: "sk-test" }, llmModels: {} };
+  const reply = (status, body) => ({ ok: status >= 200 && status < 300, status, json: async () => body });
+  const calls = [];
+  const slept = [];
+  const seq = [reply(429, { error: { message: "rate" } }), reply(200, { choices: [{ message: { content: '{"ok":true}' } }] })];
+  const fetchImpl = async (url, init) => {
+    calls.push({ url, init });
+    return seq.shift();
+  };
+  const out = await llm.complete({ messages: [{ role: "user", content: "x" }], json: true, s: sL, fetchImpl, sleep: async (ms) => slept.push(ms) });
+  const sent = JSON.parse(calls[0].init.body);
+  check("US-7: 429, затем 200 — ответ второго запроса после паузы 2 с", out.ok === true && calls.length === 2 && slept.join() === "2000");
+  check("US-7: DeepSeek — свой адрес, ключ в заголовке, модель по умолчанию, режим JSON",
+    calls[0].url === "https://api.deepseek.com/chat/completions" && calls[0].init.headers.Authorization === "Bearer sk-test" && sent.model === "deepseek-v4-flash" && sent.response_format.type === "json_object");
+  let err = null;
+  const twice = [reply(500, {}), reply(503, { error: { message: "busy" } })];
+  try {
+    await llm.complete({ messages: [], s: sL, fetchImpl: async () => twice.shift(), sleep: async () => {} });
+  } catch (e) {
+    err = e;
+  }
+  check("US-7: повтор один — вторая ошибка с текстом провайдера", err && err.message === "busy" && err.status === 503 && !twice.length);
+  err = null;
+  try {
+    await llm.complete({ messages: [], s: { ...sL, llmProvider: "chatgpt" }, fetchImpl: async () => reply(200, {}) });
+  } catch (e) {
+    err = e;
+  }
+  check("US-7: без ключа — запроса нет", err && err.message === "no key" && !llm.hasKey({ ...sL, llmProvider: "chatgpt" }) && llm.config({}).model === "gpt-5-nano");
+  const before = settings.get();
+  await settings.save({ llmKeys: { chatgpt: "sk-secret-123" } });
+  const exported = JSON.stringify(await exportConfig());
+  await settings.save({ llmKeys: before.llmKeys || {} });
+  check("US-7: экспорт конфигурации — без ключей API", !exported.includes("sk-secret-123") && !exported.includes("llmKeys"));
+}
+
 const total = document.createElement("div");
 total.className = failures ? "t-fail" : "t-ok";
 total.textContent = failures ? `${failures} FAILED` : "ALL PASSED";

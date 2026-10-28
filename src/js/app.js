@@ -20,6 +20,7 @@ import * as autoSync from "./autoSync.js";
 import * as stories from "./stories.js";
 import * as storiesView from "./storiesView.js";
 import * as omg from "./omg.js";
+import * as llm from "../llm/client.js";
 import { toHtml as markdownToHtml } from "./markdown.js";
 
 const $ = (sel) => document.querySelector(sel);
@@ -1693,6 +1694,9 @@ function fillSettingsForm() {
   $("#stubSigns").value = s.stubSigns ?? "";
   $("#btStatuses").value = s.btStatuses ?? "";
   $("#btHistoryMonths").value = s.btHistoryMonths;
+  llmDraft = { provider: llm.config(s).id, keys: { ...(s.llmKeys || {}) }, models: { ...(s.llmModels || {}) } };
+  $("#llmProvider").value = llmDraft.provider;
+  showLlmFields();
   $("#calendarWork").value = (s.calendarWork || []).join("\n");
   renderCalendarStatus();
   $("#teamsList").value = (s.teams || []).join("\n");
@@ -1855,6 +1859,7 @@ async function saveSettingsForm() {
     btStatuses: $("#btStatuses").value.trim() || settings.DEFAULTS.btStatuses,
     btHistoryMonths: Number($("#btHistoryMonths").value) > 0 ? Number($("#btHistoryMonths").value) : settings.DEFAULTS.btHistoryMonths,
     calendarWork: workcal.parseDates($("#calendarWork").value),
+    ...llmFormValues(),
     teams: team.parseSystems($("#teamsList").value),
     fields: {
       plannedStart: $("#plannedStartField").value,
@@ -1869,6 +1874,49 @@ async function saveSettingsForm() {
   await refreshHeader();
   // Список исключаемых типов влияет на счётчики «Сохранённых эпиков» — пересчитываем сразу.
   await renderStored();
+}
+
+// LLM (US-7): ключ и модель у каждого провайдера свои — поля показывают выбранного, остальные
+// хранятся в черновике до сохранения.
+let llmDraft = { provider: "chatgpt", keys: {}, models: {} };
+function stashLlmFields() {
+  llmDraft.keys[llmDraft.provider] = $("#llmKey").value.trim();
+  llmDraft.models[llmDraft.provider] = $("#llmModel").value.trim();
+}
+function showLlmFields() {
+  const id = llmDraft.provider;
+  $("#llmKey").value = llmDraft.keys[id] || "";
+  $("#llmModel").value = llmDraft.models[id] || "";
+  $("#llmModel").placeholder = llm.PROVIDERS[id].model;
+  $("#llmStatus").textContent = "";
+}
+function llmFormValues() {
+  stashLlmFields();
+  return { llmProvider: llmDraft.provider, llmKeys: { ...llmDraft.keys }, llmModels: { ...llmDraft.models } };
+}
+
+// Разрешение на домен провайдера — когда ключ задан (по щелчку «Сохранить» или «Проверить»).
+async function ensureLlmPermission() {
+  const c = llm.config();
+  if (!c.key || (await chrome.permissions.contains({ origins: [c.origin] }))) return;
+  if (!(await chrome.permissions.request({ origins: [c.origin] }))) throw new Error(t("set.llmNoPermission"));
+}
+
+async function checkLlm() {
+  const box = $("#llmStatus");
+  box.className = "muted";
+  try {
+    await saveSettingsForm();
+    if (!llm.hasKey()) throw new Error(t("set.llmNoKey"));
+    await ensureLlmPermission();
+    box.textContent = t("set.llmChecking");
+    await llm.check();
+    box.textContent = t("set.llmOk");
+    box.className = "llm-ok";
+  } catch (e) {
+    box.textContent = e && e.message ? e.message : String(e);
+    box.className = "llm-err";
+  }
 }
 
 // Производственный календарь: откуда загружен, какие годы есть, нет ли текущего или следующего года.
@@ -2174,7 +2222,13 @@ async function boot() {
       fail(e);
     }
   };
-  $("#btnSaveSettings").onclick = () => saveSettingsForm().catch(fail);
+  $("#btnSaveSettings").onclick = () => saveSettingsForm().then(ensureLlmPermission).catch(fail);
+  $("#llmProvider").onchange = () => {
+    stashLlmFields();
+    llmDraft.provider = $("#llmProvider").value;
+    showLlmFields();
+  };
+  $("#btnLlmCheck").onclick = () => checkLlm();
 
   // Предварительная конфигурация: файл → поля и системы → эпики (с выгрузкой) → сотрудники.
   const configLog = (line) => {

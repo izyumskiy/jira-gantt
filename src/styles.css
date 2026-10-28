@@ -626,6 +626,8 @@ button.s-pr:hover .s-pr-text { color: var(--accent); text-decoration: underline;
 .ai-btn.has { color: var(--ai, #6e5dc6); }
 .ai-btn.stale { opacity: .5; }
 .ai-btn.busy { display: inline-block; animation: sync-spin 1s linear infinite; cursor: progress; color: var(--ai, #6e5dc6); }
+.llm-ok { color: var(--ok); }
+.llm-err { color: var(--danger); }
 .ai-card { margin-top: 8px; }
 .ai-expl { max-width: 520px; font-size: 12px; line-height: 1.45; }
 .ai-expl .ai-text { margin: 4px 0 6px; }
@@ -1062,6 +1064,8 @@ textarea { font: inherit; padding: 5px 8px; border: 1px solid var(--line); borde
   .ai-btn.has, .ai-btn:hover, .ai-btn.busy { color: #9f8fef; }
   .ai-line { border-color: #9f8fef; }
   .ai-flag { background: #7f6fe0; }
+  .llm-ok { color: #4bce97; }
+  .llm-err { color: #f87168; }
   .ti-stub { color: #f5cd47; }
   .load-chip { background: #333a41; }
   .bar-stack { background: #4a5158; }
