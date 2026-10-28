@@ -1,6 +1,7 @@
 // AI-анализ срока эпика (US-5): входы портфеля из данных плагина → расчёт (portfolio.js, US-4) →
 // факторы и шаблонное объяснение → хранилище aiForecasts. Поправки LLM (US-8): блокировки по загрузке
-// людей, дополнительные заглушки, коэффициент к приёмке, отсутствие заказчика. Текст LLM — US-9.
+// людей, дополнительные заглушки, коэффициент к приёмке, отсутствие заказчика. Текст объяснения от
+// LLM (US-9) — только при «Новом анализе»; «Пересчитать» — шаблонный текст.
 import * as db from "./db.js";
 import * as settings from "./settings.js";
 import * as flowlib from "./flow.js";
@@ -14,6 +15,7 @@ import { isDoneStatus } from "./status.js";
 import * as jira from "./jira.js";
 import * as llm from "../llm/client.js";
 import * as adjustments from "../llm/adjustments.js";
+import * as explanation from "../llm/explanation.js";
 import { t } from "./i18n.js";
 
 const DAY = 86400000;
@@ -328,7 +330,14 @@ export async function analyze(epicKey, { today = Date.now(), withLlm = false } =
   const res = await runPortfolio(input.args);
   if (!res) throw new Error(t("ai.reason.noHistory"));
   const factors = buildFactors({ res, meta: input.meta, flowRows, today, s });
-  const rec = { key: epicKey, at: Date.now(), res, factors, text: templateText(factors), adjustments: raw, disabled, llmError, accError };
+  let text = null;
+  let textError = "";
+  if (withLlm) {
+    const got = await explanation.request({ factors, lang: s.lang, s });
+    text = got.text;
+    textError = got.error;
+  }
+  const rec = { key: epicKey, at: Date.now(), res, factors, text: text || templateText(factors), textByLlm: !!text, textError, adjustments: raw, disabled, llmError, accError };
   await db.putAll(db.STORES.aiForecasts, [rec]);
   return rec;
 }

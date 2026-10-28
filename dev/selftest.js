@@ -3608,6 +3608,25 @@ check("пиктограмма 💬 есть и на «По эпикам и лю�
   check("US-8: заглушка от LLM помечена в списке задач", document.querySelector(".tip-issues .ti-stub")?.textContent === t("ai.stubLlm"));
   gantt.closeTooltip();
   gantt.setAiStubs(new Map());
+
+  // US-9. Объяснение от LLM (openspec/changes/add-llm-explanation): числа и даты — только из факторов.
+  const expl9 = await import("../src/llm/explanation.js");
+  const fx9 = expl9.facts(f8);
+  const dd = (ms) => { const d = new Date(ms); return `${String(d.getDate()).padStart(2, "0")}.${String(d.getMonth() + 1).padStart(2, "0")}.${d.getFullYear()}`; };
+  const okText = `Срок с вероятностью 95% — ${dd(f8.dates.done.p95)}. Главное — блокировка: ${f8.blockerList[0].people[0]} теряет ${f8.blockerList[0].hours} ч, это ${f8.blockerList[0].weeks} нед. в ${f8.blockerList[0].p}% прогонов. Приёмка ×${f8.acceptance.factor}.`;
+  check("US-9: числа и даты из факторов — текст принят", expl9.check(okText, fx9).ok === true, expl9.check(okText, fx9).error);
+  const badText = okText + " Финиш не раньше 31.03.2031.";
+  check("US-9: дата не из факторов — текст отклонён", (expl9.check(badText, fx9).error || "").includes("31.03.2031"));
+  check("US-9: лишнее число — текст отклонён", !!expl9.check(okText + " Осталось 777 задач.", fx9).error);
+  const sent9 = [];
+  const seq9 = [badText, okText].map((text) => ({ ok: true, status: 200, json: async () => ({ choices: [{ message: { content: JSON.stringify({ text }) } }] }) }));
+  const got9 = await expl9.request({ factors: f8, s: sK, fetchImpl: async (u, init) => (sent9.push(JSON.parse(init.body)), seq9.shift()), sleep: async () => {} });
+  check("US-9: лишняя дата — один повтор с указанием ошибки", got9.text === okText && sent9.length === 2 && sent9[1].messages.at(-1).content.includes("31.03.2031"));
+  const twice9 = [badText, badText].map((text) => ({ ok: true, status: 200, json: async () => ({ choices: [{ message: { content: JSON.stringify({ text }) } }] }) }));
+  const fail9 = await expl9.request({ factors: f8, s: sK, fetchImpl: async () => twice9.shift(), sleep: async () => {} });
+  check("US-9: повтор тоже с ошибкой — текста нет (будет шаблон)", fail9.text === null && !!fail9.error && !twice9.length);
+  const e9 = aiView.explanation({ ...rec, text: okText, textByLlm: true }, 0);
+  check("US-9: в объяснении — отметка, что текст от LLM", e9.textContent.includes(t("ai.textLlm")));
 }
 
 // US-7. Подключение LLM (openspec/changes/add-llm-connection): fetch подменяется заглушкой.

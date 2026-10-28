@@ -70,7 +70,8 @@ export function explanation(rec, lastSync) {
   const ul = el("ul", "ai-factors");
   for (const line of factorLines(rec.factors)) ul.append(el("li", null, line));
   box.append(ul);
-  box.append(el("div", "ai-at muted small", t("ai.at", { at: fmtDay(rec.at) }) + (isStale(rec, lastSync) ? ` · ${t("ai.stale")}` : "")));
+  const src = rec.textByLlm ? ` · ${t("ai.textLlm")}` : rec.textError ? ` · ${t("ai.textTemplate", { msg: rec.textError })}` : "";
+  box.append(el("div", "ai-at muted small", t("ai.at", { at: fmtDay(rec.at) }) + src + (isStale(rec, lastSync) ? ` · ${t("ai.stale")}` : "")));
   return box;
 }
 
