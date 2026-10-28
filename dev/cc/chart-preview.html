@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <title>Превью Control Chart</title>
+  <link rel="stylesheet" href="../../src/cc/cc.css">
+  <style>
+    body { margin: 0; }
+    #page-cc { margin: 0; padding: 16px; min-height: 100vh; }
+    #page-cc .chart { height: 440px; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; }
+  </style>
+</head>
+<body>
+  <!-- Стили Control Chart привязаны к #page-cc -->
+  <div id="page-cc">
+    <h2>Превью графика на сгенерированных данных</h2>
+    <p class="muted">Страница для разработки: рисует Control Chart без Jira и без IndexedDB.</p>
+    <div class="stats" id="stats"></div>
+    <div class="chart" id="chart"></div>
+  </div>
+  <script type="module" src="chart-preview.js"></script>
+</body>
+</html>

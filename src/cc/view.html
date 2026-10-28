@@ -1,0 +1,318 @@
+<!-- Вкладка Control Chart: фрагмент, который src/cc/view.js вставляет в #page-cc при первом
+     открытии вкладки. Тексты — по атрибутам data-cc-i18n* (у OhMyGant свои data-i18n*). -->
+<div class="cc-root">
+
+  <header class="topbar">
+
+    <div class="topbar-board">
+      <button id="board-picker" class="btn btn-ghost" data-cc-i18n-title="nav.boardPick">
+        <span id="board-name">Доска не выбрана</span>
+        <span class="caret">▾</span>
+      </button>
+      <span id="board-meta" class="muted"></span>
+    </div>
+
+    <div class="topbar-actions">
+      <span id="conn-state" class="pill pill-off"></span>
+      <button id="btn-sync" class="btn btn-primary" disabled data-cc-i18n="nav.sync">Обновить данные</button>
+      <button id="btn-sync-full" class="btn btn-ghost" disabled
+              data-cc-i18n="nav.syncFull" data-cc-i18n-title="nav.syncFullTitle">Полная выгрузка</button>
+      <button id="btn-forecast" class="btn btn-ghost" data-cc-i18n="nav.forecast" data-cc-i18n-title="nav.forecastTitle">Прогноз</button>
+      <button id="btn-help" class="btn btn-ghost" data-cc-i18n="nav.help" data-cc-i18n-title="nav.helpTitle">Справка</button>
+      <button id="btn-tour" class="btn btn-ghost btn-icon" data-cc-i18n-title="tour.button">
+        <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+          <circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="1.5"/>
+          <circle cx="8" cy="8" r="2" fill="currentColor"/>
+        </svg>
+      </button>
+      <button id="btn-storage" class="btn btn-ghost" data-cc-i18n="nav.storage" data-cc-i18n-title="nav.storageTitle">Хранилище</button>
+      <button id="btn-setup" class="btn btn-ghost" data-cc-i18n="nav.settings" data-cc-i18n-title="nav.settingsTitle">Настройки</button>
+    </div>
+  </header>
+
+  <div id="progress" class="progress" hidden>
+    <div class="progress-bar"><i id="progress-fill"></i></div>
+    <span id="progress-text"></span>
+    <button id="btn-cancel" class="btn btn-ghost btn-sm" data-cc-i18n="progress.cancel">Отменить</button>
+  </div>
+
+  <div id="banner" class="banner" hidden></div>
+
+  <div class="layout">
+    <aside class="sidebar">
+      <section class="panel">
+        <h3 data-cc-i18n="period.title">Период</h3>
+        <div class="chips" id="range-presets">
+          <button class="chip" data-days="30" data-cc-i18n="period.d30">30 дней</button>
+          <button class="chip" data-days="90" data-cc-i18n="period.d90">90 дней</button>
+          <button class="chip is-active" data-days="180" data-cc-i18n="period.d180">полгода</button>
+          <button class="chip" data-days="365" data-cc-i18n="period.d365">год</button>
+          <button class="chip" data-days="0" data-cc-i18n="period.all">всё</button>
+        </div>
+        <div class="row-2">
+          <label><span data-cc-i18n="period.from">с</span><input type="date" id="date-from"></label>
+          <label><span data-cc-i18n="period.to">по</span><input type="date" id="date-to"></label>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h3>
+          <span data-cc-i18n="filters.cycleStatuses">Статусы цикла</span>
+          <button type="button" class="hint" id="hint-cycle" data-cc-i18n-title="filters.cycleHint">?</button>
+        </h3>
+        <div id="cycle-statuses" class="checklist statuses"></div>
+      </section>
+
+      <section class="panel">
+        <h3 data-cc-i18n="filters.doneStatuses">Статусы «Готово»</h3>
+        <div id="done-statuses" class="checklist statuses"></div>
+      </section>
+
+      <section class="panel collapsible">
+        <h3 data-cc-i18n="filters.types">Типы задач</h3>
+        <div id="type-filter" class="checklist"></div>
+      </section>
+
+      <section class="panel collapsible">
+        <h3 class="panel-head">
+          <span data-cc-i18n="filters.assignees">Исполнители</span>
+          <button type="button" class="icon-btn" id="assignee-all" data-cc-i18n-title="filters.toggleAll">
+            <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">
+              <rect x="1.6" y="1.6" width="12.8" height="12.8" rx="2.6" fill="none" stroke="currentColor" stroke-width="1.5"/>
+              <path d="M4.4 8.2l2.4 2.4 4.8-5.2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </button>
+        </h3>
+        <div id="assignee-filter" class="checklist"></div>
+      </section>
+
+      <section class="panel">
+        <h3 data-cc-i18n="chart.title">График</h3>
+        <label class="range-row">
+          <span data-cc-i18n="chart.rollingWindow">Окно скользящего среднего</span>
+          <input type="range" id="rolling" min="2" max="40" step="1" value="10">
+          <output id="rolling-out">10%</output>
+        </label>
+        <label class="check"><input type="checkbox" id="opt-band" checked><span data-cc-i18n="chart.band">Полоса ±1σ</span></label>
+        <label class="check"><input type="checkbox" id="opt-rolling" checked><span data-cc-i18n="chart.rolling">Скользящее среднее</span></label>
+        <label class="check"><input type="checkbox" id="opt-avg" checked><span data-cc-i18n="chart.avg">Линия среднего</span></label>
+        <label class="check"><input type="checkbox" id="opt-p85" checked><span data-cc-i18n="chart.p85">85-й перцентиль</span></label>
+        <label class="check"><input type="checkbox" id="opt-log"><span data-cc-i18n="chart.log">Логарифмическая шкала</span></label>
+        <label class="check"><input type="checkbox" id="opt-outliers"><span data-cc-i18n="chart.outliers">Скрыть выбросы (IQR)</span></label>
+      </section>
+
+      <section class="panel">
+        <h3 data-cc-i18n="excluded.title">Отброшено</h3>
+        <ul id="excluded" class="excluded"></ul>
+      </section>
+    </aside>
+
+    <main class="main">
+      <div class="stats" id="cc-stats"></div>
+
+      <div class="chart-wrap">
+        <div id="chart" class="chart"></div>
+        <div class="chart-legend">
+          <span><i class="lg-dot"></i><span data-cc-i18n="legend.issue">задача</span></span>
+          <span><i class="lg-line"></i><span data-cc-i18n="legend.rolling">скользящее среднее</span></span>
+          <span><i class="lg-band"></i><span data-cc-i18n="legend.band">±1σ</span></span>
+          <span><i class="lg-avg"></i><span data-cc-i18n="legend.avg">среднее</span></span>
+          <span><i class="lg-p85"></i><span data-cc-i18n="legend.p85">85-й перцентиль</span></span>
+          <span id="legend-highlight" hidden><i class="lg-hl"></i><span data-cc-i18n="legend.highlight">выбранный исполнитель</span></span>
+          <span class="muted" data-cc-i18n="legend.hint">протяните мышь — зум, двойной клик — сброс</span>
+        </div>
+      </div>
+
+      <section class="table-wrap" id="people-wrap">
+        <div class="table-head">
+          <h3 data-cc-i18n="people.title">Сравнение по исполнителям</h3>
+          <div class="table-actions">
+            <!-- Команды — из общей таблицы людей («Команда» в OhMyGant); без них переключатель скрыт -->
+            <span class="chips people-mode" id="people-mode" hidden>
+              <button type="button" class="chip is-active" data-mode="person" data-cc-i18n="people.modePerson">Люди</button>
+              <button type="button" class="chip" data-mode="team" data-cc-i18n="people.modeTeam">Команды</button>
+            </span>
+            <span class="muted" id="people-hint" data-cc-i18n="people.hint">Клик по строке подсвечивает человека на графике</span>
+          </div>
+        </div>
+        <div class="table-scroll">
+          <table id="people-table">
+            <thead>
+              <tr>
+                <th data-psort="name" data-cc-i18n="people.colName">Исполнитель</th>
+                <th data-psort="team" data-cc-i18n="people.colTeam" hidden>Команда</th>
+                <th data-psort="count" class="num" data-cc-i18n="people.colCount">Задач</th>
+                <th data-psort="median" class="num" data-cc-i18n="people.colMedian">Медиана</th>
+                <th data-psort="p85" class="num" data-cc-i18n="people.colP85">85-й перцентиль</th>
+                <th data-psort="sd" class="num" data-cc-i18n="people.colSd">σ</th>
+                <th data-psort="ratio" class="num" data-cc-i18n="people.colRatio" data-cc-i18n-title="people.colRatioHint">85 / медиана</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="table-wrap">
+        <div class="table-head">
+          <h3 id="table-title">Задачи</h3>
+          <div class="table-actions">
+            <input type="search" id="table-search" data-cc-i18n-placeholder="table.search">
+            <button id="btn-csv" class="btn btn-ghost btn-sm" data-cc-i18n="table.csv">Выгрузить CSV</button>
+            <button id="btn-clear-pick" class="btn btn-ghost btn-sm" hidden data-cc-i18n="table.showAll">Показать все</button>
+          </div>
+        </div>
+        <div class="table-scroll">
+          <table id="issues-table">
+            <thead>
+              <tr>
+                <th data-sort="key" data-cc-i18n="table.colKey">Задача</th>
+                <th data-sort="su" data-cc-i18n="table.colSummary">Название</th>
+                <th data-sort="ty" data-cc-i18n="table.colType">Тип</th>
+                <th data-sort="cycle" class="num" data-cc-i18n="table.colCycle" data-cc-i18n-title="table.colCycleHint">Время цикла</th>
+                <th data-sort="lead" class="num" data-cc-i18n="table.colLead" data-cc-i18n-title="table.colLeadHint">Lead time</th>
+                <th data-sort="ts" class="num" data-cc-i18n="table.colSpent" data-cc-i18n-title="table.colSpentHint">Затрачено</th>
+                <th data-sort="doneAt" data-cc-i18n="table.colDone">Завершена</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- Настройки Control Chart. Подключение к Jira и язык — общие с OhMyGant, здесь только своё. -->
+  <dialog id="dlg-setup">
+    <form method="dialog" class="dialog-body">
+      <h2 data-cc-i18n="setup.title">Настройки Control Chart</h2>
+      <div class="setup-shared">
+        <span data-cc-i18n="setup.shared">Адрес Jira, авторизация и язык — общие с OhMyGant.</span>
+        <span id="setup-conn" class="muted"></span>
+        <button type="button" id="btn-host-settings" class="link-btn" data-cc-i18n="setup.openHost">Открыть настройки подключения</button>
+      </div>
+      <label class="field">
+        <span data-cc-i18n="setup.spField">Поле Story Points</span>
+        <input type="text" id="in-sp-field" placeholder="customfield_10004">
+        <small data-cc-i18n="setup.spHint">Оставьте пустым — определим автоматически.</small>
+      </label>
+      <fieldset class="field">
+        <legend data-cc-i18n="setup.storage">Что хранить (влияет на размер базы)</legend>
+        <label class="check">
+          <input type="checkbox" id="in-store-summary" checked>
+          <span data-cc-i18n="setup.storeSummaryBefore">Названия задач (обрезаются до</span>
+          <input type="number" id="in-summary-len" min="20" max="255" value="255" class="inline-num">
+          <span data-cc-i18n="setup.storeSummaryAfter">символов)</span>
+        </label>
+        <label class="check"><input type="checkbox" id="in-store-assignee" checked><span data-cc-i18n="setup.storeAssignee">Исполнителя</span></label>
+        <label class="check"><input type="checkbox" id="in-store-labels" checked><span data-cc-i18n="setup.storeLabels">Метки</span></label>
+      </fieldset>
+      <div id="setup-msg" class="dialog-msg"></div>
+      <menu class="dialog-actions">
+        <button type="button" id="btn-test" class="btn btn-ghost" data-cc-i18n="setup.test">Проверить связь</button>
+        <button type="button" id="btn-save-setup" class="btn btn-primary" data-cc-i18n="setup.save">Сохранить</button>
+        <button value="cancel" class="btn btn-ghost" data-cc-i18n="setup.close">Закрыть</button>
+      </menu>
+    </form>
+  </dialog>
+
+  <!-- Выбор доски -->
+  <dialog id="dlg-boards">
+    <div class="dialog-body">
+      <h2 data-cc-i18n="boards.title">Доски</h2>
+      <div class="row-2">
+        <input type="search" id="board-search" data-cc-i18n-placeholder="boards.filter">
+        <button id="btn-load-boards" class="btn btn-ghost" data-cc-i18n="boards.load">Загрузить из Jira</button>
+      </div>
+      <div id="boards-list" class="boards-list"></div>
+      <menu class="dialog-actions">
+        <button id="btn-boards-close" class="btn btn-ghost" data-cc-i18n="boards.close">Закрыть</button>
+      </menu>
+    </div>
+  </dialog>
+
+  <!-- Разбор отброшенных задач -->
+  <dialog id="dlg-diag">
+    <div class="dialog-body">
+      <h2 id="diag-title">Отброшенные задачи</h2>
+      <p id="diag-hint" class="muted"></p>
+      <div id="diag-body" class="diag-body"></div>
+      <menu class="dialog-actions">
+        <button id="btn-diag-close" class="btn btn-ghost" data-cc-i18n="diag.close">Закрыть</button>
+      </menu>
+    </div>
+  </dialog>
+
+  <!-- Прогноз сроков -->
+  <dialog id="dlg-forecast" class="dialog-wide">
+    <div class="dialog-body">
+      <h2 data-cc-i18n="forecast.title">Прогноз сроков</h2>
+      <p class="muted fc-intro" data-cc-i18n="forecast.intro"></p>
+
+      <div class="row-2 fc-inputs">
+        <label>
+          <span data-cc-i18n="forecast.history">История</span>
+          <select id="fc-history">
+            <option value="182" data-cc-i18n="forecast.history6m">полгода</option>
+            <option value="365" selected data-cc-i18n="forecast.history1y">год</option>
+            <option value="0" data-cc-i18n="forecast.historyAll">вся</option>
+          </select>
+        </label>
+        <label>
+          <span data-cc-i18n="forecast.start">Старт</span>
+          <input type="date" id="fc-start">
+        </label>
+        <label>
+          <span data-cc-i18n="forecast.growth">Запас на рост, %</span>
+          <input type="number" id="fc-growth" min="0" max="300" step="5" value="0">
+        </label>
+      </div>
+
+      <div class="table-scroll fc-teams-wrap">
+        <table id="fc-teams">
+          <thead>
+            <tr>
+              <th></th>
+              <th data-cc-i18n="forecast.colBoard">Доска</th>
+              <th class="num" data-cc-i18n="forecast.colTasks">Задач проекта</th>
+              <th class="num" data-cc-i18n="forecast.colShare">Доля потока, %</th>
+              <th class="num" data-cc-i18n="forecast.colFlow">Поток проекту</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+
+      <div id="fc-warnings" class="fc-warnings"></div>
+      <div id="fc-result" class="fc-result"></div>
+      <div id="fc-histogram" class="fc-histogram"></div>
+      <div id="fc-summary" class="fc-summary"></div>
+
+      <menu class="dialog-actions">
+        <button id="btn-fc-copy" class="btn btn-ghost" data-cc-i18n="forecast.copy">Скопировать формулировку</button>
+        <button id="btn-fc-csv" class="btn btn-ghost" data-cc-i18n="forecast.csv">Выгрузить поток (CSV)</button>
+        <button id="btn-fc-close" class="btn btn-ghost" data-cc-i18n="forecast.close">Закрыть</button>
+      </menu>
+    </div>
+  </dialog>
+
+  <!-- Хранилище -->
+  <dialog id="dlg-storage">
+    <div class="dialog-body">
+      <h2 data-cc-i18n="storage.title">Хранилище</h2>
+      <div id="storage-info" class="storage-info"></div>
+      <h3 data-cc-i18n="storage.cleanup">Очистка</h3>
+      <div class="row-2">
+        <button id="btn-drop-summaries" class="btn btn-ghost" data-cc-i18n="storage.dropSummaries">Удалить названия задач</button>
+        <button id="btn-drop-old" class="btn btn-ghost" data-cc-i18n="storage.dropOld">Удалить задачи старше года</button>
+      </div>
+      <div class="row-2">
+        <button id="btn-drop-board" class="btn btn-danger" data-cc-i18n="storage.dropBoard">Удалить текущую доску</button>
+        <button id="btn-wipe" class="btn btn-danger" data-cc-i18n="storage.wipe">Очистить всю базу</button>
+      </div>
+      <menu class="dialog-actions">
+        <button id="btn-storage-close" class="btn btn-ghost" data-cc-i18n="storage.close">Закрыть</button>
+      </menu>
+    </div>
+  </dialog>
+</div>

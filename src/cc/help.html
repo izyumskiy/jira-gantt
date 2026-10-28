@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="ru" data-cc-i18n-doctitle="help.pageTitle">
+<head>
+  <meta charset="utf-8">
+  <title>Как читать Control Chart</title>
+  <link rel="stylesheet" href="cc.css">
+  <link rel="stylesheet" href="help.css">
+</head>
+<body class="help-body">
+  <!-- Стили Control Chart привязаны к контейнеру вкладки #page-cc — справка открывается в нём же. -->
+  <div id="page-cc">
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark"></span>
+        <span data-cc-i18n="help.brand">Справка</span>
+      </div>
+      <div class="topbar-actions">
+        <button id="btn-tour" class="btn btn-ghost" data-cc-i18n="tour.button">Что где на экране</button>
+        <button id="btn-back" class="btn btn-ghost" data-cc-i18n="help.back">← К графику</button>
+      </div>
+    </header>
+
+    <div class="help-layout">
+      <nav class="help-toc" id="toc"></nav>
+      <article class="help-doc" id="doc" data-cc-i18n="help.loading">Загружаю справку…</article>
+    </div>
+
+    <footer class="help-footer">
+      <b>Alexander Izyumskiy</b> · <a href="mailto:izumsky@gmail.com">izumsky@gmail.com</a> ·
+      <span data-cc-i18n="about.version">Версия</span> <span id="about-version">—</span>
+    </footer>
+  </div>
+
+  <script type="module" src="help.js"></script>
+</body>
+</html>

@@ -1,7 +1,8 @@
 // Дев-проверка чистой логики без Jira и без Chrome: подменяем chrome.storage и гоняем агрегацию.
 globalThis.chrome = {
   storage: {
-    local: { _d: {}, async get(k) { return { [k]: this._d[k] }; }, async set(o) { Object.assign(this._d, o); } },
+    // get — как у Chrome: ключ строкой или списком ключей.
+    local: { _d: {}, async get(k) { return Object.fromEntries((Array.isArray(k) ? k : [k]).map((x) => [x, this._d[x]])); }, async set(o) { Object.assign(this._d, o); } },
     onChanged: { _l: [], addListener(f) { this._l.push(f); } }
   },
   permissions: { async contains() { return true; }, async request() { return true; } },
@@ -2256,8 +2257,8 @@ check("пиктограмма 💬 есть и на «По эпикам и лю�
   const doc = new DOMParser().parseFromString(html, "text/html");
   const group = doc.querySelector(".tabs .view-group");
   const views = group ? [...group.querySelectorAll(".tab")] : [];
-  check("Р1: три ракурса в одной группе — «По эпикам», «По людям», «Эпик — история»",
-    views.map((b) => b.dataset.tab).join() === "epicPeople,people,epicStories", views.map((b) => b.dataset.tab).join());
+  check("Р1: ракурсы в одной группе — «По эпикам», «По людям», «Эпик — история» и четвёртым Control Chart",
+    views.map((b) => b.dataset.tab).join() === "epicPeople,people,epicStories,cc", views.map((b) => b.dataset.tab).join());
   check("Р1: у ракурсов пиктограммы, подпись — в подсказке и aria-label, на обоих языках",
     views.every((b) => b.classList.contains("tab-icon") && b.querySelector("svg") && !b.dataset.i18n && b.dataset.i18nTitle && b.dataset.i18nAria === b.dataset.i18nTitle &&
       DICT.ru[b.dataset.i18nTitle] && DICT.en[b.dataset.i18nTitle]));
@@ -3126,6 +3127,139 @@ check("пиктограмма 💬 есть и на «По эпикам и лю�
   const sn = mS.projects[0].epics[0].stories[0];
   check("План: на «Эпик — история» задача истории встаёт в секцию по плановому началу",
     sn.cells.get(mS.columns[1].id)?.issues.map((i) => i.key).join() === "P-NEXT", [...sn.cells.keys()].join());
+}
+
+// Control Chart (src/cc): общая база, общие настройки подключения, общая таблица людей, изоляция
+// разметки и стилей. Сам модуль покрыт своими тестами — dev/cc/test.html.
+{
+  const ccdb = await import("../src/cc/lib/db.js");
+  const ccSettings = await import("../src/cc/lib/settings.js");
+  const ccPeopleMod = await import("../src/cc/people.js");
+  const teamMod = await import("../src/js/team.js");
+
+  // База одна: сторы Control Chart — в базе Ганта, схема — в src/js/db.js.
+  const idb = await dbm.open();
+  check("CC: сторы Control Chart — в общей базе плагина (jiragantt, версия 9)",
+    ["ccBoards", "ccDicts", "ccIssues"].every((n) => idb.objectStoreNames.contains(n)) && idb.name === "jiragantt" && idb.version === 9,
+    `${idb.name} v${idb.version}`);
+  const ccIx = idb.transaction("ccIssues").objectStore("ccIssues");
+  check("CC: задача — ключ [доска, задача], индексы by_board и by_board_done",
+    JSON.stringify(ccIx.keyPath) === '["b","i"]' && ccIx.indexNames.contains("by_board") && ccIx.indexNames.contains("by_board_done"));
+
+  await ccdb.wipeAll(); // дев-страницы на одном адресе делят базу — начинаем с чистых данных CC
+  await ccdb.putBoard({ id: 901, name: "CC test board", columns: [] });
+  await ccdb.putIssues([{ b: 901, i: 1, k: 1, pj: 0, ty: 0, pr: 0, c: 1, u: 1, r: -1, s: 0, dn: -1, tr: new Uint8Array([0]), as: 0 }]);
+  await ccdb.putDictRecord({ n: "user", a: ["Пётр Петров"] });
+  const keepPeople = await dbm.all(dbm.STORES.people);
+  await dbm.clearAll();
+  check("CC: «Очистить базу» Ганта не трогает доски и задачи Control Chart",
+    (await ccdb.getBoardIssues(901)).length === 1 && !!(await ccdb.getBoard(901)));
+
+  // Таблица людей одна на оба инструмента.
+  const ccp = await ccPeopleMod.ccPeople();
+  check("CC: исполнители досок Control Chart — с доской и числом задач",
+    ccp.length === 1 && ccp[0].name === normName("Пётр Петров") && ccp[0].boards.join() === "CC test board" && ccp[0].issues === 1, JSON.stringify(ccp));
+  const merged = teamMod.mergeCcPeople(
+    [{ name: "иван", displayName: "Иван", login: "ivan", key: "ivan" }, { name: normName("Пётр Петров"), displayName: "Пётр Петров", login: "petr", key: "petr" }],
+    [...ccp, { name: "анна", displayName: "Анна", boards: ["B"], issues: 3 }]
+  );
+  const petr = merged.find((x) => x.displayName === "Пётр Петров");
+  check("CC: человек из обеих выгрузок — одна строка с пометкой Control Chart; новый добавлен, порядок по имени",
+    merged.map((x) => x.displayName).join() === "Анна,Иван,Пётр Петров" && petr.cc.issues === 1 && petr.login === "petr" && !merged.find((x) => x.displayName === "Иван").cc,
+    merged.map((x) => x.displayName).join());
+  check("CC: человек только из Control Chart в «Команде» — из выгрузки, не «нет в выгрузке»",
+    mergeProfiles(merged, []).find((r) => r.displayName === "Анна")?.loaded === true);
+  await dbm.putAll(dbm.STORES.people, [{ name: normName("Пётр Петров"), displayName: "Пётр Петров", team: "Платформа", role: "qa", status: "outstaff", systems: [] }]);
+  const prof = await ccPeopleMod.teamProfiles();
+  check("CC: Control Chart видит команду, роль и статус из «Команды», подписи — из словаря Ганта",
+    prof.get(normName("Пётр Петров"))?.team === "Платформа" && ccPeopleMod.roleLabel("qa") === t("role.qa") && ccPeopleMod.statusLabel("outstaff") === t("pstatus.outstaff"));
+  await dbm.delKeys(dbm.STORES.people, [normName("Пётр Петров")]);
+  await dbm.putAll(dbm.STORES.people, keepPeople);
+
+  await ccdb.wipeAll();
+  check("CC: «Удалить все данные Control Chart» чистит его сторы", (await ccdb.getBoards()).length === 0 && (await ccdb.getBoardIssues(901)).length === 0);
+
+  // Подключение и язык — общие с Гантом; свои настройки — под ключом cc.
+  const keepConn = await settings.load();
+  await settings.save({ baseUrl: "https://jira.example.local/secure/Dashboard.jspa", pat: "tok", lang: "en" });
+  const cs = await ccSettings.loadSettings();
+  check("CC: подключение и язык — из настроек Ганта (адрес без хвоста, сначала сессия, при отказе PAT)",
+    cs.baseUrl === "https://jira.example.local" && cs.token === "tok" && cs.authMode === "auto" && cs.locale === "en",
+    JSON.stringify({ b: cs.baseUrl, a: cs.authMode, l: cs.locale }));
+  await settings.save({ pat: "" });
+  check("CC: без PAT — только сессия браузера", (await ccSettings.loadSettings()).authMode === "cookie");
+  await ccSettings.saveSettings({ storyPointsField: "customfield_1", baseUrl: "https://evil.example", lastBoardId: 7 });
+  const rawCc = (await chrome.storage.local.get("cc")).cc;
+  check("CC: свои настройки — под ключом cc, адрес подключения туда не пишется",
+    rawCc.storyPointsField === "customfield_1" && rawCc.lastBoardId === 7 && !("baseUrl" in rawCc) && (await settings.load()).baseUrl.includes("jira.example.local"));
+  check("CC: по умолчанию хранятся заголовки целиком (255 символов) и метки — база полная для анализа",
+    ccSettings.DEFAULTS.summaryMaxLen === 255 && ccSettings.DEFAULTS.storeLabels === true && ccSettings.DEFAULTS.storeSummaries === true);
+  await settings.save({ baseUrl: keepConn.baseUrl, pat: keepConn.pat, lang: keepConn.lang });
+  await chrome.storage.local.set({ cc: {} });
+
+  // Авторизация как у Ганта: сначала сессия браузера, при отказе — PAT; удачный PAT запоминается.
+  {
+    const { JiraClient } = await import("../src/cc/lib/jira.js");
+    const origFetch = window.fetch;
+    const calls = [];
+    window.fetch = async (url, opt) => {
+      const bearer = !!(opt.headers && opt.headers.Authorization);
+      calls.push(bearer ? "pat" : "cookie");
+      if (!bearer) return new Response("", { status: 401 });
+      return new Response(JSON.stringify({ name: "ivan" }), { status: 200, headers: { "Content-Type": "application/json" } });
+    };
+    try {
+      const cl = new JiraClient({ baseUrl: "https://jira.example.local", authMode: "auto", token: "tok" });
+      const me = await cl.myself();
+      await cl.myself();
+      check("CC: в Jira сначала сессия браузера, при отказе — PAT, дальше сразу PAT", me.name === "ivan" && calls.join() === "cookie,pat,pat", calls.join());
+      calls.length = 0;
+      const plain = new JiraClient({ baseUrl: "https://jira.example.local", authMode: "cookie", token: "" });
+      let err = null;
+      await plain.myself().catch((e) => (err = e));
+      check("CC: без PAT отказ сессии — понятная ошибка авторизации, без второго запроса", err && err.kind === "auth" && calls.join() === "cookie", calls.join());
+    } finally {
+      window.fetch = origFetch;
+    }
+  }
+
+  // Разметка: id и атрибуты перевода не пересекаются с Гантом; кнопка — четвёртой в группе ракурсов.
+  const [appHtml, ccHtml] = await Promise.all([fetch("../src/app.html").then((r) => r.text()), fetch("../src/cc/view.html").then((r) => r.text())]);
+  const parse = (html) => new DOMParser().parseFromString(html, "text/html");
+  const appIds = new Set([...parse(appHtml).querySelectorAll("[id]")].map((n) => n.id));
+  const clash = [...parse(ccHtml).querySelectorAll("[id]")].map((n) => n.id).filter((id) => appIds.has(id));
+  check("CC: id разметки Control Chart не пересекаются с id Ганта", clash.length === 0, clash.join());
+  check("CC: тексты Control Chart — своими атрибутами data-cc-i18n, а не data-i18n Ганта",
+    !/\sdata-i18n(-[a-z]+)?=/.test(ccHtml) && /\sdata-cc-i18n=/.test(ccHtml));
+  check("CC: страница вкладки есть, кнопка — четвёртой в группе ракурсов",
+    !!parse(appHtml).querySelector("#page-cc.page") && [...parse(appHtml).querySelectorAll(".view-group .tab-view")].map((b) => b.dataset.tab).join() === "epicPeople,people,epicStories,cc");
+
+  // Стили: Гант не протекает в Control Chart и наоборот.
+  const link = document.createElement("link");
+  link.rel = "stylesheet";
+  link.href = "../src/cc/cc.css";
+  await new Promise((resolve) => {
+    link.onload = resolve;
+    link.onerror = resolve;
+    document.head.append(link);
+  });
+  const page = document.createElement("section");
+  page.id = "page-cc";
+  page.className = "page";
+  page.innerHTML = '<button class="plain">x</button><button class="btn">y</button><span class="muted">m</span>';
+  const outside = document.createElement("button");
+  outside.textContent = "z";
+  document.body.append(page, outside);
+  const cs1 = getComputedStyle(page.querySelector(".plain"));
+  const cs2 = getComputedStyle(page.querySelector(".btn"));
+  check("CC: правило Ганта для button внутрь вкладки не протекает", cs1.paddingTop !== "5px" && cs1.borderTopLeftRadius !== "4px", `${cs1.padding} / ${cs1.borderRadius}`);
+  check("CC: свои стили Control Chart внутри вкладки работают", cs2.paddingTop === "6px" && cs2.paddingLeft === "12px", cs2.padding);
+  check("CC: стили Control Chart не задевают Гант", getComputedStyle(outside).paddingTop === "5px" && getComputedStyle(outside).borderTopLeftRadius === "4px", getComputedStyle(outside).padding);
+  page.className = "page hidden";
+  check("CC: скрытая вкладка скрыта, хотя правило вкладки задаёт display", getComputedStyle(page).display === "none");
+  page.remove();
+  outside.remove();
+  link.remove();
 }
 
 const total = document.createElement("div");

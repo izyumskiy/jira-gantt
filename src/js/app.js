@@ -54,10 +54,13 @@ function fail(e) {
 
 // ---------- вкладки ----------
 
-function showTab(name) {
+function showTab(name, opts = {}) {
   applyTopHeight(); // содержимое верхней панели меняется — её высота тоже
   const from = state.activeTab;
   state.activeTab = name;
+  // Активная вкладка — атрибутом на body: на Control Chart верхняя панель прячет счётчики и
+  // кнопку синхронизации Ганта (у него своя выгрузка).
+  document.body.dataset.tab = name;
   if (name === "summary" && from !== "summary") state.summarySession = null; // новая сессия просмотра
   document.querySelectorAll(".tab").forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
   document.querySelectorAll(".page").forEach((p) => p.classList.add("hidden"));
@@ -67,6 +70,15 @@ function showTab(name) {
   if (name === "epicStories") drawStories();
   if (name === "team") team.render($("#page-team"), { notify: (m) => status(m) }).catch(fail);
   if (name === "summary") drawSummary().catch(fail);
+  if (name === "cc") showControlChart(opts).catch(fail);
+}
+
+// Control Chart (src/cc) — отдельный модуль со своими сторами в общей базе. Грузится при первом
+// открытии вкладки: ошибка в нём не должна мешать запуску Ганта.
+let ccModule = null;
+async function showControlChart(opts = {}) {
+  ccModule = ccModule || (await import("../cc/view.js"));
+  await ccModule.show($("#page-cc"), { openSettings: () => showTab("settings"), tour: !!opts.tour });
 }
 
 // «Сводка»: база фиксируется при открытии вкладки; пока вкладка на экране, отметка просмотра
@@ -1966,6 +1978,7 @@ async function boot() {
     await settings.save({ lang: $("#lang").value });
     setLang($("#lang").value);
     applyI18n();
+    if (ccModule) ccModule.setLanguage($("#lang").value).catch(fail);
     applyTopHeight();
     renderAbout().catch(() => {});
     fillSettingsForm();
@@ -2178,6 +2191,9 @@ async function boot() {
     // dev-страница без chrome.runtime
   }
   if (location.hash === "#summary") showTab("summary");
+  // Справка Control Chart возвращает на его вкладку: ?tab=cc (с &tour=1 — сразу с подсказками).
+  const params = new URLSearchParams(location.search);
+  if (params.get("tab") === "cc") showTab("cc", { tour: params.has("tour") });
   if (location.hash === "#auto") runAutoSync().catch(() => {});
   else if (s.baseUrl) autoSyncOnOpen().catch(() => {});
   refreshSummaryBadge().catch(() => {});

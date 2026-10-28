@@ -1,6 +1,8 @@
-// Локальное хранилище IndexedDB: эпики, задачи, спринты, служебные ключи.
+// Локальное хранилище IndexedDB: эпики, задачи, спринты, служебные ключи — и данные Control Chart.
+// База одна на весь плагин: всё, что знает плагин о Jira, лежит в одном месте (в том числе для
+// будущих инструментов, которым нужна полная картина). Схема описана только здесь.
 const DB_NAME = "jiragantt";
-const DB_VER = 8;
+const DB_VER = 9;
 
 // others — задачи людей из целевых эпиков, лежащие в ДРУГИХ эпиках (текущий и будущие спринты).
 // people — введённые вручную свойства людей (роль, системы, статус); ключ — нормализованное имя.
@@ -20,8 +22,17 @@ export const STORES = {
   // (104 недели). Удаление эпика из выбора историю не трогает — она нужна трендам и проверке прогнозов.
   syncLog: "syncLog",
   epicWeeks: "epicWeeks",
-  meta: "meta"
+  meta: "meta",
+  // Control Chart (src/cc): доски, словари строк и задачи с упакованной историей статусов.
+  // Пишет и читает их только src/cc — синхронизация Ганта сюда не заходит (docs/cc/DATA-MODEL.md).
+  ccBoards: "ccBoards",
+  ccDicts: "ccDicts",
+  ccIssues: "ccIssues"
 };
+
+// Хранилища Control Chart: у него своя выгрузка и своя чистка («Хранилище» на его вкладке), поэтому
+// «Очистить базу» и импорт конфигурации Ганта их не трогают.
+export const CC_STORES = new Set([STORES.ccBoards, STORES.ccDicts, STORES.ccIssues]);
 
 let dbp = null;
 
@@ -76,8 +87,30 @@ export function open() {
       if (!db.objectStoreNames.contains(STORES.meta)) {
         db.createObjectStore(STORES.meta, { keyPath: "k" });
       }
+      // Control Chart (версия 9). Ключ задачи — [доска, id задачи]: задача на двух досках хранится
+      // дважды, зато расчёт по доске — один запрос по индексу.
+      if (!db.objectStoreNames.contains(STORES.ccBoards)) {
+        db.createObjectStore(STORES.ccBoards, { keyPath: "id" });
+      }
+      if (!db.objectStoreNames.contains(STORES.ccDicts)) {
+        db.createObjectStore(STORES.ccDicts, { keyPath: "n" });
+      }
+      if (!db.objectStoreNames.contains(STORES.ccIssues)) {
+        const c = db.createObjectStore(STORES.ccIssues, { keyPath: ["b", "i"] });
+        c.createIndex("by_board", "b", { unique: false });
+        c.createIndex("by_board_done", ["b", "dn"], { unique: false });
+      }
     };
-    req.onsuccess = () => resolve(req.result);
+    req.onsuccess = () => {
+      const db = req.result;
+      // Новая версия схемы открывается в другой странице плагина — уступаем, иначе её обновление
+      // ждало бы, пока закроют эту вкладку.
+      db.onversionchange = () => {
+        db.close();
+        dbp = null;
+      };
+      resolve(db);
+    };
     req.onerror = () => reject(req.error);
   });
   return dbp;
@@ -166,14 +199,14 @@ export async function clear(store) {
   await done(tx(db, store, "readwrite").clear());
 }
 
-// Очистка выгрузки. Профили людей — ручной ввод, их не трогаем.
+// Очистка выгрузки. Профили людей — ручной ввод, их не трогаем; данные Control Chart — тоже.
 export async function clearAll() {
-  for (const s of Object.values(STORES)) if (s !== STORES.people) await clear(s);
+  for (const s of Object.values(STORES)) if (s !== STORES.people && !CC_STORES.has(s)) await clear(s);
 }
 
-// Полная очистка, включая профили людей — перед импортом конфигурации.
+// Полная очистка, включая профили людей — перед импортом конфигурации. Control Chart не трогаем.
 export async function clearEverything() {
-  for (const s of Object.values(STORES)) await clear(s);
+  for (const s of Object.values(STORES)) if (!CC_STORES.has(s)) await clear(s);
 }
 
 export async function metaGet(k, dflt = null) {

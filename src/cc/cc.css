@@ -1,0 +1,449 @@
+/* Control Chart внутри OhMyGant. Все правила привязаны к контейнеру вкладки #page-cc (страница
+   справки тоже оборачивает себя в #page-cc), поэтому наружу ничего не протекает.
+
+   Внутрь тоже: у Ганта свои правила для button, input, table, .chip, .muted и т. п. Первое правило
+   ниже откатывает каскад внутри вкладки к стилям браузера — так Control Chart видит «чистую»
+   страницу, как в отдельном расширении, а его собственные правила (они специфичнее) ложатся сверху.
+   SVG не трогаем: у графика и пиктограмм оформление в атрибутах fill/stroke, откат их бы стёр. */
+#page-cc :where(*:not(svg, svg *)) { all: revert; }
+
+/* Вкладка — во всю ширину под шапкой OhMyGant: съедаем поля <main>. Скрытая вкладка — скрыта
+   (класс .hidden у OhMyGant слабее правила с id). На странице справки полей <main> нет. */
+#page-cc { display: block; margin: -14px -16px -40px; min-height: calc(100vh - var(--top-h, 46px)); }
+#page-cc.hidden { display: none; }
+body.help-body { margin: 0; }
+body.help-body #page-cc { margin: 0; min-height: 100vh; }
+
+/* Оформление панели Control Chart. Светлая и тёмная тема. */
+
+#page-cc {
+  --bg: #f4f5f7;
+  --surface: #ffffff;
+  --surface-2: #fafbfc;
+  --border: #dfe1e6;
+  --text: #172b4d;
+  --text-soft: #6b778c;
+  --accent: #0052cc;
+  --accent-soft: #deebff;
+  --dot: #4c9aff;
+  --dot-stroke: #0052cc;
+  --rolling: #00875a;
+  --band: rgba(0, 135, 90, 0.14);
+  --avg: #6554c0;
+  --p85: #ff8b00;
+  --danger: #de350b;
+  --ok: #00875a;
+  --hl: #ae4787;
+  --hl-stroke: #8f3b6f;
+  --warn: #b76e00;
+  --shadow: 0 1px 3px rgba(9, 30, 66, .16);
+}
+
+@media (prefers-color-scheme: dark) {
+  #page-cc {
+    --bg: #1b1f27;
+    --surface: #22272b;
+    --surface-2: #282e33;
+    --border: #3c4149;
+    --text: #dfe4ea;
+    --text-soft: #9aa4b2;
+    --accent: #579dff;
+    --accent-soft: #1c2b41;
+    --dot: #579dff;
+    --dot-stroke: #85b8ff;
+    --rolling: #4bce97;
+    --band: rgba(75, 206, 151, 0.16);
+    --avg: #9f8fef;
+    --p85: #f5a623;
+    --danger: #f87168;
+    --ok: #4bce97;
+    --hl: #e774bb;
+    --hl-stroke: #f797d2;
+    --warn: #f5cd47;
+    --shadow: 0 1px 3px rgba(0, 0, 0, .4);
+  }
+}
+
+#page-cc * { box-sizing: border-box; }
+
+/* Блоки с display в наших правилах иначе игнорируют атрибут hidden. */
+#page-cc [hidden] { display: none !important; }
+
+#page-cc {
+  font: 13px/1.45 -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+  color: var(--text);
+  background: var(--bg);
+}
+
+#page-cc h2 { font-size: 16px; margin: 0 0 12px; }
+#page-cc h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--text-soft); margin: 0 0 8px; }
+#page-cc .muted { color: var(--text-soft); }
+
+/* -------------------------------------------------------------- шапка */
+
+#page-cc .topbar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 16px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+
+#page-cc .brand { display: flex; align-items: center; gap: 8px; font-weight: 600; }
+#page-cc .brand-mark {
+  width: 16px; height: 16px; border-radius: 3px;
+  background: linear-gradient(135deg, var(--accent), var(--rolling));
+}
+
+#page-cc .topbar-board { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; }
+#page-cc #board-name { max-width: 340px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#page-cc .caret { color: var(--text-soft); }
+#page-cc .topbar-actions { display: flex; align-items: center; gap: 8px; }
+
+#page-cc .pill {
+  font-size: 11px; padding: 2px 8px; border-radius: 10px;
+  background: var(--surface-2); border: 1px solid var(--border); color: var(--text-soft);
+}
+#page-cc .pill-on { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 40%, var(--border)); }
+#page-cc .pill-off { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 40%, var(--border)); }
+
+/* ------------------------------------------------------------ кнопки */
+
+#page-cc .btn {
+  font: inherit;
+  padding: 6px 12px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text);
+  cursor: pointer;
+}
+#page-cc .btn:hover:not(:disabled) { background: var(--accent-soft); }
+#page-cc .btn:disabled { opacity: .5; cursor: default; }
+#page-cc .btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+#page-cc .btn-primary:hover:not(:disabled) { filter: brightness(1.08); background: var(--accent); }
+#page-cc .btn-ghost { background: transparent; }
+#page-cc .btn-danger { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 40%, var(--border)); }
+#page-cc .btn-sm { padding: 3px 8px; font-size: 12px; }
+#page-cc .btn-icon { padding: 6px 8px; line-height: 0; }
+
+/* ------------------------------------------------------------ прогресс */
+
+#page-cc .progress {
+  display: flex; align-items: center; gap: 12px;
+  padding: 6px 16px; background: var(--surface-2); border-bottom: 1px solid var(--border);
+}
+#page-cc .progress-bar { flex: 1; height: 4px; background: var(--border); border-radius: 2px; overflow: hidden; }
+#page-cc .progress-bar i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .2s; }
+
+#page-cc .banner {
+  padding: 8px 16px; background: color-mix(in srgb, var(--danger) 12%, var(--surface));
+  border-bottom: 1px solid var(--border); color: var(--danger);
+}
+#page-cc .banner.info { background: var(--accent-soft); color: var(--text); }
+
+/* -------------------------------------------------------------- макет */
+
+#page-cc .layout { display: grid; grid-template-columns: 264px 1fr; min-height: calc(100vh - var(--top-h, 0px) - 53px); align-items: start; }
+
+#page-cc .sidebar {
+  padding: 12px; border-right: 1px solid var(--border); background: var(--surface);
+  overflow-y: auto; max-height: calc(100vh - var(--top-h, 0px)); position: sticky; top: var(--top-h, 0px);
+  align-self: stretch;
+}
+#page-cc .panel { margin-bottom: 18px; }
+
+#page-cc .chips { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px; }
+#page-cc .chip {
+  font: inherit; font-size: 12px; padding: 3px 8px; cursor: pointer;
+  border: 1px solid var(--border); border-radius: 12px; background: transparent; color: var(--text);
+}
+#page-cc .chip.is-active { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+#page-cc .row-2 { display: flex; gap: 8px; align-items: end; }
+#page-cc .row-2 label { display: flex; flex-direction: column; gap: 2px; font-size: 12px; color: var(--text-soft); flex: 1; }
+#page-cc input[type="date"], #page-cc input[type="text"], #page-cc input[type="url"], #page-cc input[type="password"], #page-cc input[type="search"], #page-cc input[type="number"], #page-cc select {
+  font: inherit; padding: 5px 8px; border: 1px solid var(--border);
+  border-radius: 4px; background: var(--surface-2); color: var(--text); width: 100%;
+}
+#page-cc .inline-num { width: 60px !important; display: inline-block; }
+
+#page-cc .checklist { display: flex; flex-direction: column; gap: 3px; max-height: 190px; overflow-y: auto; }
+#page-cc .checklist.statuses { max-height: 280px; gap: 0; }
+
+/* Группа = колонка доски; внутри — её статусы. */
+#page-cc .st-group { padding: 2px 0 4px; border-bottom: 1px solid var(--border); }
+#page-cc .st-group:last-child { border-bottom: none; }
+#page-cc .st-head { font-weight: 600; padding: 2px 0; }
+#page-cc .st-item { padding-left: 18px; color: var(--text-soft); }
+#page-cc .st-item:hover { color: var(--text); }
+#page-cc .st-group.is-unmapped .st-head { color: var(--p85); }
+#page-cc .st-warn {
+  display: inline-flex; width: 14px; height: 14px; margin-left: 4px;
+  align-items: center; justify-content: center; border-radius: 50%;
+  background: var(--p85); color: #fff; font-size: 10px; font-weight: 700; cursor: help;
+}
+
+#page-cc .link-btn {
+  font: inherit; padding: 0; border: none; background: none; cursor: pointer;
+  color: var(--accent); text-align: left; border-bottom: 1px dashed currentColor;
+}
+#page-cc .link-btn:hover { filter: brightness(1.15); }
+
+#page-cc .diag-body { display: flex; flex-direction: column; max-height: 50vh; overflow-y: auto; }
+#page-cc .diag-row {
+  display: flex; justify-content: space-between; gap: 12px; align-items: baseline;
+  padding: 5px 2px; border-bottom: 1px solid var(--border);
+}
+#page-cc .diag-row:last-child { border-bottom: none; }
+#page-cc .diag-tag {
+  font-size: 10px; padding: 1px 6px; border-radius: 8px; white-space: nowrap;
+  background: color-mix(in srgb, var(--p85) 18%, transparent); color: var(--p85);
+}
+#page-cc .check { display: flex; align-items: center; gap: 6px; font-size: 12px; cursor: pointer; }
+#page-cc .check input { margin: 0; }
+#page-cc .check .count { margin-left: auto; color: var(--text-soft); font-size: 11px; }
+
+#page-cc .range-row { display: grid; grid-template-columns: 1fr auto; gap: 4px; font-size: 12px; align-items: center; margin-bottom: 8px; }
+#page-cc .range-row input[type="range"] { grid-column: 1 / -1; width: 100%; }
+
+#page-cc .excluded { list-style: none; margin: 0; padding: 0; font-size: 12px; color: var(--text-soft); }
+#page-cc .excluded li { display: flex; justify-content: space-between; padding: 1px 0; }
+
+#page-cc .panel-head { display: flex; align-items: center; gap: 6px; }
+
+#page-cc .icon-btn {
+  margin-left: auto; display: inline-flex; align-items: center; justify-content: center;
+  padding: 2px; border: none; background: none; color: var(--text-soft); cursor: pointer;
+  border-radius: 3px; line-height: 0;
+}
+#page-cc .icon-btn:hover { color: var(--accent); background: var(--accent-soft); }
+#page-cc .icon-btn.is-empty { color: var(--border); }
+
+#page-cc .hint {
+  display: inline-flex; width: 15px; height: 15px; align-items: center; justify-content: center;
+  border-radius: 50%; border: 1px solid var(--border); background: transparent;
+  color: var(--text-soft); font: inherit; font-size: 10px; line-height: 1; padding: 0; cursor: help;
+}
+#page-cc .hint:hover { color: var(--accent); border-color: var(--accent); }
+
+/* ------------------------------------------------------------- главное */
+
+#page-cc .main { padding: 12px 16px 24px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+
+#page-cc .stats { display: flex; flex-wrap: wrap; gap: 8px; }
+#page-cc .stat {
+  background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
+  padding: 8px 12px; min-width: 116px; box-shadow: var(--shadow);
+}
+#page-cc .stat { cursor: help; }
+#page-cc .stat b { display: block; font-size: 18px; font-weight: 600; }
+#page-cc .stat span { font-size: 11px; color: var(--text-soft); text-transform: uppercase; letter-spacing: .03em; }
+
+/* Пороговая окраска: применяется к карточке CV. */
+#page-cc .stat.tone-good, #page-cc .stat.tone-ok, #page-cc .stat.tone-warn { border-left-width: 3px; }
+#page-cc .stat.tone-good { border-left-color: var(--ok); }
+#page-cc .stat.tone-good b { color: var(--ok); }
+#page-cc .stat.tone-ok { border-left-color: var(--accent); }
+#page-cc .stat.tone-ok b { color: var(--accent); }
+#page-cc .stat.tone-warn { border-left-color: var(--warn); }
+#page-cc .stat.tone-warn b { color: var(--warn); }
+
+#page-cc .chart-wrap {
+  background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
+  padding: 8px; box-shadow: var(--shadow);
+}
+#page-cc .chart { position: relative; height: 420px; }
+#page-cc .cc-svg { display: block; width: 100%; height: 100%; }
+
+#page-cc .chart-legend { display: flex; flex-wrap: wrap; gap: 14px; padding: 6px 6px 2px; font-size: 11px; color: var(--text-soft); }
+#page-cc .chart-legend i { display: inline-block; vertical-align: middle; margin-right: 4px; }
+#page-cc .lg-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--dot); }
+#page-cc .lg-line { width: 14px; height: 2px; background: var(--rolling); }
+#page-cc .lg-band { width: 14px; height: 8px; background: var(--band); border: 1px solid var(--rolling); }
+#page-cc .lg-avg { width: 14px; height: 0; border-top: 2px dashed var(--avg); }
+#page-cc .lg-p85 { width: 14px; height: 0; border-top: 2px dotted var(--p85); }
+#page-cc .lg-hl { width: 14px; height: 2px; background: var(--hl); }
+
+/* --------------------------------------------------------------- SVG */
+
+#page-cc .cc-gridline { stroke: var(--border); stroke-width: 1; opacity: .7; }
+#page-cc .cc-gridline-v { opacity: .4; }
+#page-cc .cc-axis { stroke: var(--border); stroke-width: 1; }
+#page-cc .cc-tick { fill: var(--text-soft); font-size: 10px; }
+#page-cc .cc-empty { fill: var(--text-soft); font-size: 13px; }
+#page-cc .cc-dot { fill: var(--dot); fill-opacity: .75; stroke: var(--dot-stroke); stroke-width: 1; }
+#page-cc .cc-dot-count { fill: #fff; font-size: 9px; font-weight: 600; pointer-events: none; }
+#page-cc .cc-rolling { fill: none; stroke: var(--rolling); stroke-width: 2; stroke-linejoin: round; }
+#page-cc .cc-rolling.is-dimmed { opacity: .35; }
+#page-cc .cc-rolling-hl { fill: none; stroke: var(--hl); stroke-width: 2.5; stroke-linejoin: round; }
+#page-cc .cc-dots.is-dimmed .cc-dot { fill: var(--text-soft); fill-opacity: .18; stroke: var(--text-soft); stroke-opacity: .35; }
+#page-cc .cc-dots.is-dimmed .cc-dot-count { fill: var(--text-soft); opacity: .5; }
+#page-cc .cc-dots.is-picked .cc-dot { fill: var(--hl); fill-opacity: .85; stroke: var(--hl-stroke); }
+#page-cc .cc-band { fill: var(--band); stroke: none; }
+#page-cc .cc-avg-line { stroke: var(--avg); stroke-width: 1.5; stroke-dasharray: 6 4; }
+#page-cc .cc-p85-line { stroke: var(--p85); stroke-width: 1.5; stroke-dasharray: 2 3; }
+#page-cc .cc-line-label { fill: var(--avg); font-size: 10px; }
+#page-cc .cc-p85-label { fill: var(--p85); }
+#page-cc .cc-overlay { fill: transparent; cursor: crosshair; }
+#page-cc .cc-brush { fill: var(--accent); fill-opacity: .12; stroke: var(--accent); stroke-width: 1; }
+#page-cc .cc-hover-ring { fill: none; stroke: var(--accent); stroke-width: 2; pointer-events: none; }
+
+#page-cc .cc-tooltip {
+  position: absolute; z-index: 5; pointer-events: none; max-width: 340px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(9, 30, 66, .25); padding: 8px 10px; font-size: 12px;
+}
+#page-cc .cc-tt-head { font-weight: 600; margin-bottom: 4px; }
+#page-cc .cc-tt-row { display: flex; gap: 8px; align-items: baseline; }
+#page-cc .cc-tt-key { color: var(--accent); font-weight: 600; }
+#page-cc .cc-tt-cycle { color: var(--rolling); }
+#page-cc .cc-tt-sum { color: var(--text-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#page-cc .cc-tt-break { margin-top: 6px; display: flex; flex-wrap: wrap; gap: 6px; color: var(--text-soft); font-size: 11px; }
+#page-cc .cc-tt-more, #page-cc .cc-tt-hint { margin-top: 4px; color: var(--text-soft); font-size: 11px; }
+
+/* ------------------------------------------------------------ таблица */
+
+#page-cc .table-wrap { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; box-shadow: var(--shadow); }
+#page-cc .table-head { display: flex; align-items: center; gap: 12px; padding: 8px 12px; border-bottom: 1px solid var(--border); }
+#page-cc .table-head h3 { margin: 0; }
+#page-cc .table-actions { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+#page-cc .table-actions input[type="search"] { width: 220px; }
+#page-cc .table-scroll { max-height: 420px; overflow: auto; }
+
+#page-cc table { width: 100%; border-collapse: collapse; }
+#page-cc th, #page-cc td { text-align: left; padding: 5px 12px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+#page-cc th { position: sticky; top: 0; background: var(--surface-2); cursor: pointer; font-size: 11px; text-transform: uppercase; color: var(--text-soft); z-index: 1; }
+#page-cc th.num, #page-cc td.num { text-align: right; }
+#page-cc td.summary { max-width: 460px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#page-cc tbody tr:hover { background: var(--surface-2); }
+#page-cc a { color: var(--accent); text-decoration: none; }
+#page-cc a:hover { text-decoration: underline; }
+
+/* ---------------------------------------------- подсказки по интерфейсу */
+
+#page-cc .tour-layer { position: absolute; top: 0; left: 0; width: 100%; height: 0; z-index: 40; pointer-events: none; }
+
+#page-cc .tour-mark {
+  position: absolute; pointer-events: auto;
+  width: 20px; height: 20px; padding: 0; border-radius: 50%;
+  border: 2px solid var(--surface); background: var(--accent); color: #fff;
+  font: 600 11px/1 inherit; display: flex; align-items: center; justify-content: center;
+  cursor: pointer; box-shadow: 0 1px 4px rgba(9, 30, 66, .35);
+}
+#page-cc .tour-mark:hover { background: var(--hl); }
+#page-cc .tour-mark.is-active { background: var(--hl); box-shadow: 0 0 0 4px color-mix(in srgb, var(--hl) 30%, transparent); }
+
+#page-cc .tour-card {
+  position: absolute; pointer-events: auto; width: 320px; max-width: 90vw;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
+  padding: 10px 12px; box-shadow: 0 6px 20px rgba(9, 30, 66, .28); font-size: 12px;
+}
+#page-cc .tour-card-title { font-weight: 600; margin-bottom: 4px; }
+#page-cc .tour-card-text { color: var(--text-soft); line-height: 1.5; }
+
+#page-cc .tour-bar {
+  position: fixed; z-index: 41; left: 50%; transform: translateX(-50%); bottom: 16px;
+  display: flex; align-items: center; gap: 12px; font-size: 12px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 20px;
+  padding: 6px 8px 6px 16px; box-shadow: 0 6px 20px rgba(9, 30, 66, .28);
+}
+
+/* ------------------------------------------------------------- диалоги */
+
+#page-cc dialog {
+  border: 1px solid var(--border); border-radius: 8px; padding: 0;
+  background: var(--surface); color: var(--text); box-shadow: 0 8px 32px rgba(9, 30, 66, .3);
+  max-width: 560px; width: 92vw;
+}
+#page-cc dialog::backdrop { background: rgba(9, 30, 66, .45); }
+#page-cc .dialog-body { padding: 18px; display: flex; flex-direction: column; gap: 12px; }
+#page-cc .field { display: flex; flex-direction: column; gap: 4px; border: none; padding: 0; margin: 0; }
+#page-cc .field legend { font-size: 12px; color: var(--text-soft); padding: 0 0 4px; }
+#page-cc .field small { color: var(--text-soft); font-size: 11px; }
+#page-cc .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin: 4px 0 0; padding: 0; }
+#page-cc .dialog-msg { font-size: 12px; min-height: 16px; }
+#page-cc .dialog-msg.err { color: var(--danger); }
+#page-cc .dialog-msg.ok { color: var(--ok); }
+
+#page-cc .boards-list { max-height: 50vh; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
+#page-cc .board-item {
+  display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-radius: 4px;
+  border: 1px solid transparent; cursor: pointer; background: transparent; color: var(--text);
+  font: inherit; text-align: left; width: 100%;
+}
+#page-cc .board-item:hover { background: var(--accent-soft); }
+#page-cc .board-item.is-current { border-color: var(--accent); }
+#page-cc .board-item .b-type { font-size: 11px; color: var(--text-soft); margin-left: auto; }
+
+#page-cc #people-table tbody tr { cursor: pointer; }
+#page-cc #people-table tbody tr.is-picked { background: color-mix(in srgb, var(--hl) 14%, transparent); }
+#page-cc #people-table tbody tr.is-picked td:first-child { box-shadow: inset 3px 0 0 var(--hl); font-weight: 600; }
+#page-cc #people-table td.few { color: var(--text-soft); }
+#page-cc #people-table .num { font-variant-numeric: tabular-nums; }
+#page-cc .table-actions .muted { font-size: 11px; }
+
+/* ------------------------------------------------------------- прогноз */
+
+#page-cc dialog.dialog-wide { max-width: 780px; }
+#page-cc .fc-intro { font-size: 12px; margin: 0; }
+#page-cc .fc-inputs label { max-width: 200px; }
+#page-cc .fc-teams-wrap { max-height: 220px; border: 1px solid var(--border); border-radius: 6px; }
+#page-cc #fc-teams th, #page-cc #fc-teams td { padding: 5px 10px; }
+#page-cc #fc-teams input[type="number"] { width: 82px; text-align: right; }
+#page-cc #fc-teams .fc-board-note { display: block; font-size: 11px; color: var(--text-soft); }
+#page-cc #fc-teams tr.is-off td { opacity: .45; }
+
+#page-cc .fc-warnings { display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
+#page-cc .fc-warn { color: var(--warn); }
+#page-cc .fc-note { color: var(--text-soft); }
+
+#page-cc .fc-result table { width: 100%; border-collapse: collapse; }
+#page-cc .fc-result th, #page-cc .fc-result td { padding: 6px 10px; border-bottom: 1px solid var(--border); text-align: left; }
+#page-cc .fc-result th { font-size: 11px; text-transform: uppercase; color: var(--text-soft); }
+#page-cc .fc-result tr.is-key td { font-weight: 600; background: var(--accent-soft); }
+#page-cc .fc-result .num { text-align: right; }
+
+#page-cc .fc-histogram svg { display: block; width: 100%; height: 92px; }
+#page-cc .fc-bar { fill: var(--dot); fill-opacity: .55; }
+#page-cc .fc-bar.is-key { fill: var(--accent); fill-opacity: .9; }
+#page-cc .fc-axis { fill: var(--text-soft); font-size: 10px; }
+
+#page-cc .fc-summary {
+  font-size: 12px; background: var(--surface-2); border: 1px solid var(--border);
+  border-radius: 6px; padding: 8px 10px;
+}
+#page-cc .fc-blocked { display: flex; flex-wrap: wrap; gap: 12px; font-size: 12px; color: var(--text-soft); }
+
+#page-cc .storage-info { display: flex; flex-direction: column; gap: 6px; font-size: 12px; }
+#page-cc .storage-info .bar { height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; }
+#page-cc .storage-info .bar i { display: block; height: 100%; background: var(--accent); }
+
+/* ------------------------------------------- общая таблица людей («Команда» в OhMyGant) */
+
+/* Фильтр исполнителей по командам: строка команды с галочкой «вся команда», люди — с отступом. */
+#page-cc .team-head { font-weight: 600; margin-top: 4px; }
+#page-cc .team-head:first-child { margin-top: 0; }
+#page-cc .team-member { padding-left: 18px; }
+#page-cc .check .p-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#page-cc .check.is-fired .p-name { color: var(--text-soft); text-decoration: line-through; }
+
+/* Пометки человека: роль, аутстаф, уволен. */
+#page-cc .p-mark {
+  margin-left: 6px; padding: 0 5px; border-radius: 8px; font-size: 10px; font-weight: 400;
+  background: var(--surface-2); border: 1px solid var(--border); color: var(--text-soft);
+  text-decoration: none; display: inline-block; line-height: 14px; vertical-align: 1px;
+}
+#page-cc .p-mark.p-outstaff { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 40%, var(--border)); }
+#page-cc .p-mark.p-fired { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 40%, var(--border)); }
+
+/* Переключатель «Люди / Команды» в шапке сравнения. */
+#page-cc .people-mode { margin: 0; flex-wrap: nowrap; }
+
+/* Настройки: подключение общее с OhMyGant — плашка со ссылкой на его настройки. */
+#page-cc .setup-shared {
+  display: flex; flex-direction: column; gap: 4px; font-size: 12px;
+  padding: 8px 10px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px;
+}
+#page-cc .setup-shared .link-btn { align-self: flex-start; }
