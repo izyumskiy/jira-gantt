@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <title>Тесты Control Chart</title>
+  <style>
+    body { font: 13px/1.5 -apple-system, "Segoe UI", Roboto, Arial, sans-serif; padding: 20px; max-width: 900px; }
+    h1 { font-size: 18px; }
+    .ok { color: #00875a; }
+    .fail { color: #de350b; font-weight: 600; }
+    li { margin: 2px 0; }
+    pre { background: #f4f5f7; padding: 10px; border-radius: 4px; overflow: auto; }
+    #summary { font-weight: 600; margin: 12px 0; }
+  </style>
+</head>
+<body>
+  <h1>Тесты Control Chart (модуль src/cc)</h1>
+  <p>Откройте как <code>chrome-extension://&lt;id&gt;/dev/cc/test.html</code> или через локальный сервер (модули не грузятся с <code>file://</code>).</p>
+  <div id="summary">Выполняю…</div>
+  <ul id="results"></ul>
+  <h2>Оценка размера хранения</h2>
+  <pre id="bench">…</pre>
+  <script type="module" src="tests.js"></script>
+</body>
+</html>

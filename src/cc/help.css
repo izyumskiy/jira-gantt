@@ -1,0 +1,67 @@
+/* Страница справки Control Chart: текст берётся из docs/cc/HOWTO.md и рендерится на лету.
+   Как и стили вкладки, привязана к #page-cc (см. cc.css). */
+
+#page-cc .help-layout {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 800px);
+  gap: 32px;
+  padding: 24px 32px 64px;
+  justify-content: center;
+}
+
+#page-cc .help-toc {
+  position: sticky;
+  top: 24px;
+  align-self: start;
+  max-height: calc(100vh - 60px);
+  overflow-y: auto;
+  font-size: 12px;
+}
+#page-cc .help-toc a {
+  display: block;
+  padding: 4px 8px;
+  border-left: 2px solid transparent;
+  color: var(--text-soft);
+}
+#page-cc .help-toc a:hover { color: var(--text); text-decoration: none; }
+#page-cc .help-toc a.is-active { color: var(--accent); border-left-color: var(--accent); }
+
+#page-cc .help-doc {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 28px 34px 40px;
+  box-shadow: var(--shadow);
+  font-size: 14px;
+  line-height: 1.62;
+}
+
+#page-cc .help-doc h1 { font-size: 24px; margin: 0 0 16px; }
+#page-cc .help-doc h2 {
+  font-size: 18px; text-transform: none; letter-spacing: 0; color: var(--text);
+  margin: 32px 0 12px; padding-top: 8px;
+}
+#page-cc .help-doc h3 { font-size: 15px; text-transform: none; letter-spacing: 0; color: var(--text); margin: 22px 0 8px; }
+#page-cc .help-doc p { margin: 0 0 12px; }
+#page-cc .help-doc ul, #page-cc .help-doc ol { margin: 0 0 12px; padding-left: 22px; }
+#page-cc .help-doc li { margin: 4px 0; }
+#page-cc .help-doc hr { border: none; border-top: 1px solid var(--border); margin: 26px 0; }
+#page-cc .help-doc code {
+  background: var(--surface-2); border: 1px solid var(--border);
+  border-radius: 3px; padding: 1px 4px; font-size: 12.5px;
+}
+#page-cc .help-doc strong { font-weight: 600; }
+
+#page-cc .md-table { overflow-x: auto; margin: 0 0 16px; border: 1px solid var(--border); border-radius: 6px; }
+#page-cc .md-table table { width: 100%; border-collapse: collapse; }
+#page-cc .md-table th, #page-cc .md-table td {
+  padding: 7px 12px; text-align: left; white-space: normal;
+  border-bottom: 1px solid var(--border); vertical-align: top;
+}
+#page-cc .md-table th { background: var(--surface-2); position: static; text-transform: none; letter-spacing: 0; font-size: 12px; }
+#page-cc .md-table tr:last-child td { border-bottom: none; }
+
+#page-cc .help-footer {
+  grid-column: 2; max-width: 800px; margin: 0 auto; padding: 16px 34px 40px;
+  font-size: 12px; color: var(--text-soft); text-align: center;
+}

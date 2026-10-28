@@ -1,10 +1,11 @@
 {
   "manifest_version": 3,
   "name": "Jira OhMyGant",
-  "version": "1.32.1",
-  "description": "Диаграмма Ганта по эпикам и исполнителям для локальной Jira (Server 9.x)",
+  "version": "1.33.0",
+  "description": "Диаграмма Ганта по эпикам и исполнителям и Control Chart по доскам для локальной Jira (Server 9.x)",
   "permissions": [
     "storage",
+    "unlimitedStorage",
     "alarms",
     "notifications"
   ],

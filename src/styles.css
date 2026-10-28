@@ -199,6 +199,8 @@ input[type="search"] { min-width: 320px; }
 .status.error { background: #ffebe6; color: var(--danger); }
 
 main { padding: 14px 16px 40px; }
+/* Вкладка Control Chart: у неё своя выгрузка, счётчики и ↻ Ганта на верхней панели там ни к чему. */
+body[data-tab="cc"] .toolbar #stats, body[data-tab="cc"] .toolbar #lastSync, body[data-tab="cc"] .toolbar .sync-btn { display: none; }
 .page > h3 { margin: 18px 0 8px; font-size: 13px; text-transform: uppercase; letter-spacing: .03em; color: var(--muted); }
 .hint { color: var(--muted); margin: 0 0 12px; }
 .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 8px 0; }
@@ -707,6 +709,9 @@ button.s-pr:hover .s-pr-text { color: var(--accent); text-decoration: underline;
 .badge.b-sum { background: var(--accent-soft); color: var(--accent); }
 .badge.b-left { background: #fff0b3; color: #172b4d; font-weight: 700; }
 .badge.b-other { background: #dfe1e6; color: #42526e; }
+/* Люди из Control Chart в «Команде»: задачи на его досках (своя выгрузка). */
+.badge.b-cc { background: #e3fcef; color: #006644; cursor: help; }
+.tcc { cursor: help; }
 
 .c-cell { padding: 3px 4px; width: var(--col-w); min-width: var(--col-w); vertical-align: middle; position: relative; }
 
@@ -1027,6 +1032,7 @@ textarea { font: inherit; padding: 5px 8px; border: 1px solid var(--line); borde
   .glabel.p-outstaff, .tip-pstatus.p-outstaff, .plabel-link.p-outstaff { color: #f5d565; }
   .badge.b-left { background: #4a3b0b; color: #f5d565; }
   .badge.b-other { background: #3c4147; color: #c7d1db; }
+  .badge.b-cc { background: #164b35; color: #7ee2b8; }
   .load-chip { background: #333a41; }
   .bar-stack { background: #4a5158; }
   .load-chip.over { background: #4f1c14; color: #ffbdad; }

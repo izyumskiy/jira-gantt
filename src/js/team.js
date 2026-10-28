@@ -30,6 +30,31 @@ export function collectPeople(issues, others = []) {
   return [...map.values()].sort((a, b) => a.displayName.localeCompare(b.displayName));
 }
 
+// Таблица людей общая с Control Chart: его исполнители (по доскам) добавляются к людям из выгрузки
+// Ганта. Совпадение — по нормализованному имени, как и у профилей. У человека из Control Chart
+// остаётся пометка: на каких досках он встречается и сколько там у него задач.
+export function mergeCcPeople(people, ccList = []) {
+  const byName = new Map(people.map((p) => [p.name, { ...p }]));
+  for (const c of ccList) {
+    const cur = byName.get(c.name);
+    const cc = { boards: c.boards || [], issues: c.issues || 0 };
+    if (cur) cur.cc = cc;
+    else byName.set(c.name, { name: c.name, displayName: c.displayName, login: "", key: "", cc });
+  }
+  return [...byName.values()].sort((a, b) => a.displayName.localeCompare(b.displayName));
+}
+
+// Исполнители Control Chart. Модуль грузится по требованию: если с ним что-то не так, «Команда»
+// всё равно показывает людей Ганта.
+async function loadCcPeople() {
+  try {
+    return await (await import("../cc/people.js")).ccPeople();
+  } catch (e) {
+    console.warn("[OhMyGant] Control Chart people unavailable", e && e.message ? e.message : e);
+    return [];
+  }
+}
+
 function emptyProfile(p) {
   return { name: p.name, displayName: p.displayName, login: p.login || "", key: p.key || "", role: "", systems: [], status: "", team: "" };
 }
@@ -39,7 +64,7 @@ export function mergeProfiles(people, profiles) {
   const byName = new Map(profiles.map((p) => [p.name, p]));
   const rows = people.map((p) => {
     const saved = byName.get(p.name) || {};
-    return { ...emptyProfile(p), ...saved, displayName: p.displayName, login: p.login, key: p.key, loaded: true };
+    return { ...emptyProfile(p), ...saved, displayName: p.displayName, login: p.login, key: p.key, cc: p.cc || null, loaded: true };
   });
   const seen = new Set(people.map((p) => p.name));
   for (const p of profiles) if (!seen.has(p.name)) rows.push({ ...emptyProfile(p), ...p, loaded: false });
@@ -147,16 +172,17 @@ function chips(all, selected, onChange) {
 
 export async function render(container, { notify = () => {} } = {}) {
   container.textContent = "";
-  const [issues, others, profiles, sprints, epics, boards] = await Promise.all([
+  const [issues, others, profiles, sprints, epics, boards, ccList] = await Promise.all([
     db.all(db.STORES.issues),
     db.all(db.STORES.others),
     db.all(db.STORES.people),
     db.all(db.STORES.sprints),
     db.all(db.STORES.epics),
-    db.all(db.STORES.boards)
+    db.all(db.STORES.boards),
+    loadCcPeople()
   ]);
 
-  const people = collectPeople(issues, others);
+  const people = mergeCcPeople(collectPeople(issues, others), ccList);
   const rows = mergeProfiles(people, profiles);
   container.append(el("p", "hint", t("team.hint")));
   if (!rows.length) {
@@ -228,11 +254,24 @@ export async function render(container, { notify = () => {} } = {}) {
     tr.append(teamCell);
 
     const g = stats.get(row.name);
-    tr.append(el("td", null, g && g.team ? g.team.name : t("team.none")));
+    const boardCell = el("td");
+    if (g && g.team) boardCell.append(el("div", null, g.team.name));
+    // Доски Control Chart, где человек встречается (у него своя выгрузка, отдельно от Ганта).
+    if (row.cc && row.cc.boards.length) {
+      const ccLine = el("div", g && g.team ? "muted small tcc" : "tcc", t("team.ccBoards", { list: row.cc.boards.join(", ") }));
+      ccLine.title = t("team.ccHint");
+      boardCell.append(ccLine);
+    }
+    if (!boardCell.childNodes.length) boardCell.textContent = t("team.none");
+    tr.append(boardCell);
     const issuesCell = el("td", "tissues");
     if (g) {
       issuesCell.append(el("span", "badge b-count", String(g.count)), el("span", "badge b-sum", fmtEstimate(g.sum)));
       if (g.otherCount) issuesCell.append(el("span", "badge b-other", `+${g.otherCount} · ${fmtEstimate(g.otherSum)}`));
+    } else if (row.cc) {
+      const b = el("span", "badge b-cc", t("team.ccIssues", { n: row.cc.issues }));
+      b.title = t("team.ccHint");
+      issuesCell.append(b);
     } else {
       issuesCell.textContent = t("team.none");
     }

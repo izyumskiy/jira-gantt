@@ -11,7 +11,8 @@
       window.chrome = {
         storage: {
           local: {
-            async get(k) { const v = localStorage.getItem("shim:" + k); return { [k]: v ? JSON.parse(v) : undefined }; },
+            // как у Chrome: ключ строкой или списком ключей
+            async get(k) { return Object.fromEntries((Array.isArray(k) ? k : [k]).map((x) => { const v = localStorage.getItem("shim:" + x); return [x, v ? JSON.parse(v) : undefined]; })); },
             async set(o) { for (const [k, v] of Object.entries(o)) localStorage.setItem("shim:" + k, JSON.stringify(v)); }
           }
         },
@@ -22,6 +23,15 @@
     <script type="module">
       const html = await (await fetch("../src/app.html")).text();
       const doc = new DOMParser().parseFromString(html, "text/html");
+      // Стили из head приложения (кроме уже подключённого styles.css) — например, cc/cc.css.
+      for (const link of doc.head.querySelectorAll('link[rel="stylesheet"]')) {
+        const href = link.getAttribute("href");
+        if (href === "styles.css") continue;
+        const l = document.createElement("link");
+        l.rel = "stylesheet";
+        l.href = "../src/" + href;
+        document.head.append(l);
+      }
       document.body.insertAdjacentHTML("afterbegin", doc.body.innerHTML.replace(/<script[\s\S]*?<\/script>/g, ""));
       await import("../src/js/app.js");
     </script>
