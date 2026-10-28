@@ -1366,7 +1366,7 @@ document.addEventListener("click", (e) => {
 });
 
 // Список задач ячейки: ключ со ссылкой в Jira, название, статус, оценка.
-// Заглушки, найденные LLM (US-8): ключ задачи → причина. Ставит app при отрисовке с AI-анализом.
+// Заглушки и задачи сопровождения, найденные LLM (US-8): ключ задачи → { kind, reason }. Ставит app при отрисовке с AI-анализом.
 let aiStubs = new Map();
 export function setAiStubs(map) {
   aiStubs = map;
@@ -1387,6 +1387,7 @@ export function showIssues(anchor, title, issues) {
 
   const tbl = el("table", "tip-table issues-table");
   const stubSigns = flowlib.stubSigns(settings.get());
+  const supportSigns = flowlib.supportSigns(settings.get());
   const sorted = [...issues].sort((a, b) => a.key.localeCompare(b.key, undefined, { numeric: true }));
   for (const it of sorted) {
     const tr = el("tr", it.done ? "issue-done" : "");
@@ -1408,8 +1409,14 @@ export function showIssues(anchor, title, issues) {
       mark.title = t("ai.stubBySettings");
       keyCell.append(mark);
     } else if (aiStubs.has(it.key)) {
-      const mark = el("div", "ti-stub", t("ai.stubLlm"));
-      mark.title = aiStubs.get(it.key) || t("ai.stubLlm");
+      const x = aiStubs.get(it.key);
+      const label = x.kind === "support" ? t("ai.supportLlm") : t("ai.stubLlm");
+      const mark = el("div", "ti-stub", label);
+      mark.title = x.reason || label;
+      keyCell.append(mark);
+    } else if (flowlib.isStub(it.summary, supportSigns)) {
+      const mark = el("div", "ti-stub", t("ai.support"));
+      mark.title = t("ai.supportBySettings");
       keyCell.append(mark);
     }
     // Чужая задача истории (ракурс «Эпик — история»): из другого эпика или без эпика.

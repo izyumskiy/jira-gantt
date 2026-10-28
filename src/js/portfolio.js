@@ -23,6 +23,36 @@ export function acceptanceSampler(st, { elapsed = 0, rnd = Math.random } = {}) {
   };
 }
 
+// Доля потока как случайная величина (бета-биномиальная модель): Beta(a, b), a — задачи эпика плюс
+// исходная оценка, b — прочие задачи команды плюс исходная оценка. Gamma — Марсалья–Цанг.
+function normal(rnd) {
+  const u = 1 - rnd();
+  return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * rnd());
+}
+function gamma(shape, rnd) {
+  if (shape < 1) return gamma(shape + 1, rnd) * Math.pow(1 - rnd(), 1 / shape);
+  const d = shape - 1 / 3;
+  const c = 1 / Math.sqrt(9 * d);
+  for (;;) {
+    let x;
+    let v;
+    do {
+      x = normal(rnd);
+      v = 1 + c * x;
+    } while (v <= 0);
+    v = v * v * v;
+    const u = 1 - rnd();
+    if (u < 1 - 0.0331 * x ** 4 || Math.log(u) < 0.5 * x * x + d * (1 - v + Math.log(v))) return d * v;
+  }
+}
+export function betaSample(a, b, rnd = Math.random) {
+  const x = gamma(a, rnd);
+  return x / (x + gamma(b, rnd));
+}
+// shortcut: доля ниже четверти средней обрезается — иначе редкие прогоны с долей около нуля уходят
+// в бесконечность и решают P95; если такие хвосты реальны, ограничение снимать вместе с maxWeeks.
+export const sampleShare = (sl, rnd) => (sl.a ? Math.max(betaSample(sl.a, sl.b, rnd), sl.a / (sl.a + sl.b) / 4) : sl.share);
+
 // Задержка блокировки (US-8): перегруз людей в часах → рабочие недели. Люди работают параллельно —
 // берётся наибольший перегруз.
 export function overloadDelayWeeks(hoursByPerson, hoursPerDay = 8) {
@@ -61,6 +91,19 @@ export function simulate({ epics, history, target, now, runs, rnd, redistribute,
   let overflow = 0;
   const sOff = { ...s, calendarOff: [...(s.calendarOff || []), ...((t && t.offDays) || [])] };
   const pick = t && t.acceptance ? acceptanceSampler(t.acceptance, { elapsed: t.inBtElapsed || 0, rnd }) : null;
+  // План эпика (вариант «б»): задача кончается в конце своего спринта плюс случайные переносы на
+  // спринт той же длины; спринт уже прошёл, а задача открыта — отсчёт от сегодня.
+  const plan = t && t.plan && t.plan.tasks.length ? t.plan : null;
+  const planSample = () => {
+    let end = 0;
+    for (const p of plan.tasks) {
+      const pool = plan.pools[p.pool] || plan.pools.all || [];
+      const k = pool.length ? pool[Math.floor(rnd() * pool.length)] : 0;
+      end = Math.max(end, Math.max(p.end, plan.today) + k * p.len);
+    }
+    return end;
+  };
+  let planWins = 0;
 
   for (let r = 0; r < runs; r++) {
     // Слоты «эпик × команда» с остатком и текущей долей.
@@ -71,7 +114,7 @@ export function simulate({ epics, history, target, now, runs, rnd, redistribute,
       if (e.inBt != null) return; // уже в бизнес-тесте — разработку не моделируем
       for (const sl of e.slots) {
         if (!(sl.remaining > 0) || !(sl.share > 0) || !norm.get(sl.team)?.length) continue;
-        const x = { ei, team: sl.team, rem: sl.remaining, share: sl.share, done: false };
+        const x = { ei, team: sl.team, rem: sl.remaining, share: sampleShare(sl, rnd), done: false };
         slots.push(x);
         openSlots[ei] += 1;
         if (!byTeam.has(sl.team)) byTeam.set(sl.team, []);
@@ -106,10 +149,18 @@ export function simulate({ epics, history, target, now, runs, rnd, redistribute,
       }
       if (k + 1 >= maxWeeks && left > 0) overflow += 1;
     }
-    if (!t || (t.inBt == null && !slots.some((x) => x.ei === tIndex))) continue; // у эпика нет истории потока
-    let weeks = t.inBt != null ? 0 : devWeeks[tIndex] || (openSlots[tIndex] ? maxWeeks : 0);
-    if (useBlockers) for (const b of t.blockers || []) if (rnd() < b.p) weeks += b.weeks;
-    const dev = t.inBt != null ? t.inBt : now + weeks * WEEK;
+    const flowed = slots.some((x) => x.ei === tIndex);
+    if (!t || (t.inBt == null && !flowed && !plan)) continue; // у эпика нет ни плана, ни истории потока
+    const weeks = t.inBt != null || !flowed ? 0 : devWeeks[tIndex] || (openSlots[tIndex] ? maxWeeks : 0);
+    let block = 0;
+    if (useBlockers) for (const b of t.blockers || []) if (rnd() < b.p) block += b.weeks;
+    let dev = t.inBt;
+    if (dev == null) {
+      const flowMs = flowed ? now + weeks * WEEK : 0;
+      const planMs = plan ? planSample() : 0;
+      if (plan && planMs >= flowMs) planWins += 1;
+      dev = Math.max(flowMs, planMs) + block * WEEK;
+    }
     devMs.push(dev);
     if (lastSlot) lastTeam.set(lastSlot.team, (lastTeam.get(lastSlot.team) || 0) + 1);
     if (!pick) {
@@ -120,7 +171,7 @@ export function simulate({ epics, history, target, now, runs, rnd, redistribute,
     const days = Math.max(Math.round(pick() * (t.btFactor || 1)), t.inBt != null ? (t.inBtElapsed || 0) + 1 : 1);
     doneMs.push(addWorkdays(dev, days, cal, sOff));
   }
-  return { devMs, doneMs, lastTeam, overflow };
+  return { devMs, doneMs, lastTeam, overflow, planWins };
 }
 
 const pct = (sorted, p) => sorted[Math.min(sorted.length - 1, Math.floor((p / 100) * sorted.length))];
@@ -130,7 +181,7 @@ const percentiles = (list) => {
 };
 
 // Прогноз эпика target внутри портфеля. Входы — простые данные (уходят в фоновый поток):
-//   epics: [{ key, slots: [{ team, remaining, share }], inBt: ms | null, inBtElapsed, acceptance:
+//   epics: [{ key, slots: [{ team, remaining, share, a?, b? }] — a, b: доля как Beta(a, b) в каждом прогоне, inBt: ms | null, inBtElapsed, acceptance:
 //            { own, all, n } | null, btFactor, blockers: [{ weeks, p }], offDays: ["ГГГГ-ММ-ДД"] }]
 //   history: { [команда]: { perWeek: [...], starts: [понедельники недель, мс] } }
 //   cal: производственный календарь (workcal.parseCalendar) или null; overrides: ручные правки.
@@ -154,6 +205,7 @@ export function portfolioForecast({ epics, history, target, now, seed = target, 
     last: [...full.lastTeam].map(([team, n]) => ({ team, pct: Math.round((n / total) * 100) })).sort((a, b) => b.pct - a.pct),
     contributions: { release: days(p95(freed) - p95(solo)), blockers: days(p95(full) - p95(freed)) },
     soloP95: p95(solo),
+    planShare: Math.round((full.planWins / total) * 100),
     overflow: full.overflow
   };
 }

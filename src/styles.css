@@ -626,6 +626,22 @@ button.s-pr:hover .s-pr-text { color: var(--accent); text-decoration: underline;
 .ai-btn.has { color: var(--ai, #6e5dc6); }
 .ai-btn.stale { opacity: .5; }
 .ai-btn.busy { display: inline-block; animation: sync-spin 1s linear infinite; cursor: progress; color: var(--ai, #6e5dc6); }
+/* ----- Бизнес-заказчики ----- */
+.cust-bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 4px; }
+.cust-bar h2 { margin: 0; font-size: 16px; }
+.cust-hint { max-width: 900px; margin-bottom: 10px; }
+.cust { margin-bottom: 10px; }
+.cust-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 6px; }
+.cust-head h3 { margin: 0; font-size: 14px; }
+.cust-sum { color: var(--muted); font-size: 12px; }
+.cust-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.cust-table th, .cust-table td { text-align: left; padding: 3px 8px; border-top: 1px solid var(--line); vertical-align: top; }
+.cust-table th { color: var(--muted); font-weight: 600; border-top: none; }
+.cust-table .num { text-align: right; white-space: nowrap; }
+.cust-key, .cust-status { white-space: nowrap; }
+.cust-title { width: 50%; }
+.cust-now { color: #b65c00; font-weight: 600; }
+.cust-ret { color: var(--danger); }
 .llm-ok { color: var(--ok); }
 .llm-err { color: var(--danger); }
 .ai-adj { margin-top: 6px; }

@@ -63,6 +63,12 @@ export function stubSigns(s) {
   return parseTypeList(s && s.stubSigns).map(normText);
 }
 
+// Признаки задач сопровождения: аналитик или архитектор поддерживает проект по ходу — задача тянется
+// весь проект, но времени почти не занимает и срок не ограничивает.
+export function supportSigns(s) {
+  return parseTypeList(s && s.supportSigns).map(normText);
+}
+
 export function isStub(summary, signs) {
   const text = normText(summary);
   return signs.some((sign) => text.includes(sign));
@@ -276,9 +282,14 @@ export function epicShare(teamFlow, epicKey, { open = false, recent = RECENT_WEE
 // Для прогноза берём самую свежую оценку темпа: последние недели → период активности → всё окно.
 // Ноль в узком окне (команда пока не бралась за эпик) откатывает на более широкое.
 export function forecastShare(s) {
-  if (s.recent && s.recent.share) return s.recent.share;
-  if (s.active && s.active.share) return s.active.share;
-  return s.share;
+  return shareWindow(s).share;
+}
+
+// Окно, по которому взята доля: { done, total, share } — сколько задач эпика из всех задач команды.
+export function shareWindow(s) {
+  if (s.recent && s.recent.share) return s.recent;
+  if (s.active && s.active.share) return s.active;
+  return s;
 }
 
 // Прогноз по выбранным командам. Остаток задач эпика целиком делят выбранные команды —

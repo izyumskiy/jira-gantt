@@ -21,6 +21,7 @@ import * as stories from "./stories.js";
 import * as storiesView from "./storiesView.js";
 import * as omg from "./omg.js";
 import * as llm from "../llm/client.js";
+import * as customersView from "./customersView.js";
 import { toHtml as markdownToHtml } from "./markdown.js";
 
 const $ = (sel) => document.querySelector(sel);
@@ -75,6 +76,7 @@ function showTab(name, opts = {}) {
   if (name === "team") team.render($("#page-team"), { notify: (m) => status(m) }).catch(fail);
   if (name === "summary") drawSummary().catch(fail);
   if (name === "cc") showControlChart(opts).catch(fail);
+  if (name === "customers") customersView.render($("#page-customers"), { notify: (m) => status(m, "error") }).catch(fail);
 }
 
 // Control Chart (src/cc) — отдельный модуль со своими сторами в общей базе. Грузится при первом
@@ -1702,6 +1704,7 @@ function fillSettingsForm() {
   $("#infoSystems").value = (s.infoSystems || []).join("\n");
   $("#calendarOff").value = (s.calendarOff || []).join("\n");
   $("#stubSigns").value = s.stubSigns ?? "";
+  $("#supportSigns").value = s.supportSigns ?? "";
   $("#btStatuses").value = s.btStatuses ?? "";
   $("#btHistoryMonths").value = s.btHistoryMonths;
   llmDraft = { provider: llm.config(s).id, keys: { ...(s.llmKeys || {}) }, models: { ...(s.llmModels || {}) } };
@@ -1866,6 +1869,7 @@ async function saveSettingsForm() {
     infoSystems: team.parseSystems($("#infoSystems").value),
     calendarOff: workcal.parseDates($("#calendarOff").value),
     stubSigns: $("#stubSigns").value.trim(),
+    supportSigns: $("#supportSigns").value.trim(),
     btStatuses: $("#btStatuses").value.trim() || settings.DEFAULTS.btStatuses,
     btHistoryMonths: Number($("#btHistoryMonths").value) > 0 ? Number($("#btHistoryMonths").value) : settings.DEFAULTS.btHistoryMonths,
     calendarWork: workcal.parseDates($("#calendarWork").value),

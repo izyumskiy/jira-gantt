@@ -3355,6 +3355,22 @@ check("пиктограмма 💬 есть и на «По эпикам и лю�
   const open = acc.parseAcceptance(ep("A-5", "БИЗНЕС ТЕСТ", [["2026-10-01", "БИЗНЕС ТЕСТ"]]), bt);
   check("US-3: эпик сейчас в БТ — незавершённая приёмка", open && open.end === null && open.days === null);
 
+  // Экран «Бизнес-заказчики»: начали, готово, время в БТ (сумма заходов), сейчас в БТ, сводка.
+  const e2 = acc.parseEpic(ep("A-2", "Готово", [["2026-09-28", "В работе"], ["2026-10-01", "БИЗНЕС ТЕСТ"], ["2026-10-08", "В работе"], ["2026-10-15", "БИЗНЕС ТЕСТ"], ["2026-10-22", "Готово"]]), bt);
+  check("US-10: эпик — начали, готово, в БТ 5 + 5 р.д., от БТ до «Готово» 15 р.д. с возвратом",
+    e2.started === Date.parse("2026-09-28T10:00:00.000+0300") && e2.done === Date.parse("2026-10-22T10:00:00.000+0300") && e2.btDays === 10 && e2.days === 15 && e2.returned, JSON.stringify(e2));
+  const nowBt = Date.parse("2026-10-15T10:00:00.000+0300");
+  const e5 = acc.parseEpic(ep("A-5", "БИЗНЕС ТЕСТ", [["2026-10-01", "БИЗНЕС ТЕСТ"]]), bt, "reporter", nowBt);
+  check("US-10: эпик сейчас в БТ — по сегодня, не готов", e5.btNow != null && e5.btDays === 10 && e5.done === null);
+  const e6 = acc.parseEpic(ep("A-6", "Новая", [], "Анна"), bt);
+  check("US-10: эпик без движения — не начат, в БТ не был", e6.started === null && e6.btDays === null);
+  const withCreated = (x, d) => ({ ...x, created: Date.parse(d) });
+  const rep = acc.customersReport([withCreated(e2, "2026-09-01"), withCreated(e5, "2026-09-01"), withCreated(e6, "2026-10-01"), withCreated({ ...e2, key: "OLD", done: Date.parse("2024-01-01") }, "2023-12-01")], nowBt);
+  const petr = rep.find((g) => g.customer === normName("Пётр Петров"));
+  check("US-10: сводка заказчика — эпики за год, медиана БТ, возвраты, сейчас в БТ",
+    rep.length === 2 && rep[0].name === "Анна" && petr.epics.length === 2 && petr.summary.bt === 1 && petr.summary.btMedian === 10 && petr.summary.toDoneMedian === 15 && petr.summary.returned === 1 && petr.summary.inBt === 1 && petr.summary.inBtMax === 10,
+    JSON.stringify(petr && petr.summary));
+
   // Смешивание: своя история весит n / (n + 3).
   const others = Array.from({ length: 99 }, (_, i) => ({ customer: "другой", days: 1 + (i % 10), returned: false }));
   const items1 = [{ customer: "пётр", days: 100, returned: true }, ...others];
@@ -3481,6 +3497,17 @@ check("пиктограмма 💬 есть и на «По эпикам и лю�
   check("US-5: заглушка не в остатке разработки", tgt && Math.round(tgt.slots.reduce((n, x) => n + x.remaining, 0)) === 2 && input.meta.stubs.join() === "T-3");
   check("US-5: приёмка заказчика (постановщика) — своя история", tgt.acceptance && tgt.acceptance.n === 2 && tgt.acceptance.all.length === 3);
   check("US-5: готовый эпик — анализ не строится", ai.buildInputs({ targetKey: "AI-3", epics: EPS, issues: ISS, flowRows: rows, profiles, s: sAi, accItems, today }).reason === "done");
+  // Сопровождение (аналитик): задача Петра (команда B) «Поддержка проекта» — не разработка; остаток
+  // делится по исполнителям: у B открытых задач разработки нет — её слот пуст, узким местом она не станет.
+  const rowsB = [...rows];
+  for (let w = 1; w <= 20; w += 4) rowsB.push({ key: `RB-${w}`, resolved: new Date(today - w * 7 * DAYMS).toISOString(), assigneeName: "Petr", epicKey: "AI-1", summary: "ТЗ" });
+  const ISSs = [...ISS, task("T-9", "AI-1", "Поддержка проекта")].map((i) => (i.key === "T-9" ? { ...i, assigneeName: "Petr", assigneeKey: "petr", assigneeLogin: "petr" } : i));
+  const sSup = { ...sAi, supportSigns: "поддержка, сопровождение" };
+  const inS = ai.buildInputs({ targetKey: "AI-1", epics: EPS, issues: ISSs, flowRows: rowsB, profiles: [...profiles, { name: "Petr", team: "B" }], s: sSup, accItems, today });
+  const slS = inS.args.epics.find((e) => e.key === "AI-1").slots;
+  check("US-5: сопровождение вне остатка; остаток по исполнителям — у команды без открытых задач слот пуст",
+    inS.meta.support.join() === "T-9" && slS.length === 2 && slS.find((x) => x.team !== slS.find((y) => y.remaining === 2)?.team)?.remaining === 0 && Math.round(slS.reduce((n, x) => n + x.remaining, 0)) === 2,
+    JSON.stringify(slS));
   const res = pf.portfolioForecast({ ...input.args, runs: 2000 });
   const f = ai.buildFactors({ res, meta: input.meta, flowRows: rows, today, s: sAi });
   const text = ai.templateText(f);
@@ -3498,6 +3525,57 @@ check("пиктограмма 💬 есть и на «По эпикам и лю�
   const fW = ai.buildFactors({ res: resW, meta: inW.meta, flowRows: rows, today, s: sAi });
   check("US-3: истории приёмок нет — бизнес-тест по окну заглушек, готовность позже разработки",
     tW.acceptance && tW.acceptance.all.join() === "10" && resW.done.p95 > resW.dev.p95 && fW.acceptance.stubs && fW.acceptance.stubs.days === 10, JSON.stringify(tW.acceptance));
+  // Разработка запланирована до 07.12, заглушки — 30.11–14.12: на БТ — только хвост плана после разработки.
+  const spDev = { id: 78, startDate: "2026-11-23T00:00:00", endDate: "2026-12-07T00:00:00" };
+  const ISSt = ISSw.map((i) => (i.key === "T-1" ? { ...i, sprintId: 78 } : i));
+  const tT = ai.buildInputs({ targetKey: "AI-1", epics: EPS, issues: ISSt, flowRows: rows, profiles, sprints: [spStub, spDev], s: sAi, accItems: [], today });
+  check("US-3: заглушки параллельно с разработкой срок не удлиняют — на БТ хвост плана после разработки",
+    tT.args.epics.find((e) => e.key === "AI-1").acceptance.all.join() === "5" && tT.meta.stubWindow.devEnd === Date.parse(spDev.endDate), JSON.stringify(tT.meta.stubWindow));
+  // Вариант «б»: задачи разработки в спринте до 20.11 — разработка по плану; переносов в истории нет —
+  // конец разработки = конец спринта; у каждой закрытой задачи один перенос — на спринт позже.
+  const spPlan = { id: 79, name: "S-79", startDate: "2026-11-09T00:00:00", endDate: "2026-11-20T23:59:59" };
+  const ISSp = ISS.map((i) => (i.key === "T-1" || i.key === "T-2" ? { ...i, sprintId: 79 } : i));
+  const inP = ai.buildInputs({ targetKey: "AI-1", epics: EPS, issues: ISSp, flowRows: rows, profiles, sprints: [spPlan], s: sAi, accItems, today });
+  const resP = pf.portfolioForecast({ ...inP.args, runs: 500 });
+  const fP = ai.buildFactors({ res: resP, meta: inP.meta, flowRows: rows, today, s: sAi });
+  check("US-11: все задачи в спринте — разработка по плану: конец спринта, без потока",
+    resP.dev.p95 === Date.parse(spPlan.endDate) && resP.planShare === 100 && fP.plan.planned === 2 && fP.plan.unplanned === 0 && inP.args.epics.find((e) => e.key === "AI-1").slots.every((x) => !x.remaining),
+    `${new Date(resP.dev.p95).toISOString()} ${JSON.stringify(fP.plan)}`);
+  const doneSlip = [1, 2, 3].map((n) => ({ ...task(`D-${n}`, "AI-1", "x", "done"), sprintId: 70 + n, sprintCount: 2, resolved: new Date(today - 7 * DAYMS).toISOString() }));
+  const inSlip = ai.buildInputs({ targetKey: "AI-1", epics: EPS, issues: [...ISSp, ...doneSlip], flowRows: rows, profiles, sprints: [spPlan], s: sAi, accItems, today });
+  const resSlip = pf.portfolioForecast({ ...inSlip.args, runs: 500 });
+  check("US-11: переносы из истории — каждая задача уезжает на спринт той же длины",
+    resSlip.dev.p50 === Date.parse(spPlan.endDate) + (Date.parse(spPlan.endDate) - Date.parse(spPlan.startDate)), new Date(resSlip.dev.p50).toISOString());
+  check("US-11: объяснение — план, переносы; узкое место потока не показывается",
+    aiView.factorLines(fP).some((l) => l.includes("S-79")) && !aiView.factorLines(fP).some((l) => l.startsWith(t("ai.fLast", { team: "", pct: "" }).split(":")[0])) && ai.templateText(fP).includes("S-79"));
+  // Заглушка в том же последнем спринте, что и разработка: БТ внутри спринта, сверх разработки не добавляется.
+  const ISSi = ISSp.map((i) => (i.key === "T-3" ? { ...i, sprintId: 79 } : i));
+  const inI = ai.buildInputs({ targetKey: "AI-1", epics: EPS, issues: ISSi, flowRows: rows, profiles, sprints: [spPlan], s: sAi, accItems: [], today });
+  const resI = pf.portfolioForecast({ ...inI.args, runs: 300 });
+  check("US-11: заглушки в последнем спринте разработки — БТ внутри него, готовность = разработка",
+    inI.meta.stubWindow.days === 0 && resI.done.p95 === resI.dev.p95 && ai.templateText(ai.buildFactors({ res: resI, meta: inI.meta, flowRows: rows, today, s: sAi })).includes(t("ai.tplAccStubsInside", { to: "" }).split("(")[0].trim().slice(0, 20)));
+  // US-12. Доля потока как бета-распределение: история (k из n) + план спринтов (вес PLAN_WEIGHT).
+  const rb = flowlib.seededRandom("beta");
+  const draws = Array.from({ length: 20000 }, () => pf.betaSample(2, 8, rb));
+  const mean = draws.reduce((n, x) => n + x, 0) / draws.length;
+  const vari = draws.reduce((n, x) => n + (x - mean) ** 2, 0) / draws.length;
+  check("US-12: Beta(2, 8) — среднее 0,2, дисперсия 0,0145", Math.abs(mean - 0.2) < 0.01 && Math.abs(vari - 16 / 1100) < 0.002, `${mean.toFixed(3)} ${vari.toFixed(4)}`);
+  const b0 = ai.shareBeta({ done: 5, total: 100 });
+  const b1 = ai.shareBeta({ done: 5, total: 100 }, 0.2);
+  check("US-12: исходная оценка — без плана Beta(½, ½), с планом 20% — как 10 задач", b0.a === 5.5 && b0.b === 95.5 && b1.a === 7 && b1.b === 103);
+  check("US-12: выборка доли не ниже четверти средней", Array.from({ length: 3000 }, () => pf.sampleShare({ a: 0.6, b: 30 }, rb)).every((x) => x >= 0.6 / 30.6 / 4));
+  const alloc = ai.planAllocation({
+    issues: [{ ...task("P-1", "AI-1", "x"), sprintId: 5 }, { ...task("P-2", "AI-2", "y"), sprintId: 5 }, { ...task("P-3", "AI-1", "z"), sprintId: 9 }],
+    sectionSprints: new Set([5]),
+    teamIdOf: () => "A",
+    epicKey: "AI-1"
+  });
+  check("US-12: доля эпика в плане — часы эпика / все часы команды в ближайших спринтах", alloc.get("A") === 0.5);
+  const fixed = pf.portfolioForecast({ epics: [{ key: "E", slots: [{ team: "A", remaining: 10, share: 0.2 }] }], history: { A: { perWeek: [5, 5, 5, 5, 5, 5] } }, target: "E", now: today, runs: 2000 });
+  const beta = pf.portfolioForecast({ epics: [{ key: "E", slots: [{ team: "A", remaining: 10, share: 0.2, a: 2, b: 8 }] }], history: { A: { perWeek: [5, 5, 5, 5, 5, 5] } }, target: "E", now: today, runs: 2000 });
+  check("US-12: доля случайная — разброс срока шире, чем с постоянной долей", beta.dev.p95 - beta.dev.p50 > fixed.dev.p95 - fixed.dev.p50 && fixed.dev.p95 === fixed.dev.p50);
+  const fs = ai.buildFactors({ res, meta: input.meta, flowRows: rows, today, s: sAi });
+  check("US-12: в объяснении — разброс доли в прогонах", fs.shares[0].range && fs.shares[0].range.lo <= fs.shares[0].share && fs.shares[0].share <= fs.shares[0].range.hi && aiView.factorLines(fs).some((l) => l.includes(t("ai.fShareRange", { lo: fs.shares[0].range.lo, hi: fs.shares[0].range.hi }))));
   check("US-3: ошибка загрузки приёмок — в объяснении", aiView.factorLines(fW).some((l) => l.includes("HTTP 400")) && ai.templateText(fW).includes(t("ai.tplAccError")));
   check("US-3: ни приёмок, ни заглушек в спринтах — бизнес-тест не заложен",
     ai.buildInputs({ targetKey: "AI-1", epics: EPS, issues: ISS, flowRows: rows, profiles, s: sAi, accItems: [], today }).args.epics.find((e) => e.key === "AI-1").acceptance === null);
@@ -3593,6 +3671,10 @@ check("пиктограмма 💬 есть и на «По эпикам и лю�
   check("US-8: задержка блокировки — из перегруза, вызванного блокером", delay.hours.join() === "40" && delay.weeks === 1, JSON.stringify(delay));
   const other = adjm.blockerDelay({ ...v.adj.blockers[0], epic: null }, load8, { norm: ctx8.norm, target: "AI-1", portfolio: ctx8.portfolio, hoursPerDay: 8 });
   check("US-8: блокер «прочая работа» — только работа вне портфеля", other.hours.join() === "20");
+  // Как у DBD-985: 1018 ч прочей работы при ёмкости 80 ч, по эпику 12 ч — эпик ждёт только свои 12 ч.
+  const loadBig = { sections: [{ id: "s25", cap: 80 * HS }], byEpic: new Map([["ivan", new Map([["s25", new Map([["", 1018 * HS], ["AI-1", 12 * HS]])]])]]) };
+  const big = adjm.blockerDelay({ people: ["Ivan"], sections: ["s25"], epic: null }, loadBig, { norm: ctx8.norm, target: "AI-1", portfolio: ctx8.portfolio, hoursPerDay: 8 });
+  check("US-8: перегруз 950 ч, по эпику 12 ч — задержка из 12 ч, а не из всего перегруза", big.hours.join() === "12" && big.weeks === 0.3, JSON.stringify(big));
   const rows8 = adjm.loadRows(load8, { people: ctx8.people, target: "AI-1", portfolio: ctx8.portfolio });
   check("US-8: загрузка для LLM — разбивка по эпикам и перегруз",
     rows8.length === 2 && rows8[0].this_epic_h === 40 && rows8[0].other_epics_h["EP-7"] === 60 && rows8[0].other_work_h === 20 && rows8[0].overload_h === 40 && rows8[1].overload_h === 0);
@@ -3635,6 +3717,8 @@ check("пиктограмма 💬 есть и на «По эпикам и лю�
   gantt.setAiStubs(ai.llmStubs(new Map([["AI-1", { adjustments: v.adj, disabled: [] }]])));
   gantt.showIssues(document.body, "x", [{ key: "T-2", summary: "Сопровождение", statusName: "Новая" }]);
   check("US-8: заглушка от LLM помечена в списке задач", document.querySelector(".tip-issues .ti-stub")?.textContent === t("ai.stubLlm"));
+  gantt.showIssues(document.body, "x", [{ key: "T-9", summary: "Поддержка проекта", statusName: "Новая" }]);
+  check("US-5: задача сопровождения помечена в списке задач", document.querySelector(".tip-issues .ti-stub")?.textContent === t("ai.support"));
   gantt.closeTooltip();
   gantt.setAiStubs(new Map());
 

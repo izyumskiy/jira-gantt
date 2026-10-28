@@ -15,16 +15,20 @@ export function facts(f) {
     chance_by_due_pct: f.dates.chance == null ? null : Math.round(f.dates.chance * 100),
     remaining_tasks: Math.round(f.remaining.total),
     stub_tasks: f.remaining.stubs,
+    support_tasks: f.remaining.support || 0,
     llm_stub_tasks: f.llmStubs || 0,
     teams: f.shares,
-    bottleneck: f.last[0] || null,
+    bottleneck: f.plan && !f.plan.unplanned ? null : f.last[0] || null,
+    plan: f.plan ? { ...f.plan, end: ymd(f.plan.end) } : null,
     release_days: f.release,
     blockers_days: f.blockersAssessed ? f.blockers : null,
     blockers: f.blockerList || [],
     acceptance: {
       ...f.acceptance,
       btSince: f.acceptance.btSince ? ymd(f.acceptance.btSince) : null,
-      stubs: f.acceptance.stubs ? { ...f.acceptance.stubs, from: ymd(f.acceptance.stubs.from), to: ymd(f.acceptance.stubs.to) } : undefined
+      stubs: f.acceptance.stubs
+        ? { ...f.acceptance.stubs, from: ymd(f.acceptance.stubs.from), to: ymd(f.acceptance.stubs.to), devEnd: f.acceptance.stubs.devEnd ? ymd(f.acceptance.stubs.devEnd) : null }
+        : undefined
     },
     holidays_workdays: f.holidays,
     spread_days: f.spread,

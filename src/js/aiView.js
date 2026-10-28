@@ -42,8 +42,19 @@ export function factorLines(f) {
   ];
   if (d.chance != null) lines.push(t("ai.fChance", { pct: Math.round(d.chance * 100) }));
   lines.push(t("ai.fRemaining", { n: Math.round(f.remaining.total), stubs: f.remaining.stubs }));
-  for (const x of f.shares) lines.push(t("ai.fShare", { team: x.team, share: x.share, pace: x.pace, people: x.people.join(", ") || t("dash") }));
-  if (f.last.length) lines.push(t("ai.fLast", { team: f.last[0].team, pct: f.last[0].pct }));
+  if (f.remaining.support) lines.push(t("ai.fSupport", { n: f.remaining.support }));
+  for (const x of f.shares) {
+    let line = t("ai.fShare", { team: x.team, share: x.share, pace: x.pace, left: x.left ?? t("dash"), people: x.people.join(", ") || t("dash") });
+    if (x.range) line += ` · ${t("ai.fShareRange", { lo: x.range.lo, hi: x.range.hi })}`;
+    if (x.plan != null) line += ` · ${t("ai.fSharePlan", { plan: x.plan })}`;
+    lines.push(line);
+  }
+  if (f.plan) {
+    const p = f.plan;
+    lines.push(t("ai.fPlan", { n: p.planned, sprint: p.sprint, end: fmtDay(p.end), unplanned: p.unplanned }));
+    if (p.slipN) lines.push(t("ai.fSlip", { pct: p.slipPct, n: p.slipN, share: p.share }));
+  }
+  if (f.last.length && (!f.plan || f.plan.unplanned)) lines.push(t("ai.fLast", { team: f.last[0].team, pct: f.last[0].pct }));
   lines.push(f.blockersAssessed ? t("ai.fInfluence", { release: sign(f.release), blockers: sign(f.blockers) }) : t("ai.fInfluenceNoBlockers", { release: sign(f.release) }));
   for (const b of f.blockerList || []) {
     lines.push(t("ai.fBlocker", { people: b.people.join(", "), epic: b.epic || t("ai.otherWork"), sections: b.sections.join("; "), hours: b.hours, weeks: b.weeks, p: b.p, reason: b.reason || t("dash") }));
@@ -52,7 +63,10 @@ export function factorLines(f) {
   const a = f.acceptance;
   if (a.loadError) lines.push(t("ai.fAccError", { msg: a.loadError }));
   if (a.none) lines.push(t("ai.fAccNone"));
-  else if (a.stubs) lines.push(t("ai.fAccStubs", { from: fmtDay(a.stubs.from), to: fmtDay(a.stubs.to), days: a.stubs.days }));
+  else if (a.stubs && a.stubs.days === 0) lines.push(t("ai.fAccStubsInside", { to: fmtDay(a.stubs.to) }));
+  else if (a.stubs) {
+    lines.push(a.stubs.devEnd ? t("ai.fAccStubsTail", { dev: fmtDay(a.stubs.devEnd), to: fmtDay(a.stubs.to), days: a.stubs.days }) : t("ai.fAccStubs", { from: fmtDay(a.stubs.from), to: fmtDay(a.stubs.to), days: a.stubs.days }));
+  }
   else if (a.noHistory) lines.push(t("ai.fAccGeneral", { customer: a.customer || t("dash") }));
   else lines.push(t("ai.fAcc", { customer: a.customer, n: a.n, median: a.median, p95: a.p95, ret: a.returnRate }));
   if (a.btSince) lines.push(t("ai.fInBt", { since: fmtDay(a.btSince) }));
@@ -106,6 +120,7 @@ function adjustmentList(rec, onToggle) {
   const items = [
     ...a.blockers.map((b) => ({ id: b.id, text: t("ai.adjBlocker", { people: b.people.join(", "), epic: b.epic || t("ai.otherWork"), sections: (b.sectionNames || b.sections).join("; "), p: Math.round(b.p * 100), reason: b.reason || t("dash") }) })),
     ...a.stubs.map((x) => ({ id: x.id, text: t("ai.adjStub", { key: x.key, reason: x.reason || t("dash") }) })),
+    ...(a.support || []).map((x) => ({ id: x.id, text: t("ai.adjSupport", { key: x.key, reason: x.reason || t("dash") }) })),
     ...(a.btFactor !== 1 ? [{ id: "factor", text: t("ai.adjFactor", { f: a.btFactor, reason: a.btFactorReason || t("dash") }) }] : []),
     ...a.absence.map((x) => ({ id: x.id, text: t("ai.adjAbsence", { from: x.from, to: x.to, p: Math.round(x.p * 100), reason: x.reason || t("dash") }) }))
   ];

@@ -20,6 +20,7 @@ export const SYSTEM_PROMPT = `Ты помогаешь менеджеру про�
                 "people": ["имя исполнителя из load"], "sections": ["id секции из load"],
                 "confidence": 0.0-1.0, "reason": "кратко, почему"}],
   "stub_tasks": [{"key": "КЛЮЧ открытой задачи этого эпика", "reason": "почему это заглушка"}],
+  "support_tasks": [{"key": "КЛЮЧ открытой задачи этого эпика", "reason": "почему это сопровождение"}],
   "bt_factor": 0.5-2.0,
   "bt_factor_reason": "почему приёмка будет дольше или короче обычной у заказчика",
   "customer_absence": [{"from": "ГГГГ-ММ-ДД", "to": "ГГГГ-ММ-ДД", "reason": "...", "confidence": 0.0-1.0}],
@@ -31,6 +32,9 @@ export const SYSTEM_PROMPT = `Ты помогаешь менеджеру про�
   эпика портфеля (other_epics_h) или прочей работой (other_work_h). Блокер — тот, кто съел ёмкость.
 - stub_tasks — задачи, обозначающие время отладки, сопровождения или бизнес-теста, а не разработку,
   которые не помечены stub_by_settings. Только открытые задачи этого эпика.
+- support_tasks — задачи сопровождения проекта, не помеченные support_by_settings: аналитик или
+  архитектор сначала пишет требования, а потом по ходу проекта отвечает на вопросы — задача тянется
+  весь проект, но времени почти не занимает. Не разработка и не бизнес-тест.
 - bt_factor — 1, если оснований менять срок приёмки нет.
 - customer_absence — только если в комментариях прямо сказано об отпуске или отсутствии заказчика.
 - Пустые списки, если ничего не нашёл. Тексты — по-русски, коротко.`;
@@ -79,7 +83,7 @@ const arr = (v) => v === undefined || v === null || Array.isArray(v);
 //        openTasks: Set }
 export function validate(raw, ctx) {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return { error: "ответ — не JSON-объект" };
-  for (const f of ["blockers", "stub_tasks", "customer_absence", "notes"]) if (!arr(raw[f])) return { error: `поле ${f} — не список` };
+  for (const f of ["blockers", "stub_tasks", "support_tasks", "customer_absence", "notes"]) if (!arr(raw[f])) return { error: `поле ${f} — не список` };
   if (raw.bt_factor != null && !Number.isFinite(Number(raw.bt_factor))) return { error: "bt_factor — не число" };
   let dropped = 0;
   const blockers = [];
@@ -108,6 +112,15 @@ export function validate(raw, ctx) {
     }
     stubs.push({ id: `stub:${key}`, key, reason: text(x.reason) });
   }
+  const support = [];
+  for (const x of raw.support_tasks || []) {
+    const key = String((x && x.key) || "").trim().toUpperCase();
+    if (!ctx.openTasks.has(key) || stubs.some((y) => y.key === key) || support.some((y) => y.key === key)) {
+      dropped += 1;
+      continue;
+    }
+    support.push({ id: `support:${key}`, key, reason: text(x.reason) });
+  }
   const absence = [];
   for (const a of raw.customer_absence || []) {
     const p = Number(a && a.confidence);
@@ -122,6 +135,7 @@ export function validate(raw, ctx) {
     adj: {
       blockers,
       stubs,
+      support,
       btFactor: Math.min(BT_FACTOR_MAX, Math.max(BT_FACTOR_MIN, f)),
       btFactorRaw: f,
       btFactorReason: text(raw.bt_factor_reason),
@@ -171,13 +185,16 @@ export function effective(adj, disabled = []) {
     ...adj,
     blockers: adj.blockers.filter((b) => !off.has(b.id)),
     stubs: adj.stubs.filter((x) => !off.has(x.id)),
+    support: (adj.support || []).filter((x) => !off.has(x.id)),
     btFactor: off.has("factor") ? 1 : adj.btFactor,
     absence: adj.absence.filter((a) => !off.has(a.id))
   };
 }
 
-// Задержка блокировки (ТЗ А2, шаг 6): по каждому человеку — перегруз в указанных секциях, вызванный
-// эпиком-блокером (null — прочей работой вне портфеля), в часах; задержка — по наибольшему.
+// Задержка блокировки (ТЗ А2, шаг 6): по каждому человеку и секции — работа этого эпика, которую
+// вытесняет перегруз блокера (null — прочей работы вне портфеля): меньшее из перегруза, часов блокера
+// и часов человека по эпику. Весь перегруз человека эпик не ждёт — только свою не влезшую работу.
+// Задержка — по наибольшему.
 export function blockerDelay(b, load, { norm, target, portfolio, hoursPerDay = 8 }) {
   const hours = b.people.map((name) => {
     const secs = load.byEpic.get(norm(name));
@@ -191,7 +208,7 @@ export function blockerDelay(b, load, { norm, target, portfolio, hoursPerDay = 8
         total += sec2;
         if (b.epic ? epic === b.epic : epic !== target && !portfolio.has(epic)) cause += sec2;
       }
-      h += Math.min(Math.max(0, total - sec.cap), cause) / H;
+      h += Math.min(Math.max(0, total - sec.cap), cause, byEpic.get(target) || 0) / H;
     }
     return round1(h);
   });
