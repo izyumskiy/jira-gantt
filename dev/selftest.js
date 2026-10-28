@@ -3528,6 +3528,86 @@ check("пиктограмма 💬 есть и на «По эпикам и лю�
   const stubs = [...document.querySelectorAll(".tip-issues .ti-stub")];
   check("US-6: заглушка помечена в списке задач", stubs.length === 1 && stubs[0].closest("tr").textContent.includes("T-3"));
   gantt.closeTooltip();
+
+  // US-8. Поправки LLM (openspec/changes/add-llm-adjustments).
+  const adjm = await import("../src/llm/adjustments.js");
+  const HS = 3600;
+  const ctx8 = {
+    portfolio: new Set(["AI-2", "EP-7"]),
+    people: new Map([["ivan", "Ivan"]]),
+    norm: (n) => String(n || "").trim().toLowerCase(),
+    sections: new Map([["s25", "Sprint 25"], ["s26", "Sprint 26"]]),
+    openTasks: new Set(["T-1", "T-2", "T-3"])
+  };
+  const answer = {
+    blockers: [
+      { epic: "EP-7", people: ["Ivan"], sections: ["s25", "s26"], confidence: 0.7, reason: "перегружен EP-7" },
+      { epic: "EP-7", people: ["Пётр"], sections: ["s25"], confidence: 0.9, reason: "не из эпика" },
+      { epic: "EP-99", people: ["Ivan"], sections: ["s25"], confidence: 0.9, reason: "не из портфеля" }
+    ],
+    stub_tasks: [{ key: "T-2", reason: "Сопровождение БТ" }, { key: "X-9", reason: "чужая" }],
+    bt_factor: 5,
+    bt_factor_reason: "заказчик просит доработки",
+    customer_absence: [{ from: "2026-12-01", to: "2026-12-03", reason: "отпуск", confidence: 0.8 }, { from: "2026-12-10", to: "2026-12-11", reason: "?", confidence: 0.3 }],
+    notes: ["a", "b", "c", "d"]
+  };
+  const v = adjm.validate(answer, ctx8);
+  check("US-8: bt_factor 5 → 2,0", v.adj && v.adj.btFactor === 2);
+  check("US-8: блокировка с человеком не из эпика и с эпиком не из портфеля — отброшены",
+    v.adj.blockers.length === 1 && v.adj.blockers[0].id === "blocker:EP-7" && v.adj.blockers[0].sectionNames.join() === "Sprint 25,Sprint 26");
+  check("US-8: заглушка из чужого эпика отброшена", v.adj.stubs.map((x) => x.key).join() === "T-2" && v.adj.dropped === 3);
+  check("US-8: отсутствие заказчика — дни при уверенности ≥ 0,6", adjm.absenceDays(v.adj.absence).join() === "2026-12-01,2026-12-02,2026-12-03" && v.adj.notes.length === 3);
+  check("US-8: нарушение формата — ошибка проверки", !!adjm.validate([], ctx8).error && !!adjm.validate({ blockers: "x" }, ctx8).error);
+
+  // Перегруз: ёмкость 80 ч, загрузка 120 ч, из них EP-7 — 60 ч → 40 ч → 1 неделя при 8-часовом дне.
+  const load8 = {
+    sections: [{ id: "s25", cap: 80 * HS, title: "Sprint 25" }, { id: "s26", cap: 80 * HS, title: "Sprint 26" }],
+    byEpic: new Map([["ivan", new Map([["s25", new Map([["EP-7", 60 * HS], ["AI-1", 40 * HS], ["", 20 * HS]])], ["s26", new Map([["AI-1", 40 * HS]])]])]])
+  };
+  const delay = adjm.blockerDelay(v.adj.blockers[0], load8, { norm: ctx8.norm, target: "AI-1", portfolio: ctx8.portfolio, hoursPerDay: 8 });
+  check("US-8: задержка блокировки — из перегруза, вызванного блокером", delay.hours.join() === "40" && delay.weeks === 1, JSON.stringify(delay));
+  const other = adjm.blockerDelay({ ...v.adj.blockers[0], epic: null }, load8, { norm: ctx8.norm, target: "AI-1", portfolio: ctx8.portfolio, hoursPerDay: 8 });
+  check("US-8: блокер «прочая работа» — только работа вне портфеля", other.hours.join() === "20");
+  const rows8 = adjm.loadRows(load8, { people: ctx8.people, target: "AI-1", portfolio: ctx8.portfolio });
+  check("US-8: загрузка для LLM — разбивка по эпикам и перегруз",
+    rows8.length === 2 && rows8[0].this_epic_h === 40 && rows8[0].other_epics_h["EP-7"] === 60 && rows8[0].other_work_h === 20 && rows8[0].overload_h === 40 && rows8[1].overload_h === 0);
+
+  // Запрос: дважды не JSON → без поправок; сначала не по формату, потом верно → поправки, повтор с ошибкой.
+  const sK = { ...settings.get(), llmProvider: "chatgpt", llmKeys: { chatgpt: "sk-test" } };
+  const resp = (content) => ({ ok: true, status: 200, json: async () => ({ choices: [{ message: { content } }] }) });
+  let n8 = 0;
+  const bad = await adjm.request({ payload: {}, ctx: ctx8, s: sK, fetchImpl: async () => (n8++, resp("не json")), sleep: async () => {} });
+  check("US-8: неразбираемый ответ дважды — без поправок, с ошибкой", bad.adj === null && !!bad.error && n8 === 2);
+  const sentBodies = [];
+  const seq8 = [resp('{"blockers": "x"}'), resp(JSON.stringify(answer))];
+  const good = await adjm.request({ payload: {}, ctx: ctx8, s: sK, fetchImpl: async (u, init) => (sentBodies.push(JSON.parse(init.body)), seq8.shift()), sleep: async () => {} });
+  check("US-8: ответ не по формату — один повтор с указанием ошибки", good.adj && good.adj.btFactor === 2 && sentBodies.length === 2 && sentBodies[1].messages.at(-1).content.includes("blockers"));
+
+  // Применение в расчёте и «Не учитывать».
+  const eff = adjm.effective(v.adj, ["blocker:EP-7"]);
+  check("US-8: отключённая блокировка не идёт в расчёт", eff.blockers.length === 0 && eff.btFactor === 2 && adjm.effective(v.adj, ["factor"]).btFactor === 1);
+  const adj8 = { ...adjm.effective(v.adj, []), stubs: [{ id: "stub:T-2", key: "T-2", reason: "БТ" }] };
+  adj8.blockers = adj8.blockers.map((b) => ({ ...b, weeks: 1, hours: [40] }));
+  const in8 = ai.buildInputs({ targetKey: "AI-1", epics: EPS, issues: ISS, flowRows: rows, profiles, s: sAi, accItems, today, adj: adj8 });
+  const t8 = in8.args.epics.find((e) => e.key === "AI-1");
+  check("US-8: заглушка от LLM вне остатка, коэффициент и блокировка — в расчёте",
+    Math.round(t8.slots.reduce((n, x) => n + x.remaining, 0)) === 1 && in8.meta.stubs.join() === "T-2,T-3" && t8.btFactor === 2 && t8.blockers.length === 1 && t8.blockers[0].p === 0.7 && t8.offDays.length === 3);
+  const res8 = pf.portfolioForecast({ ...in8.args, runs: 2000 });
+  in8.meta.llmError = "";
+  const f8 = ai.buildFactors({ res: res8, meta: in8.meta, flowRows: rows, today, s: sAi });
+  check("US-8: факторы — блокировка с задержкой, поправка приёмки, отсутствие",
+    f8.blockersAssessed && f8.blockerList[0].weeks === 1 && f8.blockerList[0].p === 70 && f8.acceptance.factor === 2 && f8.acceptance.absence.length === 1 && res8.done.p95 > res.done.p95);
+  const fFail = ai.buildFactors({ res, meta: { ...input.meta, llmError: "x" }, flowRows: rows, today, s: sAi });
+  check("US-8: поправки не получены — пометка в объяснении", ai.templateText(fFail).includes(t("ai.tplLlmFailed")) && aiView.factorLines(fFail).includes("x"));
+  const card8 = aiView.cardBlock({ ...rec, adjustments: v.adj, disabled: ["blocker:EP-7"] }, { lastSync: 0, onRecalc() {}, onNew() {}, onToggle() {}, hasKey: false });
+  const rowsCard = card8.querySelectorAll(".ai-adj-row");
+  check("US-8: карточка — поправки с «Не учитывать», без ключа «Новый анализ» даёт подсказку",
+    rowsCard.length === 5 && rowsCard[0].classList.contains("off") && rowsCard[0].querySelector("input").checked && (card8.querySelectorAll("button")[1].click(), card8.textContent.includes(t("ai.noKey"))));
+  gantt.setAiStubs(ai.llmStubs(new Map([["AI-1", { adjustments: v.adj, disabled: [] }]])));
+  gantt.showIssues(document.body, "x", [{ key: "T-2", summary: "Сопровождение", statusName: "Новая" }]);
+  check("US-8: заглушка от LLM помечена в списке задач", document.querySelector(".tip-issues .ti-stub")?.textContent === t("ai.stubLlm"));
+  gantt.closeTooltip();
+  gantt.setAiStubs(new Map());
 }
 
 // US-7. Подключение LLM (openspec/changes/add-llm-connection): fetch подменяется заглушкой.

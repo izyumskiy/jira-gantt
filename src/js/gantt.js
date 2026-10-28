@@ -1338,6 +1338,12 @@ document.addEventListener("click", (e) => {
 });
 
 // Список задач ячейки: ключ со ссылкой в Jira, название, статус, оценка.
+// Заглушки, найденные LLM (US-8): ключ задачи → причина. Ставит app при отрисовке с AI-анализом.
+let aiStubs = new Map();
+export function setAiStubs(map) {
+  aiStubs = map;
+}
+
 export function showIssues(anchor, title, issues) {
   closeTooltip();
   tip = el("div", "tooltip tip-issues");
@@ -1372,6 +1378,10 @@ export function showIssues(anchor, title, issues) {
     if (flowlib.isStub(it.summary, stubSigns)) {
       const mark = el("div", "ti-stub", t("ai.stub"));
       mark.title = t("ai.stubBySettings");
+      keyCell.append(mark);
+    } else if (aiStubs.has(it.key)) {
+      const mark = el("div", "ti-stub", t("ai.stubLlm"));
+      mark.title = aiStubs.get(it.key) || t("ai.stubLlm");
       keyCell.append(mark);
     }
     // Чужая задача истории (ракурс «Эпик — история»): из другого эпика или без эпика.

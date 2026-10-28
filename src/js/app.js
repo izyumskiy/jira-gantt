@@ -135,14 +135,17 @@ async function openEpicCard(key, anchor) {
 // ---------- AI-анализ срока эпика (US-5) ----------
 
 async function aiOpts() {
-  return { results: await aiAnalysis.getAll(), lastSync: settings.get().lastSync, onAnalyze: runAi };
+  const results = await aiAnalysis.getAll();
+  gantt.setAiStubs(aiAnalysis.llmStubs(results));
+  return { results, lastSync: settings.get().lastSync, onAnalyze: runAi };
 }
 
 async function runAi(key, btn) {
   btn.classList.add("busy");
   status(t("ai.running", { key }));
   try {
-    const rec = await aiAnalysis.analyze(key);
+    // С ключом LLM — полный анализ с поправками; без ключа — расчёт без LLM («блокировки не оценивались»).
+    const rec = await aiAnalysis.analyze(key, { withLlm: llm.hasKey() });
     status(t("ai.doneMsg", { key, p95: aiView.fmtDay(rec.res.done.p95) }));
     redrawActive();
   } catch (e) {
@@ -562,24 +565,31 @@ function showEpicInfo(anchor, epic, spent, pct) {
   flowBox.className = "share-block";
   box.append(flowBox);
 
-  // AI-анализ срока (US-5): результат, объяснение, «Пересчитать».
+  // AI-анализ срока (US-5, US-8): результат, объяснение, поправки LLM, «Пересчитать», «Новый анализ».
   const aiBox = document.createElement("div");
   box.append(aiBox);
+  const aiRun = async (btn, job) => {
+    if (btn) btn.disabled = true;
+    try {
+      renderAi(await job());
+      redrawActive();
+    } catch (e) {
+      if (btn) btn.disabled = false;
+      fail(e);
+    }
+  };
   const renderAi = (rec) => {
     aiBox.textContent = "";
     aiBox.append(
       aiView.cardBlock(rec, {
         lastSync: settings.get().lastSync,
-        onRecalc: async (btn) => {
-          btn.disabled = true;
-          try {
-            renderAi(await aiAnalysis.analyze(epic.key));
-            redrawActive();
-          } catch (e) {
-            btn.disabled = false;
-            fail(e);
-          }
-        }
+        hasKey: llm.hasKey(),
+        onRecalc: (btn) => aiRun(btn, () => aiAnalysis.analyze(epic.key)),
+        onNew: (btn) => {
+          status(t("ai.running", { key: epic.key }));
+          return aiRun(btn, () => aiAnalysis.analyze(epic.key, { withLlm: true }));
+        },
+        onToggle: (id, off) => aiRun(null, () => aiAnalysis.setDisabled(epic.key, id, off))
       })
     );
   };

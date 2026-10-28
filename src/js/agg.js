@@ -822,6 +822,7 @@ export function personLoad(model, issues, others, excludeTypes = []) {
   const sectionOf = new Map();
   for (const sec of sections) for (const sp of sec.sprints) sectionOf.set(sp.id, sec.id);
   const byName = new Map();
+  const byEpic = new Map(); // человек → секция → эпик ("" — без эпика) → часы; для блокировок AI-анализа (US-8)
   for (const i of [...issues, ...others]) {
     if (!i.assigneeName || isExcludedType(i.typeName, excludeTypes)) continue;
     const planSec = plannedSectionId(i, model.columns, model.currentId);
@@ -831,10 +832,16 @@ export function personLoad(model, issues, others, excludeTypes = []) {
     if (!byName.has(key)) byName.set(key, new Map());
     const row = byName.get(key);
     row.set(secId, (row.get(secId) || 0) + workEstimateOf(i));
+    if (!byEpic.has(key)) byEpic.set(key, new Map());
+    const secs = byEpic.get(key);
+    if (!secs.has(secId)) secs.set(secId, new Map());
+    const ep = secs.get(secId);
+    ep.set(i.epicKey || "", (ep.get(i.epicKey || "") || 0) + workEstimateOf(i));
   }
   return {
     capacity: sprintCapacity(),
     byName,
+    byEpic,
     sections: sections.map((sec, i) => ({
       id: sec.id,
       cap: sprintCapacity(sec), // ёмкость секции: по календарю, если он загружен

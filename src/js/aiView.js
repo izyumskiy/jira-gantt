@@ -45,13 +45,21 @@ export function factorLines(f) {
   for (const x of f.shares) lines.push(t("ai.fShare", { team: x.team, share: x.share, pace: x.pace, people: x.people.join(", ") || t("dash") }));
   if (f.last.length) lines.push(t("ai.fLast", { team: f.last[0].team, pct: f.last[0].pct }));
   lines.push(f.blockersAssessed ? t("ai.fInfluence", { release: sign(f.release), blockers: sign(f.blockers) }) : t("ai.fInfluenceNoBlockers", { release: sign(f.release) }));
+  for (const b of f.blockerList || []) {
+    lines.push(t("ai.fBlocker", { people: b.people.join(", "), epic: b.epic || t("ai.otherWork"), sections: b.sections.join("; "), hours: b.hours, weeks: b.weeks, p: b.p, reason: b.reason || t("dash") }));
+  }
+  if (f.llmStubs) lines.push(t("ai.fLlmStubs", { n: f.llmStubs }));
   const a = f.acceptance;
   if (a.none) lines.push(t("ai.fAccNone"));
   else if (a.noHistory) lines.push(t("ai.fAccGeneral", { customer: a.customer || t("dash") }));
   else lines.push(t("ai.fAcc", { customer: a.customer, n: a.n, median: a.median, p95: a.p95, ret: a.returnRate }));
   if (a.btSince) lines.push(t("ai.fInBt", { since: fmtDay(a.btSince) }));
+  if (a.factor) lines.push(t("ai.fBtFactor", { f: a.factor, reason: a.factorReason || t("dash") }));
+  for (const x of a.absence || []) lines.push(t("ai.fAbsence", { from: x.from, to: x.to, reason: x.reason || t("dash") }));
   lines.push(t("ai.fCalendar", { n: f.holidays }));
   lines.push(t("ai.fSpread", { days: f.spread }));
+  for (const n of f.notes || []) lines.push(t("ai.fNote", { text: n }));
+  if (f.llmError) lines.push(f.llmError);
   return lines;
 }
 
@@ -66,17 +74,56 @@ export function explanation(rec, lastSync) {
   return box;
 }
 
-// Блок «AI-анализ» в карточке эпика. «Пересчитать» — расчёт без LLM; «Новый анализ» (с LLM) — US-8.
-export function cardBlock(rec, { lastSync, onRecalc }) {
+// Поправки LLM списком: у каждой — «Не учитывать» (отметка хранится и действует в следующих анализах).
+function adjustmentList(rec, onToggle) {
+  const a = rec.adjustments;
+  const items = [
+    ...a.blockers.map((b) => ({ id: b.id, text: t("ai.adjBlocker", { people: b.people.join(", "), epic: b.epic || t("ai.otherWork"), sections: (b.sectionNames || b.sections).join("; "), p: Math.round(b.p * 100), reason: b.reason || t("dash") }) })),
+    ...a.stubs.map((x) => ({ id: x.id, text: t("ai.adjStub", { key: x.key, reason: x.reason || t("dash") }) })),
+    ...(a.btFactor !== 1 ? [{ id: "factor", text: t("ai.adjFactor", { f: a.btFactor, reason: a.btFactorReason || t("dash") }) }] : []),
+    ...a.absence.map((x) => ({ id: x.id, text: t("ai.adjAbsence", { from: x.from, to: x.to, p: Math.round(x.p * 100), reason: x.reason || t("dash") }) }))
+  ];
+  const box = el("div", "ai-adj");
+  box.append(el("div", "tip-sub", t("ai.adjTitle")));
+  if (!items.length) box.append(el("div", "muted small", t("ai.adjNone")));
+  const off = new Set(rec.disabled || []);
+  for (const it of items) {
+    const row = el("label", "ai-adj-row" + (off.has(it.id) ? " off" : ""));
+    const cb = el("input");
+    cb.type = "checkbox";
+    cb.checked = off.has(it.id);
+    cb.onchange = () => {
+      cb.disabled = true;
+      onToggle(it.id, cb.checked);
+    };
+    row.append(el("span", "ai-adj-text", it.text), cb, el("span", "muted small", t("ai.adjOff")));
+    box.append(row);
+  }
+  return box;
+}
+
+// Блок «AI-анализ» в карточке эпика: «Пересчитать» — только расчёт, без запроса к LLM; «Новый
+// анализ» — с запросом к LLM (без ключа — подсказка, запроса нет).
+export function cardBlock(rec, { lastSync, onRecalc, onNew, onToggle, hasKey = false }) {
   const box = el("div", "ai-card");
   box.append(el("div", "tip-sub", t("ai.title")));
   if (rec) box.append(explanation(rec, lastSync));
   else box.append(el("div", "muted small", t("ai.none")));
+  if (rec && rec.adjustments) box.append(adjustmentList(rec, onToggle));
   const row = el("div", "row");
   const btn = el("button", null, rec ? t("ai.recalc") : t("ai.run"));
   btn.type = "button";
+  btn.title = t("ai.recalcHint");
   btn.onclick = () => onRecalc(btn);
-  row.append(btn);
+  const fresh = el("button", null, t("ai.newAnalysis"));
+  fresh.type = "button";
+  fresh.title = hasKey ? t("ai.newAnalysisHint") : t("ai.noKey");
+  const hint = el("span", "muted small");
+  fresh.onclick = () => {
+    if (hasKey) onNew(fresh);
+    else hint.textContent = t("ai.noKey");
+  };
+  row.append(btn, fresh, hint);
   box.append(row);
   return box;
 }

@@ -628,6 +628,10 @@ button.s-pr:hover .s-pr-text { color: var(--accent); text-decoration: underline;
 .ai-btn.busy { display: inline-block; animation: sync-spin 1s linear infinite; cursor: progress; color: var(--ai, #6e5dc6); }
 .llm-ok { color: var(--ok); }
 .llm-err { color: var(--danger); }
+.ai-adj { margin-top: 6px; }
+.ai-adj-row { display: flex; align-items: baseline; gap: 6px; font-size: 12px; margin: 2px 0; cursor: pointer; }
+.ai-adj-row .ai-adj-text { flex: 1; }
+.ai-adj-row.off .ai-adj-text { text-decoration: line-through; color: var(--muted); }
 .ai-card { margin-top: 8px; }
 .ai-expl { max-width: 520px; font-size: 12px; line-height: 1.45; }
 .ai-expl .ai-text { margin: 4px 0 6px; }
