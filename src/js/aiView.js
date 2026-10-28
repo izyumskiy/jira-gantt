@@ -110,7 +110,7 @@ export function cardBlock(rec, { lastSync, onRecalc, onNew, onToggle, hasKey = f
   box.append(el("div", "tip-sub", t("ai.title")));
   if (rec) box.append(explanation(rec, lastSync));
   else box.append(el("div", "muted small", t("ai.none")));
-  if (rec && rec.adjustments) box.append(adjustmentList(rec, onToggle));
+  if (rec && rec.adjustments && Array.isArray(rec.adjustments.blockers)) box.append(adjustmentList(rec, onToggle));
   const row = el("div", "row");
   const btn = el("button", null, rec ? t("ai.recalc") : t("ai.run"));
   btn.type = "button";

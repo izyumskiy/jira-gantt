@@ -308,7 +308,7 @@ export async function analyze(epicKey, { today = Date.now(), withLlm = false } =
   const portfolio = new Set(base.args.epics.map((e) => e.key).filter((k) => k !== epicKey));
   const ctx = { portfolio, people, norm: agg.normPersonName, sections: new Map(load.sections.map((x) => [String(x.id), x.title])), openTasks: new Set(tasks.filter((i) => !agg.isDone(i)).map((i) => i.key)) };
 
-  let raw = prev ? prev.adjustments || null : null;
+  let raw = prev ? adjustments.stored(prev.adjustments) : null;
   let llmError = prev ? prev.llmError || "" : "";
   if (withLlm) {
     const storyTypes = flowlib.storyTypes(s);

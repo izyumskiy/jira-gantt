@@ -159,8 +159,12 @@ export async function request({ payload, ctx, ...opts }) {
   return { adj: null, error };
 }
 
+// Сохранённые поправки или null. Анализы до US-8 хранили вместо поправок пустой объект {}.
+export const stored = (adj) => (adj && Array.isArray(adj.blockers) ? adj : null);
+
 // Действующие поправки: без отключённых пользователем («Не учитывать», ids).
 export function effective(adj, disabled = []) {
+  adj = stored(adj);
   if (!adj) return null;
   const off = new Set(disabled);
   return {

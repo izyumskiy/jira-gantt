@@ -3603,6 +3603,10 @@ check("пиктограмма 💬 есть и на «По эпикам и лю�
   const rowsCard = card8.querySelectorAll(".ai-adj-row");
   check("US-8: карточка — поправки с «Не учитывать», без ключа «Новый анализ» даёт подсказку",
     rowsCard.length === 5 && rowsCard[0].classList.contains("off") && rowsCard[0].querySelector("input").checked && (card8.querySelectorAll("button")[1].click(), card8.textContent.includes(t("ai.noKey"))));
+  const oldRec = { ...rec, adjustments: {} }; // анализ, сохранённый до US-8
+  check("US-8: анализ до US-8 (поправки — пустой объект) — без поправок, без ошибок",
+    adjm.effective({}, undefined) === null && ai.llmStubs(new Map([["AI-1", oldRec]])).size === 0 &&
+      !aiView.cardBlock(oldRec, { lastSync: 0, onRecalc() {}, onNew() {}, onToggle() {} }).querySelector(".ai-adj"));
   gantt.setAiStubs(ai.llmStubs(new Map([["AI-1", { adjustments: v.adj, disabled: [] }]])));
   gantt.showIssues(document.body, "x", [{ key: "T-2", summary: "Сопровождение", statusName: "Новая" }]);
   check("US-8: заглушка от LLM помечена в списке задач", document.querySelector(".tip-issues .ti-stub")?.textContent === t("ai.stubLlm"));
