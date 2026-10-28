@@ -90,14 +90,14 @@ export function fields() {
 }
 
 // Постраничный поиск по JQL. onPage вызывается после каждой страницы (для прогресса).
-export async function search(jql, fieldList, onPage) {
+export async function search(jql, fieldList, onPage, expand = null) {
   const out = [];
   let startAt = 0;
   const maxResults = 100;
   for (;;) {
     const page = await request("/rest/api/2/search", {
       method: "POST",
-      body: { jql, startAt, maxResults, fields: fieldList }
+      body: { jql, startAt, maxResults, fields: fieldList, ...(expand ? { expand } : {}) }
     });
     out.push(...page.issues);
     if (onPage) onPage(out.length, page.total);

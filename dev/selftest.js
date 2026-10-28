@@ -3139,8 +3139,8 @@ check("пиктограмма 💬 есть и на «По эпикам и лю�
 
   // База одна: сторы Control Chart — в базе Ганта, схема — в src/js/db.js.
   const idb = await dbm.open();
-  check("CC: сторы Control Chart — в общей базе плагина (jiragantt, версия 9)",
-    ["ccBoards", "ccDicts", "ccIssues"].every((n) => idb.objectStoreNames.contains(n)) && idb.name === "jiragantt" && idb.version === 9,
+  check("CC: сторы Control Chart — в общей базе плагина (jiragantt, версия не ниже 9)",
+    ["ccBoards", "ccDicts", "ccIssues"].every((n) => idb.objectStoreNames.contains(n)) && idb.name === "jiragantt" && idb.version >= 9,
     `${idb.name} v${idb.version}`);
   const ccIx = idb.transaction("ccIssues").objectStore("ccIssues");
   check("CC: задача — ключ [доска, задача], индексы by_board и by_board_done",
@@ -3260,6 +3260,274 @@ check("пиктограмма 💬 есть и на «По эпикам и лю�
   page.remove();
   outside.remove();
   link.remove();
+}
+
+// US-1. Производственный календарь (openspec/changes/add-work-calendar).
+{
+  const workcal = await import("../src/js/workcal.js");
+  // Фрагмент calendar.json: в holidays — все нерабочие дни (выходные и праздники), как в настоящем файле.
+  const sample = {
+    holidays: [
+      "2025-12-27", "2025-12-28", "2025-12-31",
+      "2026-01-01", "2026-01-02", "2026-01-03", "2026-01-04", "2026-01-05", "2026-01-06", "2026-01-07", "2026-01-08", "2026-01-09", "2026-01-10", "2026-01-11",
+      "2026-01-17", "2026-01-18",
+      "2026-06-12", "2026-06-13", "2026-06-14", "2026-06-15", "2026-06-20", "2026-06-21"
+    ],
+    preholidays: ["2026-04-30"],
+    nowork: []
+  };
+  const cal = workcal.parseCalendar(sample, Date.parse("2026-10-01T00:00:00"));
+  const at = (d) => new Date(`${d}T12:00:00`).getTime();
+  const s0 = { calendarOff: [], calendarWork: [] };
+  check("US-1: годы файла — по holidays", cal.from === 2025 && cal.to === 2026, `${cal.from}–${cal.to}`);
+  check("US-1: праздник нерабочий, обычный день рабочий", !workcal.isWorkday(at("2026-01-05"), cal, s0) && workcal.isWorkday(at("2026-01-12"), cal, s0));
+  check("US-1: сокращённый предпраздничный день — рабочий", workcal.isWorkday(at("2026-04-30"), cal, s0));
+  check("US-1: ручная правка сильнее файла",
+    !workcal.isWorkday(at("2026-12-30"), cal, { calendarOff: ["2026-12-30"], calendarWork: [] }) && workcal.isWorkday(at("2026-01-05"), cal, { calendarOff: [], calendarWork: ["2026-01-05"] }));
+  check("US-1: года нет в файле — пн–пт",
+    !workcal.hasYear(2030, cal) && !workcal.isWorkday(at("2030-06-15"), cal, s0) && workcal.isWorkday(at("2030-06-17"), cal, s0));
+  check("US-1: через 3 рабочих дня после 30.12.2025 — 14.01.2026", workcal.ymd(workcal.addWorkdays(at("2025-12-30"), 3, cal, s0)) === "2026-01-14",
+    workcal.ymd(workcal.addWorkdays(at("2025-12-30"), 3, cal, s0)));
+  check("US-1: рабочих дней в [01.01, 15.01) — 3", workcal.workdaysBetween(at("2026-01-01"), at("2026-01-15"), cal, s0) === 3);
+  check("US-1: даты из поля настроек — оба формата, без мусора и дублей",
+    workcal.parseDates("2026-12-30, 31.12.2026\nfoo 2026-12-30").join() === "2026-12-30,2026-12-31");
+  let bad = null;
+  try {
+    workcal.parseCalendar({ holidays: [] });
+  } catch (e) {
+    bad = e;
+  }
+  check("US-1: пустой или чужой файл не принимается", !!bad);
+
+  // Ёмкость человека в секции: рабочие дни по календарю × часов в дне.
+  const sec = { id: "x", start: new Date("2026-06-08T00:00:00").getTime(), end: new Date("2026-06-22T00:00:00").getTime() };
+  const keepCal = workcal.current();
+  workcal.use(null);
+  const without = agg.sprintCapacity(sec);
+  workcal.use(cal);
+  const withCal = agg.sprintCapacity(sec);
+  workcal.use(keepCal);
+  const H = 3600;
+  check("US-1: спринт с двумя праздниками — 64 ч вместо 80 при 8-часовом дне",
+    without === settings.get().sprintDays * settings.get().hoursPerDay * H && withCal === 8 * settings.get().hoursPerDay * H,
+    `${without / H} / ${withCal / H}`);
+}
+
+// US-2. Задачи-заглушки (openspec/changes/add-stub-tasks).
+{
+  const signs = flowlib.stubSigns({ stubSigns: "заглушка, Отладка" });
+  check("US-2: заглушка по названию — регистр и «ё» не важны",
+    flowlib.isStub("Задача заглушка на БТ", signs) && flowlib.isStub("ОТЛАДКА интеграции", signs) && flowlib.isStub("Отлаживаем? нет: «отладка»", signs));
+  check("US-2: обычная задача — не заглушка", !flowlib.isStub("Отчёт по продажам", signs) && !flowlib.isStub("", signs));
+  const mon = new Date("2026-09-07T10:00:00").getTime(); // понедельник прошлой полной недели для now ниже
+  const now = new Date("2026-09-16T10:00:00").getTime();
+  const rows = [
+    { key: "F-1", resolved: new Date(mon + 86400000).toISOString(), assigneeName: "Ivan", epicKey: "EP-1", summary: "Отчёт" },
+    { key: "F-2", resolved: new Date(mon + 2 * 86400000).toISOString(), assigneeName: "Ivan", epicKey: "EP-1", summary: "Форма" },
+    { key: "F-3", resolved: new Date(mon + 3 * 86400000).toISOString(), assigneeName: "Ivan", epicKey: "EP-1", summary: "Задача заглушка" }
+  ];
+  const teamOf = () => ({ id: "t", name: "T", color: 0 });
+  const plain = flowlib.buildFlow({ rows, teamOf, weeks: 4, now });
+  const noStubs = flowlib.buildFlow({ rows, teamOf, weeks: 4, now, stubs: signs });
+  check("US-2: в потоке AI-анализа заглушек нет, прежний поток не изменился",
+    plain.teams[0].total === 3 && noStubs.teams[0].total === 2, `${plain.teams[0]?.total} / ${noStubs.teams[0]?.total}`);
+}
+
+// US-3. Срок приёмки заказчика (openspec/changes/add-acceptance-stats).
+{
+  const acc = await import("../src/js/acceptance.js");
+  const workcal = await import("../src/js/workcal.js");
+  const keepCal = workcal.current();
+  workcal.use(null); // пн–пт: числа проверяемы вручную
+  const bt = acc.btStatuses({ btStatuses: "БИЗНЕС ТЕСТ" });
+  const ep = (key, status, moves, reporter = "Пётр Петров") => ({
+    key,
+    fields: { status: { name: status }, reporter: { displayName: reporter } },
+    changelog: { histories: moves.map(([d, to]) => ({ created: `${d}T10:00:00.000+0300`, items: [{ field: "status", toString: to }] })) }
+  });
+  const simple = acc.parseAcceptance(ep("A-1", "Готово", [["2026-09-20", "В работе"], ["2026-10-01", "БИЗНЕС ТЕСТ"], ["2026-10-15", "Готово"]]), bt);
+  check("US-3: простая приёмка — 10 рабочих дней, без возврата", simple && simple.days === 10 && !simple.returned && simple.customer === normName("Пётр Петров"), JSON.stringify(simple));
+  const back = acc.parseAcceptance(ep("A-2", "Готово", [["2026-10-01", "БИЗНЕС ТЕСТ"], ["2026-10-08", "В работе"], ["2026-10-15", "БИЗНЕС ТЕСТ"], ["2026-10-22", "Готово"]]), bt);
+  check("US-3: приёмка с возвратом — от первого входа до «Готово», возврат отмечен",
+    back && back.days === 15 && back.returned, JSON.stringify(back));
+  check("US-3: «Бизнес тест» в другом регистре распознаётся", !!acc.parseAcceptance(ep("A-3", "Готово", [["2026-10-01", "Бизнес тест"], ["2026-10-05", "Готово"]]), bt));
+  check("US-3: статус не из настройки — приёмки нет", acc.parseAcceptance(ep("A-4", "Готово", [["2026-10-01", "Тестирование"], ["2026-10-05", "Готово"]]), bt) === null);
+  const open = acc.parseAcceptance(ep("A-5", "БИЗНЕС ТЕСТ", [["2026-10-01", "БИЗНЕС ТЕСТ"]]), bt);
+  check("US-3: эпик сейчас в БТ — незавершённая приёмка", open && open.end === null && open.days === null);
+
+  // Смешивание: своя история весит n / (n + 3).
+  const others = Array.from({ length: 99 }, (_, i) => ({ customer: "другой", days: 1 + (i % 10), returned: false }));
+  const items1 = [{ customer: "пётр", days: 100, returned: true }, ...others];
+  const st1 = acc.customerStats(items1, "пётр");
+  const rnd = flowlib.seededRandom("us3");
+  const pick1 = acc.acceptanceSampler(st1, { rnd });
+  let hits = 0;
+  for (let i = 0; i < 4000; i++) if (pick1() === 100) hits += 1;
+  const share = hits / 4000; // 0,25 своей + 0,75 × 1/100 общей ≈ 0,2575
+  check("US-3: одна своя приёмка весит 25%", Math.abs(share - 0.2575) < 0.03, share.toFixed(3));
+  check("US-3: статистика заказчика — число, медиана, доля возвратов", st1.n === 1 && st1.median === 100 && st1.returnRate === 1);
+  const st0 = acc.customerStats(others, "пётр");
+  const pick0 = acc.acceptanceSampler(st0, { rnd });
+  check("US-3: без своей истории — только общая", st0.n === 0 && Array.from({ length: 200 }, pick0).every((d) => d >= 1 && d <= 10));
+  const pickLong = acc.acceptanceSampler(st1, { elapsed: 8, rnd });
+  check("US-3: эпик в БТ 8 дней — выбранный срок всегда больше 8", Array.from({ length: 500 }, pickLong).every((d) => d > 8));
+  check("US-3: дольше любой прошлой приёмки — 5 дней сверх прошедшего", acc.acceptanceSampler(st0, { elapsed: 50, rnd })() === 55);
+  workcal.use(keepCal);
+}
+
+// US-4. Прогноз портфеля (openspec/changes/add-portfolio-forecast).
+{
+  const pf = await import("../src/js/portfolio.js");
+  const wc = await import("../src/js/workcal.js");
+  const WEEK = 7 * 86400000;
+  const now = flowlib.mondayOf(new Date("2026-11-02T10:00:00").getTime()); // понедельник
+  const perWeek = [0, 1, 2, 3, 4, 5, 2, 3, 1, 4, 2, 6];
+
+  // Один эпик одной команды — тот же P95 разработки, что у текущего прогноза.
+  const old = flowlib.forecastDelivery({ teams: [{ team: { id: "A" }, perWeek, share: 0.5, remaining: 9 }], runs: 4000, now, rnd: flowlib.seededRandom("one") });
+  const one = pf.portfolioForecast({ epics: [{ key: "E1", slots: [{ team: "A", remaining: 9, share: 0.5 }] }], history: { A: { perWeek } }, target: "E1", now, seed: "one", runs: 4000 });
+  check("US-4: один эпик в портфеле — тот же P95, что у текущего прогноза", one && one.dev.p95 === old.dates.p95.getTime(), `${one && new Date(one.dev.p95).toISOString()} / ${old.dates.p95.toISOString()}`);
+  check("US-4: без приёмки готовность = разработка", one.done.p95 === one.dev.p95);
+
+  // Два эпика в одной команде: второй ускоряется, когда первый закончил.
+  const two = pf.portfolioForecast({
+    epics: [
+      { key: "E1", slots: [{ team: "A", remaining: 3, share: 0.4 }] },
+      { key: "E2", slots: [{ team: "A", remaining: 20, share: 0.4 }] }
+    ],
+    history: { A: { perWeek } }, target: "E2", now, seed: "two", runs: 4000
+  });
+  check("US-4: освобождение — P95 второго раньше, чем без освобождения", two.done.p95 < two.soloP95 && two.contributions.release < 0,
+    `${new Date(two.done.p95).toISOString().slice(0, 10)} / ${new Date(two.soloP95).toISOString().slice(0, 10)}`);
+  check("US-4: вклады складываются в разницу с прогнозом «сам по себе»",
+    Math.abs(two.contributions.release + two.contributions.blockers - Math.round((two.done.p95 - two.soloP95) / 86400000)) <= 1);
+
+  // Неделя с праздниками: 3 рабочих дня — 3/5 потока.
+  const off = new Set();
+  for (let d = 0; d < 35; d++) {
+    const ms = now + d * 86400000 + 43200000;
+    const day = new Date(ms).getDay();
+    if (day === 0 || day === 6 || d === 0 || d === 1) off.add(wc.ymd(ms)); // выходные + пн, вт первой недели
+  }
+  const y = new Date(now).getFullYear();
+  const cal = { off, from: y, to: y, loadedAt: 0 };
+  const flat = { A: { perWeek: [5, 5, 5, 5] } };
+  const e4 = [{ key: "E", slots: [{ team: "A", remaining: 4, share: 1 }] }];
+  const noCal = pf.portfolioForecast({ epics: e4, history: flat, target: "E", now, runs: 50 });
+  const withCal = pf.portfolioForecast({ epics: e4, history: flat, target: "E", now, runs: 50, cal });
+  check("US-4: неделя с 3 рабочими днями даёт 3/5 потока", noCal.dev.p95 === now + WEEK && withCal.dev.p95 === now + 2 * WEEK,
+    `${(noCal.dev.p95 - now) / WEEK} / ${(withCal.dev.p95 - now) / WEEK}`);
+
+  // Блокировка срабатывает в доле прогонов, равной уверенности.
+  const sim = pf.simulate({
+    epics: [{ key: "E", slots: [{ team: "A", remaining: 5, share: 1 }], blockers: [{ weeks: 1, p: 0.3 }] }],
+    history: flat, target: "E", now, runs: 5000, rnd: flowlib.seededRandom("blk"), redistribute: true, useBlockers: true, cal: null, s: {}
+  });
+  const hit = sim.devMs.filter((ms) => ms > now + WEEK).length / sim.devMs.length;
+  check("US-4: блокировка с уверенностью 0,3 срабатывает в 30 ± 2% прогонов", Math.abs(hit - 0.3) <= 0.02, hit.toFixed(3));
+  check("US-4: перегруз 16 ч при 8-часовом дне — 0,4 недели; из двоих — наибольший",
+    pf.overloadDelayWeeks([16], 8) === 0.4 && pf.overloadDelayWeeks([8, 16], 8) === 0.4);
+
+  // Приёмка и эпик уже в бизнес-тесте.
+  const acc = { own: [10, 20], all: [10, 20, 30], n: 2 };
+  const withBt = pf.portfolioForecast({ epics: [{ key: "E", slots: [{ team: "A", remaining: 9, share: 0.5 }], acceptance: acc }], history: { A: { perWeek } }, target: "E", now, seed: "bt", runs: 2000 });
+  check("US-4: P95 готовности не раньше P95 разработки", withBt.done.p95 >= withBt.dev.p95 && withBt.done.p50 > withBt.dev.p50);
+  const since = now - 14 * 86400000;
+  const inBt = pf.portfolioForecast({ epics: [{ key: "E", slots: [], inBt: since, inBtElapsed: 10, acceptance: acc }], history: {}, target: "E", now, seed: "in", runs: 500 });
+  check("US-4: эпик в БТ — разработка не моделируется, готовность позже входа",
+    inBt && inBt.dev.p95 === since && inBt.done.p50 > since, inBt && new Date(inBt.done.p50).toISOString().slice(0, 10));
+  const { runPortfolio } = await import("../src/js/forecastClient.js");
+  const viaWorker = await runPortfolio({ epics: [{ key: "E1", slots: [{ team: "A", remaining: 9, share: 0.5 }] }], history: { A: { perWeek } }, target: "E1", now, seed: "one", runs: 4000 });
+  check("US-4: в фоновом потоке — тот же результат", viaWorker && viaWorker.dev.p95 === one.dev.p95);
+  check("US-4: эпик без истории потока — прогноза нет",
+    pf.portfolioForecast({ epics: [{ key: "E", slots: [{ team: "Z", remaining: 3, share: 1 }] }], history: {}, target: "E", now, runs: 50 }) === null);
+}
+
+// US-5. AI-анализ: входы, факторы, шаблон, пиктограмма (openspec/changes/add-ai-analysis).
+{
+  const ai = await import("../src/js/aiAnalysis.js");
+  const aiView = await import("../src/js/aiView.js");
+  const pf = await import("../src/js/portfolio.js");
+  const today = new Date("2026-11-04T10:00:00").getTime();
+  const DAYMS = 86400000;
+  const EPS = [
+    { key: "AI-1", summary: "Эпик 1", statusName: "В работе", statusCategory: "indeterminate", reporterName: "Пётр Петров", dueDate: "2027-03-01" },
+    { key: "AI-2", summary: "Эпик 2", statusName: "В работе", statusCategory: "indeterminate", reporterName: "Анна" },
+    { key: "AI-3", summary: "Готовый", statusName: "Готово", statusCategory: "done", reporterName: "Анна" }
+  ];
+  const task = (key, epic, summary, st = "new") => ({ ...mk(key, epic, "AAA", "Ivan", null, 4, st), summary, typeName: "Задача" });
+  const ISS = [
+    task("T-1", "AI-1", "Форма"), task("T-2", "AI-1", "Отчёт"), task("T-3", "AI-1", "Задача заглушка"),
+    task("T-4", "AI-2", "API"), task("T-5", "AI-2", "Отладка")
+  ];
+  // Иван (команда A) 20 недель закрывал задачи обоих эпиков.
+  const rows = [];
+  for (let w = 1; w <= 20; w++) {
+    const at = new Date(today - w * 7 * DAYMS).toISOString();
+    rows.push({ key: `R1-${w}`, resolved: at, assigneeName: "Ivan", epicKey: "AI-1", summary: "x" });
+    rows.push({ key: `R2-${w}`, resolved: at, assigneeName: "Ivan", epicKey: "AI-2", summary: "y" });
+    if (w % 2) rows.push({ key: `R3-${w}`, resolved: at, assigneeName: "Ivan", epicKey: "", summary: "z" });
+  }
+  const profiles = [{ name: "Ivan", team: "A" }];
+  const sAi = { ...settings.get(), stubSigns: "заглушка, отладка", btStatuses: "БИЗНЕС ТЕСТ", forecastExcludeTypes: "" };
+  const accItems = [
+    { key: "OLD-1", customer: normName("Пётр Петров"), days: 8, returned: false, end: 1, start: 0 },
+    { key: "OLD-2", customer: normName("Пётр Петров"), days: 12, returned: true, end: 1, start: 0 },
+    { key: "OLD-3", customer: "другой", days: 20, returned: false, end: 1, start: 0 }
+  ];
+  const input = ai.buildInputs({ targetKey: "AI-1", epics: EPS, issues: ISS, flowRows: rows, profiles, s: sAi, accItems, today });
+  const tgt = input.args && input.args.epics.find((e) => e.key === "AI-1");
+  check("US-5: портфель — открытые эпики, готовый не входит", input.args && input.args.epics.map((e) => e.key).join() === "AI-1,AI-2", input.reason);
+  check("US-5: заглушка не в остатке разработки", tgt && Math.round(tgt.slots.reduce((n, x) => n + x.remaining, 0)) === 2 && input.meta.stubs.join() === "T-3");
+  check("US-5: приёмка заказчика (постановщика) — своя история", tgt.acceptance && tgt.acceptance.n === 2 && tgt.acceptance.all.length === 3);
+  check("US-5: готовый эпик — анализ не строится", ai.buildInputs({ targetKey: "AI-3", epics: EPS, issues: ISS, flowRows: rows, profiles, s: sAi, accItems, today }).reason === "done");
+  const res = pf.portfolioForecast({ ...input.args, runs: 2000 });
+  const f = ai.buildFactors({ res, meta: input.meta, flowRows: rows, today, s: sAi });
+  const text = ai.templateText(f);
+  check("US-5: факторы — доля потока команды с людьми, узкое место, приёмка",
+    f.shares.length === 1 && f.shares[0].team === "A" && f.shares[0].people.join() === "Ivan" && f.last[0].team === "A" && f.acceptance.n === 2 && f.remaining.stubs === 1,
+    JSON.stringify(f.shares));
+  check("US-5: без LLM — шаблонное объяснение, блокировки «не оценивались»", text.includes(t("ai.tplNoBlockers")) && text.length > 40);
+  const rec = { key: "AI-1", at: 1000, res, factors: f, text };
+  const btn = aiView.aiButton("AI-1", { results: new Map([["AI-1", rec]]), lastSync: 2000, onAnalyze: () => {} });
+  check("US-5: пиктограмма — есть результат, устарел после синхронизации", btn.classList.contains("has") && btn.classList.contains("stale") && btn.title.includes(t("ai.stale")));
+  const card = aiView.cardBlock(null, { lastSync: 0, onRecalc: () => {} });
+  check("US-5: карточка без анализа — кнопка «Запустить анализ»", card.textContent.includes(t("ai.run")));
+  const expl = aiView.explanation(rec, 0);
+  check("US-5: объяснение — текст и факторы списком", expl.querySelectorAll(".ai-factors li").length >= 8 && expl.textContent.includes(text));
+
+  // US-6. Отметки на Ганте (openspec/changes/add-gantt-forecast-marks): 4 недельные колонки.
+  const W = 7 * DAYMS;
+  const c0 = new Date("2026-11-02T00:00:00").getTime();
+  const model = { columns: [0, 1, 2, 3].map((i) => ({ start: c0 + i * W, end: c0 + (i + 1) * W })) };
+  const row = () => {
+    const tr = document.createElement("tr");
+    for (let i = 0; i < 5; i++) tr.append(document.createElement("td"));
+    return tr;
+  };
+  const mkRec = (dev, done, btSince = null) => ({ ...rec, res: { ...res, dev: { ...res.dev, p95: dev }, done: { ...res.done, p95: done } }, factors: { ...f, acceptance: { ...f.acceptance, btSince } } });
+  const r1 = row();
+  gantt.addAiMarks(r1, mkRec(c0 + 3.5 * DAYMS, c0 + W + 3.5 * DAYMS), model, 0);
+  const bands = [...r1.querySelectorAll(".ai-bt")];
+  check("US-6: штриховка — от P95 разработки до P95 готовности, по колонкам",
+    bands.length === 2 && bands[0].parentElement === r1.children[1] && bands[0].style.left === "50%" && bands[0].style.width === "50%" && bands[1].parentElement === r1.children[2] && bands[1].style.left === "0%" && bands[1].style.width === "50%",
+    bands.map((b) => `${b.style.left}/${b.style.width}`).join());
+  const flag = r1.querySelector(".ai-flag");
+  check("US-6: флажок 95% — в колонке даты готовности", flag && flag.parentElement === r1.children[2] && flag.textContent.startsWith("95%") && r1.querySelector(".ai-line"));
+  // Шкала вокруг настоящего «сегодня»: прошедшая часть БТ рисуется плотнее.
+  const m0 = flowlib.mondayOf(Date.now());
+  const nowModel = { columns: [0, 1, 2, 3].map((i) => ({ start: m0 + (i - 1) * W, end: m0 + i * W })) };
+  const r2 = row();
+  gantt.addAiMarks(r2, mkRec(m0, m0 + 10 * W, m0 - W), nowModel, 0);
+  check("US-6: эпик в БТ — штриховка от даты входа (прошедшее плотнее), флажок за шкалой",
+    r2.querySelectorAll(".ai-bt.past").length >= 1 && r2.querySelector(".ai-bt").style.left === "0%" && r2.querySelector(".ai-flag.edge-right"));
+  const r3 = row();
+  gantt.addAiMarks(r3, mkRec(c0 + DAYMS, c0 + 2 * DAYMS), model, 5000);
+  check("US-6: устаревший анализ — отметки помечены", r3.querySelector(".ai-flag.stale") && r3.querySelector(".ai-bt.stale"));
+  gantt.showIssues(document.body, "x", [{ key: "T-3", summary: "Задача Заглушка", statusName: "Новая" }, { key: "T-1", summary: "Форма" }]);
+  const stubs = [...document.querySelectorAll(".tip-issues .ti-stub")];
+  check("US-6: заглушка помечена в списке задач", stubs.length === 1 && stubs[0].closest("tr").textContent.includes("T-3"));
+  gantt.closeTooltip();
 }
 
 const total = document.createElement("div");

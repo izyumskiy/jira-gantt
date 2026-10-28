@@ -1,5 +1,8 @@
 // Сборка приложения: вкладки, поиск эпиков, синхронизация, отрисовка диаграмм, настройки.
 import { t, setLang, applyI18n, getLang } from "./i18n.js";
+import * as aiAnalysis from "./aiAnalysis.js";
+import * as aiView from "./aiView.js";
+import * as workcal from "./workcal.js";
 import * as settings from "./settings.js";
 import * as db from "./db.js";
 import * as jira from "./jira.js";
@@ -126,6 +129,26 @@ async function openEpicCard(key, anchor) {
     .epicCounters([epic], await db.all(db.STORES.issues), { excludeTypes: flowlib.excludedTypes(settings.get()) })
     .get(key);
   showEpicInfo(anchor, epic, c.spent, c.pct);
+}
+
+// ---------- AI-анализ срока эпика (US-5) ----------
+
+async function aiOpts() {
+  return { results: await aiAnalysis.getAll(), lastSync: settings.get().lastSync, onAnalyze: runAi };
+}
+
+async function runAi(key, btn) {
+  btn.classList.add("busy");
+  status(t("ai.running", { key }));
+  try {
+    const rec = await aiAnalysis.analyze(key);
+    status(t("ai.doneMsg", { key, p95: aiView.fmtDay(rec.res.done.p95) }));
+    redrawActive();
+  } catch (e) {
+    btn.classList.remove("busy");
+    btn.title = e && e.message ? e.message : String(e);
+    fail(e);
+  }
 }
 
 // Перерисовать активную вкладку с диаграммой (после синка, смены языка, фильтров).
@@ -537,6 +560,29 @@ function showEpicInfo(anchor, epic, spent, pct) {
   const flowBox = document.createElement("div");
   flowBox.className = "share-block";
   box.append(flowBox);
+
+  // AI-анализ срока (US-5): результат, объяснение, «Пересчитать».
+  const aiBox = document.createElement("div");
+  box.append(aiBox);
+  const renderAi = (rec) => {
+    aiBox.textContent = "";
+    aiBox.append(
+      aiView.cardBlock(rec, {
+        lastSync: settings.get().lastSync,
+        onRecalc: async (btn) => {
+          btn.disabled = true;
+          try {
+            renderAi(await aiAnalysis.analyze(epic.key));
+            redrawActive();
+          } catch (e) {
+            btn.disabled = false;
+            fail(e);
+          }
+        }
+      })
+    );
+  };
+  db.getOne(db.STORES.aiForecasts, epic.key).then(renderAi).catch(() => {});
   const shares = document.createElement("div");
   shares.className = "share-block";
   box.append(shares);
@@ -1190,6 +1236,7 @@ function openSyncMenu() {
 async function runSync(full) {
   try {
     const result = await sync.sync({ full, onProgress: (m) => status(m) });
+    workcal.maybeRefresh().then(renderCalendarStatus).catch(() => {}); // раз в неделю, если разрешение есть
     await refreshHeader();
     state.shareCache.clear(); // ворклоги могли измениться
     renderFlowDiag().catch(() => {});
@@ -1457,6 +1504,7 @@ async function drawGantt(mode, container) {
       excludeTypeNames: flowlib.excludedTypeNames(settings.get())
     });
     const opts = { mode, profiles, personLoad: analytics.personLoad(model, issues, others, excludeTypes) };
+    if (mode === "epicPeople") opts.ai = await aiOpts();
     if (mode === "epicPeople") {
       // Заметки эпиков — как на «Эпик — история»: строка под эпиком, ✎ и 💬 → «Сохранить как заметку».
       opts.notes = {
@@ -1567,6 +1615,7 @@ async function drawStories() {
       return p ? omg.projectKey(p.name) : stories.NO_PROJECT;
     };
     storiesView.render($("#epicStoriesChart"), model, {
+      ai: await aiOpts(),
       notify: (m, kind) => status(m, kind),
       onProjectSet: async (key, name) => {
         await setEpicProject([key], name);
@@ -1640,6 +1689,12 @@ function fillSettingsForm() {
   $("#storyLinkType").value = s.storyLinkType ?? "";
   $("#noteStaleDays").value = s.noteStaleDays ?? "";
   $("#infoSystems").value = (s.infoSystems || []).join("\n");
+  $("#calendarOff").value = (s.calendarOff || []).join("\n");
+  $("#stubSigns").value = s.stubSigns ?? "";
+  $("#btStatuses").value = s.btStatuses ?? "";
+  $("#btHistoryMonths").value = s.btHistoryMonths;
+  $("#calendarWork").value = (s.calendarWork || []).join("\n");
+  renderCalendarStatus();
   $("#teamsList").value = (s.teams || []).join("\n");
   $("#lang").value = s.lang;
   renderBoards();
@@ -1795,6 +1850,11 @@ async function saveSettingsForm() {
     storyLinkType: $("#storyLinkType").value.trim() || settings.DEFAULTS.storyLinkType,
     noteStaleDays: Number($("#noteStaleDays").value) > 0 ? Number($("#noteStaleDays").value) : settings.DEFAULTS.noteStaleDays,
     infoSystems: team.parseSystems($("#infoSystems").value),
+    calendarOff: workcal.parseDates($("#calendarOff").value),
+    stubSigns: $("#stubSigns").value.trim(),
+    btStatuses: $("#btStatuses").value.trim() || settings.DEFAULTS.btStatuses,
+    btHistoryMonths: Number($("#btHistoryMonths").value) > 0 ? Number($("#btHistoryMonths").value) : settings.DEFAULTS.btHistoryMonths,
+    calendarWork: workcal.parseDates($("#calendarWork").value),
     teams: team.parseSystems($("#teamsList").value),
     fields: {
       plannedStart: $("#plannedStartField").value,
@@ -1809,6 +1869,28 @@ async function saveSettingsForm() {
   await refreshHeader();
   // Список исключаемых типов влияет на счётчики «Сохранённых эпиков» — пересчитываем сразу.
   await renderStored();
+}
+
+// Производственный календарь: откуда загружен, какие годы есть, нет ли текущего или следующего года.
+function renderCalendarStatus() {
+  const c = workcal.current();
+  if (!c) {
+    $("#calendarStatus").textContent = t("set.calendarNone");
+    return;
+  }
+  const y = new Date().getFullYear();
+  const missing = [y, y + 1].filter((year) => !workcal.hasYear(year));
+  $("#calendarStatus").textContent = [
+    t("set.calendarLoaded", { date: new Date(c.loadedAt).toLocaleDateString(), from: c.from, to: c.to }),
+    ...missing.map((year) => t("set.calendarMissing", { year }))
+  ].join(" · ");
+}
+
+async function refreshCalendar() {
+  if (!(await chrome.permissions.request({ origins: [workcal.CALENDAR_ORIGIN] }))) throw new jira.JiraError(t("err.noPermission"), 0);
+  await workcal.refresh();
+  renderCalendarStatus();
+  status(t("set.calendarDone"));
 }
 
 async function ensurePermission() {
@@ -2171,7 +2253,9 @@ async function boot() {
     await refreshHeader();
     status(t("set.wipeDone"));
   };
+  $("#btnCalendar").onclick = () => refreshCalendar().catch(fail);
 
+  await workcal.load();
   fillSettingsForm();
   const stored = await renderStored();
   stored.forEach((e) => !e.hidden && state.selected.add(e.key));

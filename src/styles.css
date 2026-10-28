@@ -619,6 +619,18 @@ button.s-pr:hover .s-pr-text { color: var(--accent); text-decoration: underline;
 /* Пиктограмма «прокомментировать» у эпика и окно комментариев. */
 .cmt-btn { border: none; background: none; padding: 0 3px; margin-left: 4px; font-size: 12px; line-height: 1; cursor: pointer; vertical-align: middle; opacity: .7; }
 .cmt-btn:hover { opacity: 1; }
+/* AI-анализ срока (US-5): ✦ у эпика — серая без анализа, фиолетовая с анализом, бледная устаревшая,
+   крутится, пока идёт расчёт. */
+.ai-btn { border: none; background: none; padding: 0 3px; margin-left: 2px; font-size: 13px; line-height: 1; cursor: pointer; vertical-align: middle; color: var(--muted); }
+.ai-btn:hover { color: var(--ai, #6e5dc6); }
+.ai-btn.has { color: var(--ai, #6e5dc6); }
+.ai-btn.stale { opacity: .5; }
+.ai-btn.busy { display: inline-block; animation: sync-spin 1s linear infinite; cursor: progress; color: var(--ai, #6e5dc6); }
+.ai-card { margin-top: 8px; }
+.ai-expl { max-width: 520px; font-size: 12px; line-height: 1.45; }
+.ai-expl .ai-text { margin: 4px 0 6px; }
+.ai-factors { margin: 0 0 4px; padding-left: 18px; color: var(--text); }
+.ai-factors li { margin: 1px 0; }
 /* Критический путь: переключатель у эпика и оранжевая обводка полос критичного человека. */
 .crit-btn { border: none; background: none; padding: 0 3px; margin-left: 2px; font-size: 12px; line-height: 1; cursor: pointer; opacity: .45; filter: grayscale(1); vertical-align: middle; }
 .crit-btn:hover { opacity: .9; }
@@ -755,6 +767,20 @@ button.s-pr:hover .s-pr-text { color: var(--accent); text-decoration: underline;
 .due-planned.due-line { border-left-style: dotted; }
 .due-planned.due-line.edge-right { border-right-style: dotted; }
 .swatch-due { border-left: 2px dashed #de350b; width: 0; height: 12px; border-radius: 0; opacity: 1; }
+/* AI-анализ (US-6): штриховка бизнес-теста — жёлтая, поверх полос (щелчки проходят насквозь);
+   прошедшее время в БТ — гуще. */
+.ai-bt { position: absolute; top: 2px; bottom: 2px; z-index: 1; pointer-events: none; background: repeating-linear-gradient(135deg, rgba(255, 171, 0, .55) 0 3px, transparent 3px 8px); border-top: 1px solid rgba(255, 171, 0, .8); border-bottom: 1px solid rgba(255, 171, 0, .8); }
+.ai-bt.past { background: repeating-linear-gradient(135deg, rgba(255, 171, 0, .8) 0 4px, rgba(255, 171, 0, .25) 4px 7px); }
+.ai-bt.stale, .ai-line.stale, .ai-flag.stale { opacity: .45; }
+/* Отметка P95 готовности — фиолетовая, ниже флажка срока, чтобы не перекрывать его. */
+.ai-line { position: absolute; top: 0; bottom: 0; left: var(--x, 0%); width: 0; border-left: 2px solid var(--ai, #6e5dc6); pointer-events: none; z-index: 1; }
+.ai-line.edge-left { left: 2px; }
+.ai-line.edge-right { left: auto; right: 2px; border-left: none; border-right: 2px solid var(--ai, #6e5dc6); }
+.ai-flag { position: absolute; bottom: 0; left: var(--x, 0%); transform: translateX(-50%); z-index: 2; padding: 0 5px; border-radius: 4px 4px 0 0; font-size: 10px; font-weight: 700; line-height: 14px; color: #fff; background: var(--ai, #6e5dc6); white-space: nowrap; cursor: help; }
+.ai-flag.edge-left { left: 2px; transform: none; }
+.ai-flag.edge-right { left: auto; right: 2px; transform: none; }
+.tooltip.tip-ai { max-width: 540px; }
+.ti-stub { margin-top: 2px; font-size: 10px; font-weight: 600; color: #b76e00; }
 .c-empty { background: transparent; }
 
 /* Цвета команд: --tc задаёт и точку в легенде, и заливку отрезка. */
@@ -1033,6 +1059,10 @@ textarea { font: inherit; padding: 5px 8px; border: 1px solid var(--line); borde
   .badge.b-left { background: #4a3b0b; color: #f5d565; }
   .badge.b-other { background: #3c4147; color: #c7d1db; }
   .badge.b-cc { background: #164b35; color: #7ee2b8; }
+  .ai-btn.has, .ai-btn:hover, .ai-btn.busy { color: #9f8fef; }
+  .ai-line { border-color: #9f8fef; }
+  .ai-flag { background: #7f6fe0; }
+  .ti-stub { color: #f5cd47; }
   .load-chip { background: #333a41; }
   .bar-stack { background: #4a5158; }
   .load-chip.over { background: #4f1c14; color: #ffbdad; }

@@ -54,6 +54,20 @@ export function parseTypeList(text) {
     .filter(Boolean);
 }
 
+// Задачи-заглушки (US-2): менеджер ставит их на время отладки и бизнес-теста («Задача заглушка»,
+// «Отладка»). Признак — подстрока названия из настройки, без учёта регистра и «ё». Это время
+// бизнес-теста, а не разработка: AI-анализ не считает их ни в остатке, ни в потоке.
+const normText = (x) => String(x || "").toLowerCase().replace(/ё/g, "е");
+
+export function stubSigns(s) {
+  return parseTypeList(s && s.stubSigns).map(normText);
+}
+
+export function isStub(summary, signs) {
+  const text = normText(summary);
+  return signs.some((sign) => text.includes(sign));
+}
+
 // Типы историй (ракурс «Эпик — история», Р2), в нижнем регистре.
 export function storyTypes(s) {
   return parseTypeList(s && s.storyTypes);
@@ -97,7 +111,7 @@ export function isExcludedType(typeName, excluded) {
 // rows — записи хранилища flow (завершённые задачи с датой), teamOf — функция «человек → команда».
 // epicKey — если задан, у каждой команды дополнительно считается ряд «задачи эпика по неделям».
 // excludeTypes — типы задач (в нижнем регистре), которые в поток не попадают.
-export function buildFlow({ rows, teamOf, weeks = 16, now = Date.now(), epicKey = "", excludeTypes = [] }) {
+export function buildFlow({ rows, teamOf, weeks = 16, now = Date.now(), epicKey = "", excludeTypes = [], stubs = [] }) {
   const win = fullWeeks(weeks, now);
   const index = new Map(win.starts.map((ms, i) => [ms, i]));
   const teams = new Map();
@@ -106,6 +120,7 @@ export function buildFlow({ rows, teamOf, weeks = 16, now = Date.now(), epicKey 
   for (const r of rows) {
     if (!r.resolved) continue;
     if (isExcludedType(r.typeName, excludeTypes)) continue;
+    if (stubs.length && isStub(r.summary, stubs)) continue; // AI-анализ: заглушки — не поток разработки
     const ms = mondayOf(Date.parse(r.resolved));
     const slot = index.get(ms);
     if (slot === undefined) continue; // вне окна полных недель

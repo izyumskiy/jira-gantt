@@ -274,6 +274,44 @@
           </div>
         </div>
 
+        <!-- Производственный календарь (US-1): рабочие дни для ёмкости людей и прогнозов -->
+        <div class="card">
+          <h3 data-i18n="set.calendar"></h3>
+          <small class="muted" data-i18n="set.calendarHint"></small>
+          <div class="row">
+            <button id="btnCalendar" data-i18n="set.calendarRefresh"></button>
+            <span id="calendarStatus" class="muted"></span>
+          </div>
+          <label class="field">
+            <span data-i18n="set.calendarOff"></span>
+            <textarea id="calendarOff" rows="2" placeholder="2026-12-30"></textarea>
+          </label>
+          <label class="field">
+            <span data-i18n="set.calendarWork"></span>
+            <textarea id="calendarWork" rows="2" placeholder="2026-12-27"></textarea>
+            <small class="muted" data-i18n="set.calendarDatesHint"></small>
+          </label>
+        </div>
+
+        <!-- AI-анализ срока эпика: заглушки, бизнес-тест, подключение LLM -->
+        <div class="card">
+          <h3 data-i18n="set.ai"></h3>
+          <label class="field">
+            <span data-i18n="set.stubSigns"></span>
+            <input id="stubSigns" type="text" placeholder="заглушка, отладка" />
+            <small class="muted" data-i18n="set.stubSignsHint"></small>
+          </label>
+          <label class="field">
+            <span data-i18n="set.btStatuses"></span>
+            <input id="btStatuses" type="text" placeholder="БИЗНЕС ТЕСТ" />
+            <small class="muted" data-i18n="set.btStatusesHint"></small>
+          </label>
+          <label class="field narrow">
+            <span data-i18n="set.btHistoryMonths"></span>
+            <input id="btHistoryMonths" type="number" min="3" max="60" step="1" />
+          </label>
+        </div>
+
         <div class="card">
           <h3 data-i18n="set.summary"></h3>
           <small class="muted" data-i18n="set.summaryHint"></small>

@@ -2,7 +2,7 @@
 // База одна на весь плагин: всё, что знает плагин о Jira, лежит в одном месте (в том числе для
 // будущих инструментов, которым нужна полная картина). Схема описана только здесь.
 const DB_NAME = "jiragantt";
-const DB_VER = 9;
+const DB_VER = 10;
 
 // others — задачи людей из целевых эпиков, лежащие в ДРУГИХ эпиках (текущий и будущие спринты).
 // people — введённые вручную свойства людей (роль, системы, статус); ключ — нормализованное имя.
@@ -27,7 +27,9 @@ export const STORES = {
   // Пишет и читает их только src/cc — синхронизация Ганта сюда не заходит (docs/cc/DATA-MODEL.md).
   ccBoards: "ccBoards",
   ccDicts: "ccDicts",
-  ccIssues: "ccIssues"
+  ccIssues: "ccIssues",
+  // AI-анализ срока эпика (US-5): результат по ключу эпика — перцентили, факторы, объяснение, поправки.
+  aiForecasts: "aiForecasts"
 };
 
 // Хранилища Control Chart: у него своя выгрузка и своя чистка («Хранилище» на его вкладке), поэтому
@@ -94,6 +96,9 @@ export function open() {
       }
       if (!db.objectStoreNames.contains(STORES.ccDicts)) {
         db.createObjectStore(STORES.ccDicts, { keyPath: "n" });
+      }
+      if (!db.objectStoreNames.contains(STORES.aiForecasts)) {
+        db.createObjectStore(STORES.aiForecasts, { keyPath: "key" });
       }
       if (!db.objectStoreNames.contains(STORES.ccIssues)) {
         const c = db.createObjectStore(STORES.ccIssues, { keyPath: ["b", "i"] });
