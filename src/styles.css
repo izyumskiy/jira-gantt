@@ -626,6 +626,13 @@ button.s-pr:hover .s-pr-text { color: var(--accent); text-decoration: underline;
 .ai-btn.has { color: var(--ai, #6e5dc6); }
 .ai-btn.stale { opacity: .5; }
 .ai-btn.busy { display: inline-block; animation: sync-spin 1s linear infinite; cursor: progress; color: var(--ai, #6e5dc6); }
+/* Команда «Бизнес-заказчик»: имя красным, полосы оранжевые. */
+.glabel.p-bizcust, .plabel.p-bizcust { color: var(--danger); font-weight: 600; }
+tr.biz-cust .bar:not(.bar-split) { background: color-mix(in srgb, #ff8b00 38%, var(--panel)); }
+tr.biz-cust .part-target, tr.biz-cust .part-other { background: color-mix(in srgb, #ff8b00 38%, var(--panel)); color: var(--text); }
+/* Ручка порядка строк внутри эпика. */
+.row-handle { font-size: 10px; padding: 0 3px; margin-right: 2px; }
+
 /* ----- Бизнес-заказчики ----- */
 .cust-bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 4px; }
 .cust-bar h2 { margin: 0; font-size: 16px; }
@@ -634,6 +641,9 @@ button.s-pr:hover .s-pr-text { color: var(--accent); text-decoration: underline;
 .cust-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 6px; }
 .cust-head h3 { margin: 0; font-size: 14px; }
 .cust-sum { color: var(--muted); font-size: 12px; }
+.cust-avg { font-weight: 600; font-size: 13px; color: #b65c00; }
+.cust-avg.none { color: var(--muted); font-weight: 400; }
+.cust-nobt { margin-bottom: 10px; max-width: 900px; white-space: normal; }
 .cust-table { width: 100%; border-collapse: collapse; font-size: 12px; }
 .cust-table th, .cust-table td { text-align: left; padding: 3px 8px; border-top: 1px solid var(--line); vertical-align: top; }
 .cust-table th { color: var(--muted); font-weight: 600; border-top: none; }

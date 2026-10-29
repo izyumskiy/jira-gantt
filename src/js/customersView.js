@@ -3,6 +3,7 @@
 // Данные — та же выгрузка, по которой AI-анализ берёт срок приёмки (acceptance.load, раз в сутки).
 import * as acceptance from "./acceptance.js";
 import { el, maybeLink, browseUrl } from "./gantt.js";
+import * as settings from "./settings.js";
 import { t } from "./i18n.js";
 
 const fmt = (ms) => (ms == null ? "—" : new Date(ms).toLocaleDateString(undefined, { day: "2-digit", month: "2-digit", year: "2-digit" }));
@@ -10,7 +11,7 @@ const num = (v) => (v == null ? "—" : String(v));
 
 function summaryLine(sm) {
   const parts = [t("cust.sumEpics", { n: sm.epics, done: sm.done })];
-  parts.push(sm.bt ? t("cust.sumBt", { n: sm.bt, median: sm.btMedian, avg: sm.btAvg, max: sm.btMax }) : t("cust.sumNoBt"));
+  if (sm.bt) parts.push(t("cust.sumBt", { median: sm.btMedian, max: sm.btMax }));
   if (sm.toDoneMedian != null) parts.push(t("cust.sumToDone", { median: sm.toDoneMedian }));
   if (sm.returned) parts.push(t("cust.sumReturned", { n: sm.returned }));
   if (sm.inBt) parts.push(t("cust.sumInBt", { n: sm.inBt, max: sm.inBtMax }));
@@ -28,7 +29,10 @@ function btCell(x) {
 function customerBlock(g) {
   const box = el("section", "card cust");
   const head = el("div", "cust-head");
-  head.append(el("h3", null, g.name || t("cust.noCustomer")), el("div", "cust-sum", summaryLine(g.summary)));
+  const sm = g.summary;
+  // Главное — средняя длительность бизнес-теста по завершённым заходам эпиков заказчика.
+  const avg = el("div", "cust-avg" + (sm.bt ? "" : " none"), sm.bt ? t("cust.avg", { avg: sm.btAvg, n: sm.bt }) : t("cust.avgNone"));
+  head.append(el("h3", null, g.name || t("cust.noCustomer")), avg, el("div", "cust-sum", summaryLine(sm)));
   box.append(head);
   const tbl = el("table", "cust-table");
   const hr = el("tr");
@@ -73,5 +77,11 @@ export async function render(page, { force = false, notify = () => {} } = {}) {
     return;
   }
   info.textContent += ` · ${t("cust.count", { customers: report.length, epics: report.reduce((n, g) => n + g.epics.length, 0) })}`;
+  // Ни один эпик не был в бизнес-тесте — скорее всего, названия статусов в настройках не те:
+  // показываем, что указано и какие статусы реально встречаются в истории эпиков.
+  if (!items.some((x) => x.btDays != null)) {
+    const seen = await acceptance.seenStatuses();
+    list.prepend(el("div", "status error cust-nobt", t("cust.noBt", { setting: settings.get().btStatuses || "—", seen: seen.join(", ") || "—" })));
+  }
   for (const g of report) list.append(customerBlock(g));
 }

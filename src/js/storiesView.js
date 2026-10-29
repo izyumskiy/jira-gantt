@@ -13,6 +13,7 @@ import * as omg from "./omg.js";
 import { fmtEstimate } from "./agg.js";
 import { NO_PROJECT, projectOf } from "./stories.js";
 import { api, noteRow, showNoteEditor, popoverHead } from "./notes.js";
+import * as rowOrder from "./rowOrder.js";
 
 // Запись в Jira — через общий модуль заметок: самопроверка подменяет её заглушкой.
 export { api, showNoteEditor };
@@ -96,11 +97,12 @@ function dueCell(milestone, done) {
 }
 
 // Строка названий: [отступ, раскрытие, приоритет, название + действия при наведении] | статус | готово | срок.
-function nameCell({ indent = "", twist = null, icon = null, title, actions = [], marks = [], status = null, progress, due }) {
+function nameCell({ indent = "", twist = null, handle = null, icon = null, title, actions = [], marks = [], status = null, progress, due }) {
   const td = el("td", "c-name");
   const row = el("div", "s-cols");
   const main = el("div", "s-title");
   if (indent) main.append(el("span", indent));
+  if (handle) main.append(handle);
   if (twist) main.append(twist);
   if (icon) main.append(icon);
   main.append(title, ...marks);
@@ -251,6 +253,7 @@ export function render(container, model, opts = {}) {
   const showNotes = opts.showNotes !== false;
   const bar = gantt.chartBar(model, {
     withDue: false,
+    ai: opts.aiToggle || null,
     onExpand: () => {
       collapsed.clear();
       rerender();
@@ -315,12 +318,16 @@ export function render(container, model, opts = {}) {
   gantt.applyNameWidth(table, "epicStories");
   table.append(gantt.chartHead(model, rerender, { widthKey: "epicStories", compact: true, nameHead: nameHead() }));
   const tbody = el("tbody");
+  if (typeof opts.onStoryReorder === "function") rowOrder.wire(tbody, opts.onStoryReorder);
   const projectNames = model.projects.filter((p) => p.key !== NO_PROJECT).map((p) => p.name);
   const noteOf = (rec) => (showNotes ? omg.latestNote(rec) : null);
 
+  // Ручной порядок историй внутри эпика: ручка ⋮⋮ у строки истории.
+  const storyReorder = typeof opts.onStoryReorder === "function";
   const storyRow = (en, sn, edue, guides) => {
     const str = el("tr", "g-row s-story" + (sn.status && sn.status.id === "done" ? " s-story-done" : ""));
     str.dataset.story = sn.key;
+    if (storyReorder) rowOrder.mark(str, en.key, sn.key);
     const link = gantt.maybeLink("", gantt.browseUrl(sn.key), "plabel s-story-link");
     link.append(el("span", "s-key", sn.key), " ", el("span", null, sn.story.summary || ""));
     const hint = [t("story.hint", { n: sn.all.length, f: sn.foreign })];
@@ -342,6 +349,7 @@ export function render(container, model, opts = {}) {
     str.append(
       nameCell({
         indent: "indent indent2",
+        handle: storyReorder ? rowOrder.handle(en.key, sn.key, sn.label) : null,
         icon: prio.icon(sn.priority, model.priorities, t),
         title: link,
         marks,
@@ -369,7 +377,9 @@ export function render(container, model, opts = {}) {
     const note = noteOf(sn.story.omg);
     if (note) {
       str.classList.add("has-note"); // заметка «прилипает» к своей истории: разделитель между ними убираем
-      tbody.append(addGuides(noteRow({ target, note, cells: model.columns.length + 1, opts, indent: "indent indent2", due: edue }), guides, eKey(en)));
+      const ntr = noteRow({ target, note, cells: model.columns.length + 1, opts, indent: "indent indent2", due: edue });
+      if (storyReorder) rowOrder.mark(ntr, en.key, sn.key); // заметка едет вместе со своей историей
+      tbody.append(addGuides(ntr, guides, eKey(en)));
     }
   };
 
@@ -437,8 +447,9 @@ export function render(container, model, opts = {}) {
       }
       if (ec) return;
 
-      const open = en.stories.filter((sn) => !(sn.status && sn.status.id === "done"));
-      const done = en.stories.filter((sn) => sn.status && sn.status.id === "done");
+      const ordered = storyReorder ? rowOrder.applyOrder(en.stories, opts.storyOrder && opts.storyOrder[en.key], (sn) => sn.key) : en.stories;
+      const open = ordered.filter((sn) => !(sn.status && sn.status.id === "done"));
+      const done = ordered.filter((sn) => sn.status && sn.status.id === "done");
       for (const sn of open) storyRow(en, sn, edue, [pg, eg]);
       // Готовые истории — одной строкой, раскрываются по щелчку.
       if (done.length) {

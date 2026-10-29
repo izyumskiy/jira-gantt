@@ -1694,7 +1694,7 @@ check("текущая секция помечена словом «текущи�
   [...document.querySelectorAll("#g1 thead .c-sprint")][0].querySelector(".sp-name")?.textContent);
 check("у второй секции подписи нет — только спринты", ![...document.querySelectorAll("#g1 thead .c-sprint")][1].querySelector(".sp-name"));
 check("секция без дат подписана «Без дат»", [...document.querySelectorAll("#g1 thead .c-sprint:not(.backlog)")].at(-1).querySelector(".sp-name")?.textContent === t("gantt.noDates"));
-check("легенда команд отрисована — в горизонтальной прокрутке", document.querySelectorAll("#g1 .legend-scroll .legend-item").length === 2 && getComputedStyle(document.querySelector("#g1 .legend-scroll")).overflowX === "auto");
+check("над Гантом нет легенды команд (досок)", !document.querySelector("#g1 .legend-teams") && !document.querySelector("#g1 .legend-scroll"));
 check("подписи легенды короткие", document.querySelector("#g1 .legend-done").textContent === t("gantt.legendDone") && t("gantt.legendDone") === "доля готовых задач" && t("gantt.legendDue") === "срок ◆, план ◇");
 check("на «По эпикам» цифры скрыты — жёлтого баллона «осталось» нет", document.querySelectorAll("#g1 .badge.b-left").length === 0);
 check("у исполнителей жёлтого баллона нет", document.querySelectorAll("#g2 .badge.b-left").length === 0);
@@ -1735,7 +1735,15 @@ check("серого бейджа прочих у фамилии больше н�
 check("у эпиков серого бейджа нет", document.querySelectorAll("#g1 .badge.b-other").length === 0);
 // профиль человека на вкладке по людям: цвет имени, лейбл роли, ширина колонки
 const labelOf = (name) => [...document.querySelectorAll("#g2 .glabel")].find((b) => b.textContent === name);
-check("уволенный — серое имя (класс p-fired)", labelOf("Ivan").classList.contains("p-fired") && getComputedStyle(labelOf("Ivan")).color === getComputedStyle(document.querySelector("#g2 .gantt-bar .legend-title")).color,
+const mutedColor = (host) => {
+  const m = document.createElement("span");
+  m.className = "muted";
+  host.append(m);
+  const c = getComputedStyle(m).color;
+  m.remove();
+  return c;
+};
+check("уволенный — серое имя (класс p-fired)", labelOf("Ivan").classList.contains("p-fired") && getComputedStyle(labelOf("Ivan")).color === mutedColor(document.querySelector("#g2")),
   `${labelOf("Ivan").className} / ${getComputedStyle(labelOf("Ivan")).color}`);
 check("аутстаф — жёлтое имя (класс p-outstaff)", labelOf("Olga").classList.contains("p-outstaff") && getComputedStyle(labelOf("Olga")).color === "rgb(161, 98, 7)", getComputedStyle(labelOf("Olga")).color);
 check("без профиля — обычное имя", !labelOf("Petr").className.includes("p-"));
@@ -3779,6 +3787,48 @@ check("пиктограмма 💬 есть и на «По эпикам и лю�
   const exported = JSON.stringify(await exportConfig());
   await settings.save({ llmKeys: before.llmKeys || {} });
   check("US-7: экспорт конфигурации — без ключей API", !exported.includes("sk-secret-123") && !exported.includes("llmKeys"));
+}
+
+// US-13. Над Гантом: галочка «ИИ аналитика», порядок исполнителей и историй внутри эпика, бизнес-заказчики.
+{
+  const ro = await import("../src/js/rowOrder.js");
+  check("US-13: порядок — сохранённые ключи вперёд, новые в конце; перенос после ключа",
+    ro.applyOrder(["a", "b", "c", "d"], ["c", "a"], (x) => x).join() === "c,a,b,d" && ro.moveKey(["a", "b", "c"], "c", null).join() === "c,a,b" && ro.moveKey(["a", "b", "c"], "a", "b").join() === "b,a,c");
+  check("US-13: команда «Бизнес-заказчик» распознаётся", agg.isBusinessTeam("Бизнес-заказчик") && agg.isBusinessTeam("бизнес заказчики") && !agg.isBusinessTeam("Бизнес-аналитика"));
+  const mb = agg.buildModel({ issues, others: [], sprints, epics, boards, profiles: [{ name: "Petr", team: "Бизнес-заказчик" }], mode: "epicPeople" });
+  const gb = document.createElement("div");
+  document.body.append(gb);
+  const ep = mb.groups.find((g) => g.projects.length >= 2);
+  const people = ep.projects.map((p) => p.key);
+  const moved = [];
+  gantt.setCollapsed("epicPeople", []);
+  gantt.render(gb, mb, { mode: "epicPeople", childOrder: { [ep.key]: [...people].reverse() }, onChildReorder: (g, keys) => moved.push([g, keys]), aiToggle: { show: false, onToggle() {} } });
+  const rowsB = [...gb.querySelectorAll(`tr[data-cgroup="${ep.key}"]`)].map((r) => r.dataset.ckey);
+  check("US-13: исполнители эпика — в сохранённом порядке, у каждого ручка", rowsB.join() === [...people].reverse().join() && gb.querySelectorAll(`tr[data-cgroup="${ep.key}"] .row-handle`).length === people.length, rowsB.join());
+  const toggle = gb.querySelector(".ai-toggle input");
+  check("US-13: галочка «ИИ аналитика» после «Заметок»-места, по умолчанию снята; без ИИ нет ✦", toggle && !toggle.checked && !gb.querySelector(".ai-btn") && !gb.querySelector(".ai-flag"));
+  const petr = [...gb.querySelectorAll(".plabel")].find((x) => x.textContent === "Petr");
+  check("US-13: бизнес-заказчик — имя красным, полосы оранжевые", !petr || (petr.classList.contains("p-bizcust") && petr.closest("tr").classList.contains("biz-cust")), petr ? petr.className : "нет Petr в эпиках");
+  check("US-13: модель знает бизнес-заказчиков", mb.isBusiness("Petr") && !mb.isBusiness("Ivan"));
+  gb.remove();
+  const cv = await import("../src/js/customersView.js");
+  const acc13 = await import("../src/js/acceptance.js");
+  const bt2 = acc13.btStatuses({ btStatuses: "бизнес тест, business test" });
+  check("US-13: статусы БТ из настроек — без регистра, пробелов, дефисов",
+    ["Business Test", "БИЗНЕС-ТЕСТ", "бизнес\u00a0 тест", "Бизнес тест"].every((x) => bt2.includes(acc13.normStatus(x))) && !bt2.includes(acc13.normStatus("Тест")));
+  // Кэш хранит сырую историю: правка «Статусов бизнес-теста» действует без новой выгрузки.
+  const rawEpic = { key: "R-1", fields: { summary: "x", created: "2026-09-01T10:00:00.000+0300", status: { name: "Готово", statusCategory: { key: "done" } }, reporter: { displayName: "Анна" } },
+    changelog: { histories: [{ created: "2026-10-01T10:00:00.000+0300", items: [{ field: "status", toString: "Business Test" }] }, { created: "2026-10-08T10:00:00.000+0300", items: [{ field: "status", toString: "Готово" }] }] } };
+  const keepS = settings.get().btStatuses;
+  await dbm.metaSet("customersRaw", { at: Date.now(), reporterField: "reporter", raw: [rawEpic] });
+  await settings.save({ btStatuses: "бизнес тест" });
+  const l1 = await acc13.load();
+  await settings.save({ btStatuses: "бизнес тест, business test" });
+  const l2 = await acc13.load();
+  await settings.save({ btStatuses: keepS });
+  check("US-13: после правки настройки БТ находится без новой выгрузки", l1[0].btDays === null && l2[0].btDays === 5 && (await acc13.seenStatuses()).includes("Business Test"), JSON.stringify([l1[0].btDays, l2[0].btDays]));
+  const rep13 = acc13.customersReport([10, 20].map((d, i) => ({ key: `K-${i}`, customer: "x", customerName: "X", created: Date.now(), btDays: d, btNow: null, days: d, status: "Готово", statusCategory: "done", done: Date.now() })));
+  check("US-13: заказчик — среднее и медиана бизнес-теста по эпикам", rep13[0].summary.btAvg === 15 && rep13[0].summary.btMedian === 15 && typeof cv.render === "function", JSON.stringify(rep13[0].summary));
 }
 
 const total = document.createElement("div");
