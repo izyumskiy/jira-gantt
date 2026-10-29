@@ -6,6 +6,7 @@
 // Проект эпика меняется новым комментарием (omg project) в эпик; заметки — комментарии
 // (omg comment) в ту же задачу (Р4), строка заметки — только там, где заметка есть.
 import { t } from "./i18n.js";
+import { aiButton } from "./aiView.js";
 import * as gantt from "./gantt.js";
 import * as prio from "./priority.js";
 import * as omg from "./omg.js";
@@ -406,6 +407,7 @@ export function render(container, model, opts = {}) {
       const actions = [];
       if (opts.onProjectSet) actions.push(projectButton(en, projectNames, opts));
       actions.push(gantt.commentButton(en.key, en.label, { kind: "epic", opts }));
+      if (opts.ai) actions.push(aiButton(en.key, opts.ai));
       if (opts.onNoteAdded) actions.push(actionBtn("s-note-add", "✎", t("note.edit"), (a) => showNoteEditor(a, target, opts)));
       etr.append(
         nameCell({
@@ -422,6 +424,8 @@ export function render(container, model, opts = {}) {
       );
       const edue = gantt.dueInfo(en, model);
       if (edue) gantt.addDueLine(etr, edue, false);
+      const aiRec = opts.ai ? opts.ai.results.get(en.key) : null;
+      if (aiRec) gantt.addAiMarks(etr, aiRec, model, opts.ai.lastSync);
       // Заметка эпика — его собственная строка: видна и у свёрнутого эпика.
       const enote = noteOf(en.epic.omg);
       const eg = { level: 1, key: eKey(en) };

@@ -6,6 +6,7 @@
 // Команда спринта = доска, на которой он заведён (другого понятия «команда» в Jira Server нет).
 import { t } from "./i18n.js";
 import * as settings from "./settings.js";
+import * as workcal from "./workcal.js";
 import { classify, isDoneStatus, isCancelledStatus } from "./status.js";
 import { isExcludedType } from "./flow.js";
 
@@ -34,11 +35,13 @@ export function workEstimateOf(issue) {
 
 // Ёмкость спринта в единицах оценки: длительность спринта (рабочих дней) × часов в дне.
 // Для story points сравнивать не с чем — возвращаем 0 (подсветка перегруза выключена).
-export function sprintCapacity() {
+export function sprintCapacity(sec = null) {
   const s = settings.get();
   if (s.estimateField === "points") return 0;
-  const days = Number(s.sprintDays) || 0;
   const hpd = Number(s.hoursPerDay) || 8;
+  // Секция с датами и загруженный календарь — её рабочие дни по календарю (праздники уменьшают ёмкость).
+  if (sec && sec.start != null && sec.end != null && workcal.current()) return workcal.workdaysBetween(sec.start, sec.end) * hpd * 3600;
+  const days = Number(s.sprintDays) || 0;
   return days > 0 ? days * hpd * 3600 : 0;
 }
 
@@ -819,6 +822,7 @@ export function personLoad(model, issues, others, excludeTypes = []) {
   const sectionOf = new Map();
   for (const sec of sections) for (const sp of sec.sprints) sectionOf.set(sp.id, sec.id);
   const byName = new Map();
+  const byEpic = new Map(); // человек → секция → эпик ("" — без эпика) → часы; для блокировок AI-анализа (US-8)
   for (const i of [...issues, ...others]) {
     if (!i.assigneeName || isExcludedType(i.typeName, excludeTypes)) continue;
     const planSec = plannedSectionId(i, model.columns, model.currentId);
@@ -828,12 +832,19 @@ export function personLoad(model, issues, others, excludeTypes = []) {
     if (!byName.has(key)) byName.set(key, new Map());
     const row = byName.get(key);
     row.set(secId, (row.get(secId) || 0) + workEstimateOf(i));
+    if (!byEpic.has(key)) byEpic.set(key, new Map());
+    const secs = byEpic.get(key);
+    if (!secs.has(secId)) secs.set(secId, new Map());
+    const ep = secs.get(secId);
+    ep.set(i.epicKey || "", (ep.get(i.epicKey || "") || 0) + workEstimateOf(i));
   }
   return {
     capacity: sprintCapacity(),
     byName,
+    byEpic,
     sections: sections.map((sec, i) => ({
       id: sec.id,
+      cap: sprintCapacity(sec), // ёмкость секции: по календарю, если он загружен
       caption: i === 0 ? t("cmp.loadCurrent") : `+${i}`,
       title: sec.sprints.map((sp) => sp.name).join(", ") || sectionLabel(sec)
     }))

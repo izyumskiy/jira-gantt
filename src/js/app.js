@@ -1,5 +1,8 @@
 // Сборка приложения: вкладки, поиск эпиков, синхронизация, отрисовка диаграмм, настройки.
 import { t, setLang, applyI18n, getLang } from "./i18n.js";
+import * as aiAnalysis from "./aiAnalysis.js";
+import * as aiView from "./aiView.js";
+import * as workcal from "./workcal.js";
 import * as settings from "./settings.js";
 import * as db from "./db.js";
 import * as jira from "./jira.js";
@@ -17,6 +20,8 @@ import * as autoSync from "./autoSync.js";
 import * as stories from "./stories.js";
 import * as storiesView from "./storiesView.js";
 import * as omg from "./omg.js";
+import * as llm from "../llm/client.js";
+import * as customersView from "./customersView.js";
 import { toHtml as markdownToHtml } from "./markdown.js";
 
 const $ = (sel) => document.querySelector(sel);
@@ -71,6 +76,7 @@ function showTab(name, opts = {}) {
   if (name === "team") team.render($("#page-team"), { notify: (m) => status(m) }).catch(fail);
   if (name === "summary") drawSummary().catch(fail);
   if (name === "cc") showControlChart(opts).catch(fail);
+  if (name === "customers") customersView.render($("#page-customers"), { notify: (m) => status(m, "error") }).catch(fail);
 }
 
 // Control Chart (src/cc) — отдельный модуль со своими сторами в общей базе. Грузится при первом
@@ -126,6 +132,29 @@ async function openEpicCard(key, anchor) {
     .epicCounters([epic], await db.all(db.STORES.issues), { excludeTypes: flowlib.excludedTypes(settings.get()) })
     .get(key);
   showEpicInfo(anchor, epic, c.spent, c.pct);
+}
+
+// ---------- AI-анализ срока эпика (US-5) ----------
+
+async function aiOpts() {
+  const results = await aiAnalysis.getAll();
+  gantt.setAiStubs(aiAnalysis.llmStubs(results));
+  return { results, lastSync: settings.get().lastSync, onAnalyze: runAi };
+}
+
+async function runAi(key, btn) {
+  btn.classList.add("busy");
+  status(t("ai.running", { key }));
+  try {
+    // С ключом LLM — полный анализ с поправками; без ключа — расчёт без LLM («блокировки не оценивались»).
+    const rec = await aiAnalysis.analyze(key, { withLlm: llm.hasKey() });
+    status(t("ai.doneMsg", { key, p95: aiView.fmtDay(rec.res.done.p95) }));
+    redrawActive();
+  } catch (e) {
+    btn.classList.remove("busy");
+    btn.title = e && e.message ? e.message : String(e);
+    fail(e);
+  }
 }
 
 // Перерисовать активную вкладку с диаграммой (после синка, смены языка, фильтров).
@@ -537,6 +566,36 @@ function showEpicInfo(anchor, epic, spent, pct) {
   const flowBox = document.createElement("div");
   flowBox.className = "share-block";
   box.append(flowBox);
+
+  // AI-анализ срока (US-5, US-8): результат, объяснение, поправки LLM, «Пересчитать», «Новый анализ».
+  const aiBox = document.createElement("div");
+  box.append(aiBox);
+  const aiRun = async (btn, job) => {
+    if (btn) btn.disabled = true;
+    try {
+      renderAi(await job());
+      redrawActive();
+    } catch (e) {
+      if (btn) btn.disabled = false;
+      fail(e);
+    }
+  };
+  const renderAi = (rec) => {
+    aiBox.textContent = "";
+    aiBox.append(
+      aiView.cardBlock(rec, {
+        lastSync: settings.get().lastSync,
+        hasKey: llm.hasKey(),
+        onRecalc: (btn) => aiRun(btn, () => aiAnalysis.analyze(epic.key)),
+        onNew: (btn) => {
+          status(t("ai.running", { key: epic.key }));
+          return aiRun(btn, () => aiAnalysis.analyze(epic.key, { withLlm: true }));
+        },
+        onToggle: (id, off) => aiRun(null, () => aiAnalysis.setDisabled(epic.key, id, off))
+      })
+    );
+  };
+  db.getOne(db.STORES.aiForecasts, epic.key).then(renderAi).catch(() => {});
   const shares = document.createElement("div");
   shares.className = "share-block";
   box.append(shares);
@@ -1190,6 +1249,7 @@ function openSyncMenu() {
 async function runSync(full) {
   try {
     const result = await sync.sync({ full, onProgress: (m) => status(m) });
+    workcal.maybeRefresh().then(renderCalendarStatus).catch(() => {}); // раз в неделю, если разрешение есть
     await refreshHeader();
     state.shareCache.clear(); // ворклоги могли измениться
     renderFlowDiag().catch(() => {});
@@ -1457,6 +1517,7 @@ async function drawGantt(mode, container) {
       excludeTypeNames: flowlib.excludedTypeNames(settings.get())
     });
     const opts = { mode, profiles, personLoad: analytics.personLoad(model, issues, others, excludeTypes) };
+    if (mode === "epicPeople") opts.ai = await aiOpts();
     if (mode === "epicPeople") {
       // Заметки эпиков — как на «Эпик — история»: строка под эпиком, ✎ и 💬 → «Сохранить как заметку».
       opts.notes = {
@@ -1567,6 +1628,7 @@ async function drawStories() {
       return p ? omg.projectKey(p.name) : stories.NO_PROJECT;
     };
     storiesView.render($("#epicStoriesChart"), model, {
+      ai: await aiOpts(),
       notify: (m, kind) => status(m, kind),
       onProjectSet: async (key, name) => {
         await setEpicProject([key], name);
@@ -1640,6 +1702,16 @@ function fillSettingsForm() {
   $("#storyLinkType").value = s.storyLinkType ?? "";
   $("#noteStaleDays").value = s.noteStaleDays ?? "";
   $("#infoSystems").value = (s.infoSystems || []).join("\n");
+  $("#calendarOff").value = (s.calendarOff || []).join("\n");
+  $("#stubSigns").value = s.stubSigns ?? "";
+  $("#supportSigns").value = s.supportSigns ?? "";
+  $("#btStatuses").value = s.btStatuses ?? "";
+  $("#btHistoryMonths").value = s.btHistoryMonths;
+  llmDraft = { provider: llm.config(s).id, keys: { ...(s.llmKeys || {}) }, models: { ...(s.llmModels || {}) } };
+  $("#llmProvider").value = llmDraft.provider;
+  showLlmFields();
+  $("#calendarWork").value = (s.calendarWork || []).join("\n");
+  renderCalendarStatus();
   $("#teamsList").value = (s.teams || []).join("\n");
   $("#lang").value = s.lang;
   renderBoards();
@@ -1795,6 +1867,13 @@ async function saveSettingsForm() {
     storyLinkType: $("#storyLinkType").value.trim() || settings.DEFAULTS.storyLinkType,
     noteStaleDays: Number($("#noteStaleDays").value) > 0 ? Number($("#noteStaleDays").value) : settings.DEFAULTS.noteStaleDays,
     infoSystems: team.parseSystems($("#infoSystems").value),
+    calendarOff: workcal.parseDates($("#calendarOff").value),
+    stubSigns: $("#stubSigns").value.trim(),
+    supportSigns: $("#supportSigns").value.trim(),
+    btStatuses: $("#btStatuses").value.trim() || settings.DEFAULTS.btStatuses,
+    btHistoryMonths: Number($("#btHistoryMonths").value) > 0 ? Number($("#btHistoryMonths").value) : settings.DEFAULTS.btHistoryMonths,
+    calendarWork: workcal.parseDates($("#calendarWork").value),
+    ...llmFormValues(),
     teams: team.parseSystems($("#teamsList").value),
     fields: {
       plannedStart: $("#plannedStartField").value,
@@ -1809,6 +1888,71 @@ async function saveSettingsForm() {
   await refreshHeader();
   // Список исключаемых типов влияет на счётчики «Сохранённых эпиков» — пересчитываем сразу.
   await renderStored();
+}
+
+// LLM (US-7): ключ и модель у каждого провайдера свои — поля показывают выбранного, остальные
+// хранятся в черновике до сохранения.
+let llmDraft = { provider: "chatgpt", keys: {}, models: {} };
+function stashLlmFields() {
+  llmDraft.keys[llmDraft.provider] = $("#llmKey").value.trim();
+  llmDraft.models[llmDraft.provider] = $("#llmModel").value.trim();
+}
+function showLlmFields() {
+  const id = llmDraft.provider;
+  $("#llmKey").value = llmDraft.keys[id] || "";
+  $("#llmModel").value = llmDraft.models[id] || "";
+  $("#llmModel").placeholder = llm.PROVIDERS[id].model;
+  $("#llmStatus").textContent = "";
+}
+function llmFormValues() {
+  stashLlmFields();
+  return { llmProvider: llmDraft.provider, llmKeys: { ...llmDraft.keys }, llmModels: { ...llmDraft.models } };
+}
+
+// Разрешение на домен провайдера — когда ключ задан (по щелчку «Сохранить» или «Проверить»).
+async function ensureLlmPermission() {
+  const c = llm.config();
+  if (!c.key || (await chrome.permissions.contains({ origins: [c.origin] }))) return;
+  if (!(await chrome.permissions.request({ origins: [c.origin] }))) throw new Error(t("set.llmNoPermission"));
+}
+
+async function checkLlm() {
+  const box = $("#llmStatus");
+  box.className = "muted";
+  try {
+    await saveSettingsForm();
+    if (!llm.hasKey()) throw new Error(t("set.llmNoKey"));
+    await ensureLlmPermission();
+    box.textContent = t("set.llmChecking");
+    await llm.check();
+    box.textContent = t("set.llmOk");
+    box.className = "llm-ok";
+  } catch (e) {
+    box.textContent = e && e.message ? e.message : String(e);
+    box.className = "llm-err";
+  }
+}
+
+// Производственный календарь: откуда загружен, какие годы есть, нет ли текущего или следующего года.
+function renderCalendarStatus() {
+  const c = workcal.current();
+  if (!c) {
+    $("#calendarStatus").textContent = t("set.calendarNone");
+    return;
+  }
+  const y = new Date().getFullYear();
+  const missing = [y, y + 1].filter((year) => !workcal.hasYear(year));
+  $("#calendarStatus").textContent = [
+    t("set.calendarLoaded", { date: new Date(c.loadedAt).toLocaleDateString(), from: c.from, to: c.to }),
+    ...missing.map((year) => t("set.calendarMissing", { year }))
+  ].join(" · ");
+}
+
+async function refreshCalendar() {
+  if (!(await chrome.permissions.request({ origins: [workcal.CALENDAR_ORIGIN] }))) throw new jira.JiraError(t("err.noPermission"), 0);
+  await workcal.refresh();
+  renderCalendarStatus();
+  status(t("set.calendarDone"));
 }
 
 async function ensurePermission() {
@@ -2092,7 +2236,13 @@ async function boot() {
       fail(e);
     }
   };
-  $("#btnSaveSettings").onclick = () => saveSettingsForm().catch(fail);
+  $("#btnSaveSettings").onclick = () => saveSettingsForm().then(ensureLlmPermission).catch(fail);
+  $("#llmProvider").onchange = () => {
+    stashLlmFields();
+    llmDraft.provider = $("#llmProvider").value;
+    showLlmFields();
+  };
+  $("#btnLlmCheck").onclick = () => checkLlm();
 
   // Предварительная конфигурация: файл → поля и системы → эпики (с выгрузкой) → сотрудники.
   const configLog = (line) => {
@@ -2171,7 +2321,9 @@ async function boot() {
     await refreshHeader();
     status(t("set.wipeDone"));
   };
+  $("#btnCalendar").onclick = () => refreshCalendar().catch(fail);
 
+  await workcal.load();
   fillSettingsForm();
   const stored = await renderStored();
   stored.forEach((e) => !e.hidden && state.selected.add(e.key));

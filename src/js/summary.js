@@ -174,10 +174,10 @@ export function computeSignals({
       let worst = null;
       for (const sec of load.sections) {
         const v = row.get(sec.id) || 0;
-        if (v > load.capacity && (!worst || v > worst.v)) worst = { v, sec };
+        if (v > (sec.cap ?? load.capacity) && (!worst || v > worst.v)) worst = { v, sec };
       }
       if (worst) {
-        const pct = Math.round((worst.v / load.capacity) * 100);
+        const pct = Math.round((worst.v / (worst.sec.cap ?? load.capacity)) * 100);
         const display = displayName(person, issues, others);
         add({ type: "overload", group: "resources", severity: "warning", person: display, rank: pct, params: { person: display, pct, section: worst.sec.caption } });
       }
@@ -209,7 +209,7 @@ export function computeSignals({
       const members = teamSize(id);
       if (!members || !secs.length) continue;
       const sum = (teamLoad.get(id) || { sum: 0 }).sum;
-      const pct = Math.round((sum / (members * load.capacity * secs.length)) * 100);
+      const pct = Math.round((sum / (members * secs.reduce((n, sec) => n + (sec.cap ?? load.capacity), 0))) * 100);
       if (pct >= th.idlePct) continue;
       const [epicKey, n] = [...m.epics].sort((a, b) => b[1] - a[1])[0];
       add({ type: "idleNearLate", group: "resources", severity: "warning", team: m.team.name, epicKey, rank: th.idlePct - pct, params: { team: m.team.name, pct, n } });

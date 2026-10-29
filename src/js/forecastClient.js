@@ -3,6 +3,7 @@
 // процессорное время, один поток не успевал бы. Если потоки создать нельзя — считаем здесь же,
 // результат тот же.
 import { forecastForTeams, seededRandom } from "./flow.js";
+import { portfolioForecast } from "./portfolio.js";
 
 const POOL = Math.max(1, Math.min(4, ((typeof navigator !== "undefined" && navigator.hardwareConcurrency) || 2) - 1));
 let workers = null;
@@ -50,13 +51,22 @@ function pool() {
 
 // args — как у forecastForTeams, но вместо генератора — необязательное зерно seed (строка).
 export function runForecast(args) {
+  return send(undefined, args, local);
+}
+
+// Прогноз портфеля (US-4): args — как у portfolioForecast.
+export function runPortfolio(args) {
+  return send("portfolio", args, portfolioForecast);
+}
+
+function send(kind, args, here) {
   const ws = pool();
-  if (!ws) return Promise.resolve(local(args));
+  if (!ws) return Promise.resolve(here(args));
   const w = ws[next++ % ws.length];
   return new Promise((resolve, reject) => {
     const id = ++seq;
-    pending.set(id, { resolve, reject, fallback: () => resolve(local(args)) });
-    w.postMessage({ id, args });
+    pending.set(id, { resolve, reject, fallback: () => resolve(here(args)) });
+    w.postMessage({ id, args, kind });
   });
 }
 

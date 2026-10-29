@@ -4,8 +4,10 @@
 // рисуются тонкими голубыми отрезками — по одному на каждый спринт секции.
 import { t } from "./i18n.js";
 import { fmtEstimate, NO_DATES_ID, BACKLOG_ID, OFF_SPRINT_ID, PLANNED_ID, sprintCapacity } from "./agg.js";
+import * as flowlib from "./flow.js";
 import * as settings from "./settings.js";
 import { cfId, escapeJql, comments as jiraComments, addComment as jiraAddComment, userSearch as jiraUserSearch } from "./jira.js";
+import { aiButton, explanation, isStale, copyButton } from "./aiView.js";
 import * as omg from "./omg.js";
 import * as prio from "./priority.js";
 import { noteRow, noteToShow, notesToggle, publishNote, publishError } from "./notes.js";
@@ -294,31 +296,25 @@ function fmtDue(ms) {
 }
 
 // Куда ставить веху: индекс колонки, доля по ширине (0..1), край (если срок вне графика), цвет, подписи.
+// Место даты на шкале: секция, доля внутри неё; за шкалой — край (left/right).
+export function datePos(dayMs, model) {
+  const dated = model.columns.map((sec, index) => ({ sec, index })).filter(({ sec }) => sec.start != null);
+  if (!dated.length) return null;
+  const hit = dated.find(({ sec }) => dayMs >= sec.start && dayMs < sec.end);
+  if (hit) return { colIndex: hit.index, frac: (dayMs - hit.sec.start) / (hit.sec.end - hit.sec.start), edge: null };
+  if (dayMs < dated[0].sec.start) return { colIndex: dated[0].index, frac: 0, edge: "left" };
+  return { colIndex: dated[dated.length - 1].index, frac: 1, edge: "right" };
+}
+
 export function dueInfo(g, model) {
   const ms = g.milestone;
   if (!ms) return null;
   const due = dayStart(ms.date);
   if (due == null) return null;
   const planned = ms.kind === "planned";
-  const dated = model.columns.map((sec, index) => ({ sec, index })).filter(({ sec }) => sec.start != null);
-  if (!dated.length) return null;
-
-  let colIndex;
-  let frac;
-  let edge = null;
-  const hit = dated.find(({ sec }) => due >= sec.start && due < sec.end);
-  if (hit) {
-    colIndex = hit.index;
-    frac = (due - hit.sec.start) / (hit.sec.end - hit.sec.start);
-  } else if (due < dated[0].sec.start) {
-    colIndex = dated[0].index;
-    frac = 0;
-    edge = "left";
-  } else {
-    colIndex = dated[dated.length - 1].index;
-    frac = 1;
-    edge = "right";
-  }
+  const pos = datePos(due, model);
+  if (!pos) return null;
+  const { colIndex, frac, edge } = pos;
 
   const today = new Date();
   today.setHours(0, 0, 0, 0);
@@ -363,6 +359,87 @@ export function addDueLine(row, info, withFlag) {
     flag.title = info.title;
     td.append(flag);
   }
+}
+
+// AI-анализ (US-6): отметка P95 готовности и жёлтая штриховка бизнес-теста в строке эпика.
+// Штриховка — от P95 конца разработки (эпик в БТ — от даты входа) до P95 готовности. Лежит поверх
+// полос — накрывает и задачи-заглушки, — но пропускает щелчки: полосы остаются кликабельными.
+// Объяснение — по наведению на флажок 95% (мышь можно увести в окно); щелчок по флажку закрепляет
+// окно: прокрутка, выделение, «Копировать», закрытие — ×, Esc или щелчок мимо.
+export function addAiMarks(row, rec, model, lastSync) {
+  const stale = isStale(rec, lastSync) ? " stale" : "";
+  const done = rec.res.done.p95;
+  const btSince = rec.factors.acceptance && rec.factors.acceptance.btSince;
+  const from = btSince != null ? btSince : rec.res.dev.p95;
+  const today = dayStart(new Date().toISOString());
+  const pinned = () => !!tip && tip.classList.contains("pinned");
+  const show = (node, pin) => {
+    const box = el("div", "tooltip tip-ai" + (pin ? " pinned" : ""));
+    const head = el("div", "tip-head");
+    head.append(el("strong", null, `${t("ai.title")} · ${rec.key}`));
+    if (pin) {
+      const close = el("button", "tip-close", "×");
+      close.title = t("tip.close");
+      close.onclick = closeTooltip;
+      const tools = el("span", "tip-tools");
+      tools.append(copyButton(rec, lastSync), close);
+      head.append(tools);
+    }
+    box.append(head, explanation(rec, lastSync));
+    if (!pin) {
+      box.append(el("div", "muted small ai-pin-hint", t("ai.pinHint")));
+      box.onmouseleave = (e) => {
+        if (!pinned() && !node.contains(e.relatedTarget)) closeTooltip();
+      };
+    }
+    openPopover(box, node);
+  };
+  const hover = (node) => {
+    node.onmouseenter = () => {
+      if (!pinned()) show(node, false);
+    };
+    // Уход мыши в само окно его не закрывает — текст можно дочитать и прокрутить.
+    node.onmouseleave = (e) => {
+      if (!pinned() && !(tip && tip.contains(e.relatedTarget))) closeTooltip();
+    };
+    node.onclick = (e) => {
+      e.stopPropagation();
+      show(node, true);
+    };
+  };
+  const piece = (td, sec, a, b, cls) => {
+    if (b <= a) return;
+    const len = sec.end - sec.start;
+    const band = el("i", `ai-bt${cls}${stale}`);
+    band.style.left = `${((a - sec.start) / len) * 100}%`;
+    band.style.width = `${((b - a) / len) * 100}%`;
+    td.append(band);
+  };
+  model.columns.forEach((sec, i) => {
+    const td = row.children[1 + i];
+    if (!td || sec.start == null) return;
+    const a = Math.max(from, sec.start);
+    const b = Math.min(done, sec.end);
+    if (btSince != null) {
+      piece(td, sec, a, Math.min(b, today), " past");
+      piece(td, sec, Math.max(a, today), b, "");
+    } else piece(td, sec, a, b, "");
+  });
+  const pos = datePos(dayStart(new Date(done).toISOString()), model);
+  const td = pos && row.children[1 + pos.colIndex];
+  if (!td) return;
+  td.classList.add("has-due");
+  const x = `${Math.round(pos.frac * 100)}%`;
+  const edge = pos.edge ? ` edge-${pos.edge}` : "";
+  const line = el("i", `ai-line${edge}${stale}`);
+  line.style.setProperty("--x", x);
+  const p = (n) => String(n).padStart(2, "0");
+  const d = new Date(done);
+  const short = `${p(d.getDate())}.${p(d.getMonth() + 1)}`;
+  const flag = el("span", `ai-flag${edge}${stale}`, pos.edge === "left" ? `◀ 95% · ${short}` : pos.edge === "right" ? `95% · ${short} ▶` : `95% · ${short}`);
+  flag.style.setProperty("--x", x);
+  hover(flag);
+  td.append(line, flag);
 }
 
 function emptyCells(n) {
@@ -674,6 +751,7 @@ export function render(container, model, opts) {
     name.append(twisty, label);
     if (g.status && g.status.name) name.append(lozenge(g.status));
     if (epicLike && g.key) name.append(commentButton(g.key, g.label, { kind: "epic", opts: opts.notes }));
+    if (epicLike && g.key && opts.ai) name.append(aiButton(g.key, opts.ai));
     const critical = model.childKind === "person" && g.key && criticalOn.has(g.key) ? criticalPeople(g, model) : null;
     if (model.childKind === "person" && g.key) {
       const cb = criticalButton(g, model, () => render(container, model, opts));
@@ -687,8 +765,8 @@ export function render(container, model, opts) {
     }
     if (mode === "assignee" && g.key) name.append(compareButton(g.label, profile, profiles, personLoad));
     tr.append(name);
-    const capacity = mode === "assignee" ? sprintCapacity() : 0;
     for (const sec of model.columns) {
+      const capacity = mode === "assignee" ? sprintCapacity(sec) : 0;
       const td = el("td", "c-cell");
       const cell = g.cells.get(sec.id);
       if (mode === "assignee") {
@@ -718,6 +796,8 @@ export function render(container, model, opts) {
     // Веха срока исполнения — по строкам эпика (на «По людям» строки — люди, там её нет).
     const due = epicLike ? dueInfo(g, model) : null;
     if (due) addDueLine(tr, due, true);
+    const aiRec = opts.ai && g.key ? opts.ai.results.get(g.key) : null;
+    if (aiRec) addAiMarks(tr, aiRec, model, opts.ai.lastSync);
     tbody.append(tr);
     // Заметка эпика — своей строкой под ним, как на «Эпик — история».
     if (epicLike && g.key && opts.notes) {
@@ -1119,11 +1199,12 @@ function loadCells(displayName, personLoad) {
   const row = personLoad.byName.get(normName(displayName)) || new Map();
   for (const sec of personLoad.sections) {
     const sum = row.get(sec.id) || 0;
-    const pct = personLoad.capacity > 0 ? Math.round((sum / personLoad.capacity) * 100) : null;
+    const cap = sec.cap ?? personLoad.capacity;
+    const pct = cap > 0 ? Math.round((sum / cap) * 100) : null;
     const chip = el("span", "load-chip" + (pct != null && pct > 100 ? " over" : ""), pct != null ? `${pct}%` : fmtEstimate(sum));
     chip.title = `${sec.title} · ${
       pct != null
-        ? t("cmp.loadHint", { caption: sec.caption, sum: fmtEstimate(sum), cap: fmtEstimate(personLoad.capacity), pct })
+        ? t("cmp.loadHint", { caption: sec.caption, sum: fmtEstimate(sum), cap: fmtEstimate(cap), pct })
         : t("cmp.loadNoCap", { caption: sec.caption, sum: fmtEstimate(sum) })
     }`;
     box.append(chip);
@@ -1285,6 +1366,12 @@ document.addEventListener("click", (e) => {
 });
 
 // Список задач ячейки: ключ со ссылкой в Jira, название, статус, оценка.
+// Заглушки и задачи сопровождения, найденные LLM (US-8): ключ задачи → { kind, reason }. Ставит app при отрисовке с AI-анализом.
+let aiStubs = new Map();
+export function setAiStubs(map) {
+  aiStubs = map;
+}
+
 export function showIssues(anchor, title, issues) {
   closeTooltip();
   tip = el("div", "tooltip tip-issues");
@@ -1299,6 +1386,8 @@ export function showIssues(anchor, title, issues) {
   tip.append(head);
 
   const tbl = el("table", "tip-table issues-table");
+  const stubSigns = flowlib.stubSigns(settings.get());
+  const supportSigns = flowlib.supportSigns(settings.get());
   const sorted = [...issues].sort((a, b) => a.key.localeCompare(b.key, undefined, { numeric: true }));
   for (const it of sorted) {
     const tr = el("tr", it.done ? "issue-done" : "");
@@ -1312,6 +1401,22 @@ export function showIssues(anchor, title, issues) {
     if (it.planned) {
       const mark = el("span", "ti-planned", "◷");
       mark.title = t("gantt.plannedIssue", { date: it.planned });
+      keyCell.append(mark);
+    }
+    // Заглушка на время отладки и бизнес-теста (US-6): AI-анализ не считает её разработкой.
+    if (flowlib.isStub(it.summary, stubSigns)) {
+      const mark = el("div", "ti-stub", t("ai.stub"));
+      mark.title = t("ai.stubBySettings");
+      keyCell.append(mark);
+    } else if (aiStubs.has(it.key)) {
+      const x = aiStubs.get(it.key);
+      const label = x.kind === "support" ? t("ai.supportLlm") : t("ai.stubLlm");
+      const mark = el("div", "ti-stub", label);
+      mark.title = x.reason || label;
+      keyCell.append(mark);
+    } else if (flowlib.isStub(it.summary, supportSigns)) {
+      const mark = el("div", "ti-stub", t("ai.support"));
+      mark.title = t("ai.supportBySettings");
       keyCell.append(mark);
     }
     // Чужая задача истории (ракурс «Эпик — история»): из другого эпика или без эпика.

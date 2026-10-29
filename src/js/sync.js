@@ -563,7 +563,8 @@ export async function collectFlow({ tempo, issues, others, onProgress = () => {}
         epicKey: (fields.epicLink && f[fields.epicLink]) || "",
         projectKey: f.project?.key || "",
         statusName: f.status?.name || "",
-        typeName: f.issuetype?.name || ""
+        typeName: f.issuetype?.name || "",
+        summary: f.summary || "" // по названию AI-анализ узнаёт задачи-заглушки (US-2)
       });
     }
   }
