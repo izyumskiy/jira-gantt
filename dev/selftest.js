@@ -199,6 +199,25 @@ check("подпись секции — диапазон дат", /^\d{2}\.\d{2} 
   check("шаг шкалы кривой спринт не сбил", agg.sprintStepDays(sp) === 14, String(agg.sprintStepDays(sp)));
 }
 
+// 2e. длинный (новогодний) спринт не оставляет за собой пустую колонку
+{
+  const at = (offsetDays, h = 10) => { const x = new Date(); x.setHours(h, 0, 0, 0); x.setDate(x.getDate() + offsetDays); return x.toISOString(); };
+  const sp = [
+    // Закрытые спринты задают ритм шкалы — две недели.
+    { id: 39, name: "22.2026 WEB", state: "CLOSED", startDate: at(-31), endDate: at(-18), boardId: 1 },
+    { id: 40, name: "23.2026 WEB", state: "CLOSED", startDate: at(-17), endDate: at(-4), boardId: 1 },
+    { id: 41, name: "24.2026 WEB", state: "ACTIVE", startDate: at(-3), endDate: at(10), boardId: 1 },
+    { id: 42, name: "25.2026 WEB", state: "FUTURE", startDate: at(11), endDate: at(38), boardId: 1 }, // 4 недели
+    { id: 43, name: "01.2027 WEB", state: "FUTURE", startDate: at(39), endDate: at(52), boardId: 1 },
+    { id: 44, name: "03.2027 WEB", state: "FUTURE", startDate: at(67), endDate: at(80), boardId: 1 } // перед ним — настоящий разрыв
+  ];
+  const cols = agg.timeline(sp, sp.map((x) => mk(`L-${x.id}`, "EP-1", "AAA", "Ivan", x.id, 1)));
+  const iOf = (id) => cols.findIndex((c) => c.sprints.some((x) => x.id === id));
+  const long = cols[iOf(42)];
+  check("длинный спринт: следующий спринт — в соседней колонке, пустой нет", iOf(43) === iOf(42) + 1 && long.end === cols[iOf(43)].start, cols.map((c) => c.sprints.map((x) => x.name).join("+") || "∅").join(" | "));
+  check("разрыв без длинного спринта — пустая колонка остаётся", iOf(44) === iOf(43) + 2 && !cols[iOf(43) + 1].sprints.length);
+}
+
 // 2c. шкала одинакова на вкладках и не зависит от фильтров
 {
   const all = [...issues, ...others];
