@@ -250,9 +250,20 @@ export function timeline(sprints, issues, now = Date.now()) {
 
   const sections = [];
   for (let i = 0; i <= last; i++) {
-    sections.push(
-      byIndex.get(i) || { id: `sec:${i}`, index: i, start: origin + i * step, end: origin + (i + 1) * step, sprints: [] }
-    );
+    const sec = byIndex.get(i) || { id: `sec:${i}`, index: i, start: origin + i * step, end: origin + (i + 1) * step, sprints: [] };
+    // Длинный спринт (новогодний на четыре недели) встаёт в свою секцию, а следующий шаг шкалы
+    // остаётся без спринтов. Пустую секцию, которую он покрывает, не рисуем: предыдущая растягивается
+    // до начала следующей, даты и вехи остаются на своих местах. Пустой шаг без покрытия — настоящий
+    // разрыв между спринтами, он остаётся.
+    const prev = sections[sections.length - 1];
+    if (!sec.sprints.length && prev && prev.sprints.length) {
+      const covered = Math.max(...prev.sprints.map((s) => dayOf(s.endDate) ?? -Infinity));
+      if (covered >= sec.start + DAY) {
+        prev.end = sec.end;
+        continue;
+      }
+    }
+    sections.push(sec);
   }
   if (noDates && hasIssues(noDates)) sections.push(noDates);
   for (const sec of sections) sec.label = sectionLabel(sec);
