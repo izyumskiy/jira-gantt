@@ -11,6 +11,7 @@ import { aiButton, explanation, isStale, copyButton } from "./aiView.js";
 import * as omg from "./omg.js";
 import * as prio from "./priority.js";
 import { noteRow, noteToShow, notesToggle, publishNote, publishError } from "./notes.js";
+import * as rowOrder from "./rowOrder.js";
 
 // Комментарии эпика — через это, чтобы самопроверка могла подменить Jira заглушкой.
 export const commentsApi = {
@@ -466,8 +467,19 @@ export function keepScroll(container) {
   };
 }
 
-// Панель над диаграммой: «Развернуть всё» / «Свернуть всё», легенды доли готовых, вехи и команд.
-export function chartBar(model, { withDue = true, onExpand, onCollapse, notes = null }) {
+// Галочка «ИИ аналитика»: пиктограммы ✦, прогнозные сроки и штриховка бизнес-теста (по умолчанию снята).
+export function aiToggle({ show, onToggle }) {
+  const box = el("label", "legend s-notes-toggle ai-toggle");
+  const cb = el("input");
+  cb.type = "checkbox";
+  cb.checked = !!show;
+  cb.onchange = () => onToggle(cb.checked);
+  box.append(cb, el("span", null, t("ai.toggle")));
+  return box;
+}
+
+// Панель над диаграммой: «Развернуть всё» / «Свернуть всё», галочки, легенды доли готовых и вехи.
+export function chartBar(model, { withDue = true, onExpand, onCollapse, notes = null, ai = null }) {
   const bar = el("div", "gantt-bar");
   const expand = el("button", "link", t("gantt.expandAll"));
   const collapse = el("button", "link", t("gantt.collapseAll"));
@@ -475,6 +487,7 @@ export function chartBar(model, { withDue = true, onExpand, onCollapse, notes = 
   collapse.onclick = onCollapse;
   bar.append(expand, collapse);
   if (notes && notes.onToggle) bar.append(notesToggle(notes));
+  if (ai && ai.onToggle) bar.append(aiToggle(ai));
   const doneLegend = el("span", "legend legend-done");
   doneLegend.append(el("i", "swatch swatch-done"), el("span", null, t("gantt.legendDone")));
   bar.append(doneLegend);
@@ -482,20 +495,6 @@ export function chartBar(model, { withDue = true, onExpand, onCollapse, notes = 
     const dueLegend = el("span", "legend legend-done");
     dueLegend.append(el("i", "swatch swatch-due"), el("span", null, t("gantt.legendDue")));
     bar.append(dueLegend);
-  }
-  if (model.teams.length) {
-    // Команд может быть много — список в горизонтальной прокрутке, панель не растёт.
-    const legend = el("span", "legend legend-teams");
-    legend.append(el("span", "legend-title", t("gantt.teams")));
-    const scroll = el("span", "legend-scroll");
-    for (const tm of model.teams) {
-      const item = el("span", "legend-item" + (tm.derived ? " derived" : ""));
-      if (tm.hint) item.title = tm.hint;
-      item.append(dot(tm), el("span", null, tm.name));
-      scroll.append(item);
-    }
-    legend.append(scroll);
-    bar.append(legend);
   }
   return bar;
 }
@@ -696,6 +695,7 @@ export function render(container, model, opts) {
     chartBar(model, {
       withDue: epicLike,
       notes: epicLike ? opts.notes : null,
+      ai: epicLike ? opts.aiToggle : null,
       onExpand: () => {
         collapsed[mode].clear();
         render(container, model, opts);
@@ -719,6 +719,10 @@ export function render(container, model, opts) {
   // Ручной порядок эпиков (Р8): ручка ⋮⋮ у строки эпика, перетаскивание и Alt+↑ / Alt+↓.
   const reorder = epicLike && typeof opts.onReorder === "function";
   if (reorder) wireReorder(tbody, model, opts.onReorder);
+  // Ручной порядок исполнителей внутри эпика: ручка ⋮⋮ у строки человека.
+  const childReorder = model.childKind === "person" && typeof opts.onChildReorder === "function";
+  if (childReorder) rowOrder.wire(tbody, opts.onChildReorder);
+  const isBusiness = (name) => !!(model.isBusiness && model.isBusiness(name));
   let lastTeamId = null;
   model.groups.forEach((g, index) => {
     // На вкладке по людям перед первым человеком команды — строка-заголовок команды.
@@ -734,7 +738,7 @@ export function render(container, model, opts) {
     }
 
     const isCollapsed = collapsed[mode].has(g.key);
-    const tr = el("tr", "g-row group");
+    const tr = el("tr", "g-row group" + (mode === "assignee" && isBusiness(g.label) ? " biz-cust" : ""));
     if (reorder) tr.dataset.gkey = g.key;
     const name = el("td", "c-name");
     if (reorder && g.key) name.append(dragHandle(g, model, opts.onReorder, tr));
@@ -745,7 +749,7 @@ export function render(container, model, opts) {
     };
     if (epicLike) name.append(el("span", "gnum", `${index + 1}.`));
     const profile = mode === "assignee" ? profileOf.get(normName(g.label)) || null : null;
-    const label = el("button", "glabel" + (profile && profile.status ? ` p-${profile.status}` : ""), g.label);
+    const label = el("button", "glabel" + (profile && profile.status ? ` p-${profile.status}` : "") + (mode === "assignee" && isBusiness(g.label) ? " p-bizcust" : ""), g.label);
     label.title = g.label + (profile && profile.status ? ` · ${t(`pstatus.${profile.status}`)}` : "");
     label.onclick = (e) => showTooltip(e.currentTarget, g, mode, model, profile);
     name.append(twisty, label);
@@ -819,26 +823,31 @@ export function render(container, model, opts) {
     }
 
     if (isCollapsed) return;
-    for (const p of g.projects) {
-      const ptr = el("tr", "g-row proj" + (highlightChild && p.key === highlightChild ? " hl" : "") + (p.target ? " epic-target" : ""));
+    const children = childReorder ? rowOrder.applyOrder(g.projects, opts.childOrder && opts.childOrder[g.key], (p) => p.key) : g.projects;
+    for (const p of children) {
+      const isPersonChild = model.childKind === "person";
+      const biz = isPersonChild && isBusiness(p.label);
+      const ptr = el("tr", "g-row proj" + (highlightChild && p.key === highlightChild ? " hl" : "") + (p.target ? " epic-target" : "") + (biz ? " biz-cust" : ""));
       if (reorder) ptr.dataset.gkey = g.key; // вложенные строки едут вместе со своим эпиком
+      if (childReorder && p.key) rowOrder.mark(ptr, g.key, p.key);
       const pname = el("td", "c-name");
       let plabel;
-      const isPersonChild = model.childKind === "person";
       if (onChildClick) {
         // Клик по вложенной строке раскрывает связанные группы, остальные сворачивает.
         // У человека дополнительно статус из профиля «Команды»: уволенный — серым, аутстаф — жёлтым.
         const prof = isPersonChild ? profileOf.get(normName(p.label)) : null;
-        plabel = el("button", "plabel plabel-link" + (prof && prof.status ? ` p-${prof.status}` : ""), p.label);
+        plabel = el("button", "plabel plabel-link" + (prof && prof.status ? ` p-${prof.status}` : "") + (biz ? " p-bizcust" : ""), p.label);
         plabel.title = isPersonChild
           ? t("gantt.personClick", { name: p.label }) + (prof && prof.status ? ` · ${t(`pstatus.${prof.status}`)}` : "")
           : t("gantt.epicClick", { name: p.label }) + (p.target ? ` · ${t("gantt.targetEpic")}` : "");
         plabel.onclick = () => onChildClick(p.key, p.label);
       } else {
-        plabel = el("span", "plabel", p.label);
+        plabel = el("span", "plabel" + (biz ? " p-bizcust" : ""), p.label);
         plabel.title = p.label + (p.target ? ` · ${t("gantt.targetEpic")}` : "");
       }
-      pname.append(el("span", "indent"), plabel);
+      pname.append(el("span", "indent"));
+      if (childReorder && p.key) pname.append(rowOrder.handle(g.key, p.key, p.label));
+      pname.append(plabel);
       if (isPersonChild && p.key) pname.append(compareButton(p.label, profileOf.get(normName(p.label)) || null, profiles, personLoad));
       ptr.append(pname);
       for (const sec of model.columns) ptr.append(nestedCell(p.cells.get(sec.id), sec, model, `${g.label} · ${p.label}`));

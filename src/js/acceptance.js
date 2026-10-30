@@ -9,11 +9,18 @@ import { isDoneStatus, classify } from "./status.js";
 import { normName } from "./team.js";
 import { parseTypeList } from "./flow.js";
 
-const META_KEY = "customers"; // прежний ключ «acceptance» хранил только эпики из БТ — формат другой
+// Хранится сырая история статусов (разбирается при чтении по текущим настройкам); прежние ключи
+// «acceptance» и «customers» хранили уже разобранные данные — формат другой.
+const META_KEY = "customersRaw";
 const DAY = 86400000;
 
+// Название статуса для сравнения: без регистра, «ё», лишних и неразрывных пробелов, дефисов и
+// подчёркиваний — «Бизнес-тест», «БИЗНЕС  ТЕСТ» и «бизнес тест» — одно и то же.
+export const normStatus = (x) => String(x || "").toLowerCase().replace(/ё/g, "е").replace(/[\s\u00a0_\-–—]+/g, " ").trim();
+
+// Статусы бизнес-теста из настроек — через запятую, можно на разных языках («бизнес тест, business test»).
 export function btStatuses(s) {
-  return parseTypeList(s && s.btStatuses);
+  return parseTypeList(s && s.btStatuses).map(normStatus);
 }
 
 // Эпик из ответа Jira с expand=changelog — для экрана «Бизнес-заказчики» и срока приёмки:
@@ -27,7 +34,7 @@ export function btStatuses(s) {
 // немного; если Jira начнёт обрезать (больше 100 записей), дочитывать через /issue/{key}?expand=changelog.
 export function parseEpic(issue, bt, reporterField = "reporter", now = Date.now()) {
   const f = issue.fields || {};
-  const isBt = (name) => bt.includes(String(name || "").trim().toLowerCase());
+  const isBt = (name) => bt.includes(normStatus(name));
   const isDone = (name) => isDoneStatus(name, "");
   const moves = [];
   for (const h of (issue.changelog && issue.changelog.histories) || []) {
@@ -93,18 +100,48 @@ export function parseAcceptance(issue, bt, reporterField = "reporter", now = Dat
 // Выгрузка раз в сутки (force — сейчас): все эпики, обновлённые за год (или за «Историю приёмок»,
 // если она длиннее), с историей статусов. Экран «Бизнес-заказчики» показывает их все, прогноз берёт
 // приёмки (days) и эпики, которые сейчас в БТ (btNow).
+// Хранится только нужное: поля эпика и переходы статусов. Разбор — при каждом чтении, по текущим
+// «Статусам бизнес-теста»: правка настройки действует сразу, без новой выгрузки.
+const slim = (i, reporterField) => {
+  const f = i.fields || {};
+  const rep = f[reporterField] || {};
+  return {
+    key: i.key,
+    fields: {
+      summary: f.summary || "",
+      created: f.created || "",
+      status: { name: (f.status && f.status.name) || "", statusCategory: { key: (f.status && f.status.statusCategory && f.status.statusCategory.key) || "" } },
+      [reporterField]: { displayName: rep.displayName || "", name: rep.name || "" }
+    },
+    changelog: {
+      histories: ((i.changelog && i.changelog.histories) || [])
+        .map((h) => ({ created: h.created, items: (h.items || []).filter((it) => it.field === "status").map((it) => ({ field: "status", toString: it.toString })) }))
+        .filter((h) => h.items.length)
+    }
+  };
+};
+
 export async function load({ force = false, now = Date.now(), onPage = null } = {}) {
-  const row = await db.metaGet(META_KEY);
-  if (!force && row && now - row.at < DAY) return row.items;
   const s = settings.get();
   const bt = btStatuses(s);
   const reporterField = (s.fields && s.fields.epicReporter) || "reporter";
-  const days = Math.max(365, Math.round((Number(s.btHistoryMonths) || 18) * 30.4));
-  const jql = `issuetype = Epic AND updated >= -${days}d ORDER BY updated DESC`;
-  const issues = await jira.search(jql, ["summary", "status", "created", reporterField], onPage, ["changelog"], 50);
-  const items = issues.map((i) => parseEpic(i, bt, reporterField, now));
-  await db.metaSet(META_KEY, { at: now, items });
-  return items;
+  let row = await db.metaGet(META_KEY);
+  if (force || !row || now - row.at >= DAY || row.reporterField !== reporterField) {
+    const days = Math.max(365, Math.round((Number(s.btHistoryMonths) || 18) * 30.4));
+    const jql = `issuetype = Epic AND updated >= -${days}d ORDER BY updated DESC`;
+    const issues = await jira.search(jql, ["summary", "status", "created", reporterField], onPage, ["changelog"], 50);
+    row = { at: now, reporterField, raw: issues.map((i) => slim(i, reporterField)) };
+    await db.metaSet(META_KEY, row);
+  }
+  return row.raw.map((i) => parseEpic(i, bt, row.reporterField, now));
+}
+
+// Статусы, которые встречались в истории выгруженных эпиков, — подсказка, если бизнес-тест не найден.
+export async function seenStatuses() {
+  const row = await db.metaGet(META_KEY);
+  const out = new Set();
+  for (const i of (row && row.raw) || []) for (const h of i.changelog.histories) for (const it of h.items) if (it.toString) out.add(it.toString);
+  return [...out].sort((a, b) => a.localeCompare(b, "ru"));
 }
 
 // Когда выгружали в последний раз (для экрана).
@@ -130,6 +167,12 @@ export function customerStats(items, customer) {
   };
 }
 
+// Медиана отсортированного списка: при чётном числе — среднее двух средних.
+const median = (sorted) => {
+  if (!sorted.length) return null;
+  const m = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[m] : Math.round(((sorted[m - 1] + sorted[m]) / 2) * 10) / 10;
+};
 const avg = (list) => (list.length ? Math.round((list.reduce((n, x) => n + x, 0) / list.length) * 10) / 10 : null);
 
 // Экран «Бизнес-заказчики»: эпики за последний год (созданные, готовые за год или ещё не готовые),
@@ -155,10 +198,10 @@ export function customersReport(items, now = Date.now()) {
         epics: g.epics.length,
         done: g.epics.filter((x) => x.done != null).length,
         bt: finished.length,
-        btMedian: percentile(finished, 50),
+        btMedian: median(finished),
         btAvg: avg(finished),
         btMax: finished.length ? finished[finished.length - 1] : null,
-        toDoneMedian: percentile(toDone, 50),
+        toDoneMedian: median(toDone),
         returned: g.epics.filter((x) => x.returned).length,
         inBt: now_.length,
         inBtMax: now_.length ? Math.max(...now_.map((x) => x.btDays)) : null

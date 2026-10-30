@@ -134,6 +134,10 @@ async function openEpicCard(key, anchor) {
   showEpicInfo(anchor, epic, c.spent, c.pct);
 }
 
+// Ручной порядок строк внутри эпика: исполнители на «По эпикам», истории на «Эпик — история».
+const PERSON_ORDER_KEY = "personOrder";
+const STORY_ORDER_KEY = "storyOrder";
+
 // ---------- AI-анализ срока эпика (US-5) ----------
 
 async function aiOpts() {
@@ -1517,7 +1521,23 @@ async function drawGantt(mode, container) {
       excludeTypeNames: flowlib.excludedTypeNames(settings.get())
     });
     const opts = { mode, profiles, personLoad: analytics.personLoad(model, issues, others, excludeTypes) };
-    if (mode === "epicPeople") opts.ai = await aiOpts();
+    if (mode === "epicPeople") {
+      // «ИИ аналитика» (по умолчанию снята): без неё нет ✦, прогнозных сроков и штриховки БТ.
+      opts.aiToggle = {
+        show: !!s.aiShow,
+        onToggle: async (on) => {
+          await settings.save({ aiShow: on });
+          drawGantt("epicPeople", $("#page-epicPeople"));
+        }
+      };
+      opts.ai = s.aiShow ? await aiOpts() : null;
+      // Ручной порядок исполнителей внутри эпика.
+      opts.childOrder = (await db.metaGet(PERSON_ORDER_KEY, null)) || {};
+      opts.onChildReorder = async (epicKey, keys) => {
+        await db.metaSet(PERSON_ORDER_KEY, { ...((await db.metaGet(PERSON_ORDER_KEY, null)) || {}), [epicKey]: keys });
+        drawGantt("epicPeople", $("#page-epicPeople"));
+      };
+    }
     if (mode === "epicPeople") {
       // Заметки эпиков — как на «Эпик — история»: строка под эпиком, ✎ и 💬 → «Сохранить как заметку».
       opts.notes = {
@@ -1628,7 +1648,20 @@ async function drawStories() {
       return p ? omg.projectKey(p.name) : stories.NO_PROJECT;
     };
     storiesView.render($("#epicStoriesChart"), model, {
-      ai: await aiOpts(),
+      ai: s.aiShow ? await aiOpts() : null,
+      aiToggle: {
+        show: !!s.aiShow,
+        onToggle: async (on) => {
+          await settings.save({ aiShow: on });
+          drawStories();
+        }
+      },
+      // Ручной порядок историй внутри эпика.
+      storyOrder: (await db.metaGet(STORY_ORDER_KEY, null)) || {},
+      onStoryReorder: async (epicKey, keys) => {
+        await db.metaSet(STORY_ORDER_KEY, { ...((await db.metaGet(STORY_ORDER_KEY, null)) || {}), [epicKey]: keys });
+        drawStories();
+      },
       notify: (m, kind) => status(m, kind),
       onProjectSet: async (key, name) => {
         await setEpicProject([key], name);

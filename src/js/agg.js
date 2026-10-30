@@ -302,6 +302,9 @@ export const normPersonName = normPerson;
 
 // Ручное распределение по командам из вкладки «Команда». Нужно, когда Tempo API закрыт: без него
 // люди разошлись бы по доскам или остались без команды. Профили хранят уже нормализованное имя.
+// Команда «Бизнес-заказчик»: её люди на Ганте — красным именем и оранжевыми полосами.
+export const isBusinessTeam = (name) => /^бизнес[\s-]*заказчик/i.test(String(name || "").trim().replace(/ё/g, "е"));
+
 export function buildManualTeams(profiles = []) {
   const names = [...new Set(profiles.map((p) => String(p.team || "").trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b));
   const teams = new Map();
@@ -745,9 +748,17 @@ export function buildModel({ issues: allIssues, others = [], sprints, epics, boa
     visibleTeams.set(tm.id, tm);
   }
 
+  // Люди команды «Бизнес-заказчик» (ручное распределение или Tempo) — ключи normPerson.
+  const business = new Set();
+  for (const i of [...issues, ...others]) {
+    if (!i.assigneeName) continue;
+    const tm = manualInfo.of({ key: i.assigneeKey, login: i.assigneeLogin, name: i.assigneeName }) || tempoInfo.of({ key: i.assigneeKey, login: i.assigneeLogin, name: i.assigneeName });
+    if (tm && isBusinessTeam(tm.name)) business.add(normPerson(i.assigneeName));
+  }
   return {
     columns,
     groups: list,
+    isBusiness: (name) => business.has(normPerson(name)),
     maxCell: max,
     currentId,
     teams: [...visibleTeams.values()],

@@ -53,7 +53,7 @@ export function planAllocation({ issues, others = [], sectionSprints, teamIdOf, 
   return out;
 }
 
-const isBt = (status, s) => acceptance.btStatuses(s).includes(String(status || "").trim().toLowerCase());
+const isBt = (status, s) => acceptance.btStatuses(s).includes(acceptance.normStatus(status));
 
 // Бизнес-тест по плану заглушек: окно их спринтов { from, to } и сколько рабочих дней плана приходится
 // на БТ — от конца последнего спринта с задачами разработки (devEnd) до конца окна. Заглушки, стоящие
