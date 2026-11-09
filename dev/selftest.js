@@ -590,7 +590,7 @@ const renderOpen = (box, model, opts) => {
   gantt.render(box, model, opts);
 };
 
-// шапка секции: не больше 7 спринтов, остальные по клику
+// шапка секции свёрнута, как на «Эпик — история»: подпись, точки команд, «N спр.»; список — по клику
 const manySprints = [sprints[1], ...Array.from({ length: 12 }, (_, i) => ({ id: 100 + i, name: `Someday ${i + 1}`, state: "FUTURE", startDate: null, endDate: null, boardId: 7 }))];
 const manyIssues = Array.from({ length: 12 }, (_, i) => mk(`M-${i}`, "EP-1", "AAA", "Ivan", 100 + i, 1, "new"));
 const mh = agg.buildModel({ issues: manyIssues, sprints: manySprints, epics, boards, mode: "epicPeople" });
@@ -598,13 +598,13 @@ const gh = document.createElement("div");
 document.body.append(gh);
 renderOpen(gh, mh, { mode: "epicPeople" });
 const noDateTh = () => [...gh.querySelectorAll("thead .c-sprint:not(.backlog)")].at(-1);
-check("в шапке секции «Без дат» показаны только 7 спринтов из 12", noDateTh().querySelectorAll(".sp-item").length === 7, String(noDateTh().querySelectorAll(".sp-item").length));
-check("под списком — «ещё 5»", noDateTh().querySelector(".sp-more")?.textContent === t("gantt.headerMore", { n: 5 }), noDateTh().querySelector(".sp-more")?.textContent);
+check("шапка секции «Без дат» свёрнута: «12 спр.», точки команд, список — в подсказке",
+  !noDateTh().querySelector(".sp-item") && noDateTh().querySelector(".sp-count")?.textContent === t("gantt.sprintsN", { n: 12 }) && noDateTh().querySelectorAll(".sp-dots .dot").length === 12 && noDateTh().title.includes("Someday 12"),
+  noDateTh().textContent);
 noDateTh().click();
-check("клик по шапке раскрывает все 12", noDateTh().querySelectorAll(".sp-item").length === 12 && noDateTh().querySelector(".sp-more")?.textContent === t("gantt.headerLess"));
+check("клик по шапке раскрывает все 12 спринтов", noDateTh().querySelectorAll(".sp-item").length === 12);
 noDateTh().click();
-check("повторный клик сворачивает обратно до 7", noDateTh().querySelectorAll(".sp-item").length === 7);
-check("секция с ≤7 спринтами без переключателя", !gh.querySelector("thead .c-sprint.current .sp-more"));
+check("повторный клик сворачивает обратно", !noDateTh().querySelector(".sp-item") && !!noDateTh().querySelector(".sp-count"));
 gh.remove();
 
 const g3 = document.createElement("div");
@@ -1705,13 +1705,13 @@ check("вложенные отрезки ниже групповых",
   `${firstProjBars[0].getBoundingClientRect().height} < ${document.querySelector("#g1 .g-row.group .bar").getBoundingClientRect().height}`);
 check("колонка секции стала 264px", getComputedStyle(document.documentElement).getPropertyValue("--col-w").trim() === "264px",
   getComputedStyle(document.documentElement).getPropertyValue("--col-w"));
-check("в заголовке секции перечислены спринты обеих команд",
-  [...document.querySelectorAll("#g1 thead .c-sprint")][0].querySelectorAll(".sp-item").length === 2);
+check("в свёрнутом заголовке секции — точки обеих команд и «2 спр.»",
+  [...document.querySelectorAll("#g1 thead .c-sprint")][0].querySelectorAll(".sp-dots .dot").length === 2 && [...document.querySelectorAll("#g1 thead .c-sprint")][0].querySelector(".sp-count")?.textContent === t("gantt.sprintsN", { n: 2 }));
 const heads = [...document.querySelectorAll("#g1 thead .c-sprint")].map((th) => th.textContent);
 check("в заголовках секций нет дат", heads.every((h) => !/\d{2}\.\d{2}/.test(h)), heads.join(" | "));
 check("текущая секция помечена словом «текущий», без дат", [...document.querySelectorAll("#g1 thead .c-sprint")][0].querySelector(".sp-name")?.textContent === t("gantt.current"),
   [...document.querySelectorAll("#g1 thead .c-sprint")][0].querySelector(".sp-name")?.textContent);
-check("у второй секции подписи нет — только спринты", ![...document.querySelectorAll("#g1 thead .c-sprint")][1].querySelector(".sp-name"));
+check("вторая секция подписана «+1»", [...document.querySelectorAll("#g1 thead .c-sprint")][1].querySelector(".sp-name")?.textContent === "+1");
 check("секция без дат подписана «Без дат»", [...document.querySelectorAll("#g1 thead .c-sprint:not(.backlog)")].at(-1).querySelector(".sp-name")?.textContent === t("gantt.noDates"));
 check("над Гантом нет легенды команд (досок)", !document.querySelector("#g1 .legend-teams") && !document.querySelector("#g1 .legend-scroll"));
 check("подписи легенды короткие", document.querySelector("#g1 .legend-done").textContent === t("gantt.legendDone") && t("gantt.legendDone") === "доля готовых задач" && t("gantt.legendDue") === "срок ◆, план ◇");
