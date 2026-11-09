@@ -3138,7 +3138,8 @@ check("пиктограмма 💬 есть и на «По эпикам и лю�
   const pbar = box.querySelector(".bar.nested.planned");
   check("План: на «По эпикам» — отрезок «По плану» с подсказкой", !!pbar && pbar.textContent.includes(t("gantt.planned")) && pbar.title.includes(t("gantt.plannedHint")));
   pbar.click();
-  check("План: в списке задач такой отрезок помечает задачи знаком ◷", document.querySelector(".tooltip.tip-issues .ti-planned")?.title.includes(ymd(2)));
+  check("План: в списке задач такой отрезок помечает задачи знаком ◷ и «План: с …» без завершения",
+    document.querySelector(".tooltip.tip-issues .ti-planned")?.title.includes(ymd(2)) && [...document.querySelectorAll(".tooltip.tip-issues .ti-plan-dates")].some((x) => x.textContent === t("gantt.plannedFrom", { from: ymd(2).split("-").reverse().join(".") })));
   document.querySelector(".tooltip .tip-close")?.click();
   box.remove();
 
@@ -3154,6 +3155,39 @@ check("пиктограмма 💬 есть и на «По эпикам и лю�
   const sn = mS.projects[0].epics[0].stories[0];
   check("План: на «Эпик — история» задача истории встаёт в секцию по плановому началу",
     sn.cells.get(mS.columns[1].id)?.issues.map((i) => i.key).join() === "P-NEXT", [...sn.cells.keys()].join());
+
+  // Плановое начало и завершение — полоса «По плану» сквозь секции по датам.
+  const c1 = m.columns[1];
+  const dayOff = (ms) => Math.round((ms - Date.now()) / 86400000);
+  const spanIssue = { ...plan("P-SPAN", "EP-1", "Olga", 8, ymd(dayOff(c1.start) - 3)), plannedEnd: ymd(dayOff(c1.start) + 3) };
+  const mP = agg.buildModel({ issues: [...set, spanIssue], others: [], sprints, epics: EPS, boards, mode: "epicPeople" });
+  const gP = mP.groups.find((x) => x.key === "EP-1");
+  const olga = gP.projects.find((x) => x.label === "Olga");
+  check("План-полоса: у исполнителя — отрезок с датами, в ячейках не дублируется, итог эпика — в секции начала",
+    olga && olga.spans.length === 1 && olga.spans[0].issues[0].key === "P-SPAN" && ![...olga.cells.values()].some((c) => c.issues.some((i) => i.key === "P-SPAN")) && gP.cells.get(mP.currentId)?.issues.some((i) => i.key === "P-SPAN"));
+  const boxP = document.createElement("div");
+  document.body.append(boxP);
+  renderOpen(boxP, mP, { mode: "epicPeople" });
+  const olgaRow = [...boxP.querySelectorAll(".g-row.proj")].find((r) => r.querySelector(".plabel")?.textContent === "Olga");
+  const pieces = [...olgaRow.querySelectorAll(".planned-span")];
+  const colOf = (b) => [...olgaRow.children].indexOf(b.closest("td"));
+  check("План-полоса: сквозь две секции — начало и конец скруглены, подпись одна",
+    pieces.length === 2 && colOf(pieces[0]) + 1 === colOf(pieces[1]) && pieces[0].classList.contains("span-start") && pieces[1].classList.contains("span-end") && boxP.querySelectorAll(".planned-span .bar-sprint").length === 1 && pieces[0].getBoundingClientRect().left > pieces[0].closest("td").getBoundingClientRect().left + 1,
+    pieces.map((b) => `${colOf(b)}:${b.style.marginLeft}/${b.style.width}`).join(" "));
+  const endPos = gantt.datePos(agg.plannedSpanOf(spanIssue).last, mP);
+  const tdR = pieces[1].closest("td").getBoundingClientRect();
+  const rightEdge = pieces[1].getBoundingClientRect().right;
+  const expected = tdR.left + endPos.frac * tdR.width; // так ставится линия вехи: left = доля ширины ячейки
+  check("План-полоса: конец полосы — там же, где веха той же даты", colOf(pieces[1]) === 1 + endPos.colIndex && Math.abs(rightEdge - expected) < 1, `${rightEdge.toFixed(1)} / ${expected.toFixed(1)}`);
+  pieces[1].click();
+  const pd = document.querySelector(".tooltip.tip-issues .ti-plan-dates")?.textContent || "";
+  const dmy = (x) => x.split("-").reverse().join(".");
+  check("План-полоса: щелчок — список её задач с датами «с — по»",
+    document.querySelector(".tooltip.tip-issues")?.textContent.includes("P-SPAN") && pd === t("gantt.plannedDates", { from: dmy(spanIssue.plannedStart), to: dmy(spanIssue.plannedEnd) }), pd);
+  document.querySelector(".tooltip .tip-close")?.click();
+  boxP.remove();
+  check("План-полоса: без планового завершения (или оно раньше начала) — плашка в секции начала",
+    agg.plannedSpanOf(set[1]) === null && agg.plannedSpanOf({ ...set[1], plannedEnd: ymd(1) }) === null && !!agg.plannedSpanOf(spanIssue));
 }
 
 // Control Chart (src/cc): общая база, общие настройки подключения, общая таблица людей, изоляция

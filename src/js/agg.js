@@ -176,6 +176,32 @@ export function plannedStartOf(issue) {
   return issue.plannedStart || "";
 }
 
+// Плановый отрезок задачи без спринта: { start, end, last } — от начала дня планового начала до начала
+// дня планового завершения (там же стоит веха с этой датой, полоса и флажок совпадают); last — день
+// завершения для подписи. Начало и завершение в один день — полоса в один день. Нет обеих дат или
+// завершение раньше начала — null: задача остаётся плашкой в секции планового начала.
+export function plannedSpanOf(issue) {
+  const a = ts(plannedStartOf(issue));
+  const b = ts(issue && issue.plannedEnd);
+  if (a == null || b == null || b < a) return null;
+  const start = startOfDay(a);
+  const last = startOfDay(b);
+  return { start, end: last > start ? last : start + DAY, last };
+}
+
+// Плановые отрезки строки: задачи с одинаковыми датами — одной полосой.
+function addSpan(row, span, est, brief) {
+  const key = `${span.start}|${span.end}`;
+  let x = row.spans.find((s) => s.key === key);
+  if (!x) {
+    x = { key, start: span.start, end: span.end, last: span.last, count: 0, sum: 0, issues: [] };
+    row.spans.push(x);
+  }
+  x.count += 1;
+  x.sum += est;
+  x.issues.push(brief);
+}
+
 // Секции от текущего спринта в будущее; хвост секций без задач отбрасываем, а пустые
 // секции между занятыми оставляем — шкала времени должна быть честной.
 export function timeline(sprints, issues, now = Date.now()) {
@@ -464,8 +490,9 @@ export function briefOf(issue, est, done) {
     estimate: est,
     done,
     offSprint: isOffSprintWork(issue),
-    // Задача без спринта, поставленная на шкалу по плановому началу.
-    planned: plannedStartOf(issue) || ""
+    // Задача без спринта, поставленная на шкалу по плановому началу; plannedEnd — для подписи «с — по».
+    planned: plannedStartOf(issue) || "",
+    plannedEnd: plannedStartOf(issue) ? issue.plannedEnd || "" : ""
   };
 }
 
@@ -596,6 +623,7 @@ export function buildModel({ issues: allIssues, others = [], sprints, epics, boa
         sum: 0,
         noSprint: 0,
         cells: new Map(),
+        spans: [], // задачи с плановыми датами — полосой сквозь секции
         backlog: emptyCell(),
         issues: []
       });
@@ -616,12 +644,16 @@ export function buildModel({ issues: allIssues, others = [], sprints, epics, boa
         continue;
       }
       // Не в спринте и не в работе, но с плановым началом — в секцию по этой дате.
+      // У вложенной строки задача с обеими плановыми датами — полоса сквозь секции; итоги строки
+      // эпика (группы) — по-прежнему в секции планового начала.
       const planSec = plannedSectionId(issue, columns, currentId);
       if (planSec) {
-        for (const bag of [g.cells, p.cells]) {
+        const span = plannedSpanOf(issue);
+        for (const bag of span ? [g.cells] : [g.cells, p.cells]) {
           if (!bag.has(planSec)) bag.set(planSec, emptyCell());
           addTo(bag.get(planSec), PLANNED_ID, est, brief);
         }
+        if (span) addSpan(p, span, est, brief);
         continue;
       }
       // Выполненную задачу вне спринта считать нечего — в бэклог идут только незакрытые.
@@ -683,6 +715,7 @@ export function buildModel({ issues: allIssues, others = [], sprints, epics, boa
           sum: 0,
           noSprint: 0,
           cells: new Map(),
+          spans: [],
           backlog: emptyCell(),
           issues: []
         });
@@ -691,8 +724,12 @@ export function buildModel({ issues: allIssues, others = [], sprints, epics, boa
       op.count += 1;
       op.sum += est;
       op.issues.push(brief);
-      if (!op.cells.has(secId)) op.cells.set(secId, emptyCell());
-      addTo(op.cells.get(secId), partId, est, brief);
+      const span = planSec ? plannedSpanOf(issue) : null;
+      if (span) addSpan(op, span, est, brief);
+      else {
+        if (!op.cells.has(secId)) op.cells.set(secId, emptyCell());
+        addTo(op.cells.get(secId), partId, est, brief);
+      }
     }
   }
 
@@ -700,14 +737,14 @@ export function buildModel({ issues: allIssues, others = [], sprints, epics, boa
   // (текущий и будущие спринты) или в бэклоге (без спринта, не готово). Итоги эпика — по всем задачам.
   if (mode === "epicPeople") {
     for (const g of groups.values()) {
-      for (const [key, p] of g.projects) if (!p.cells.size && !p.backlog.count) g.projects.delete(key);
+      for (const [key, p] of g.projects) if (!p.cells.size && !p.spans.length && !p.backlog.count) g.projects.delete(key);
     }
   }
   // «По людям»: внутри человека — только эпики с задачами в текущем/будущих спринтах или в
   // бэклоге; сами люди без такой работы с вкладки убираются.
   if (mode === "assignee") {
     for (const [key, g] of groups) {
-      for (const [pk, p] of g.projects) if (!p.cells.size && !p.backlog.count) g.projects.delete(pk);
+      for (const [pk, p] of g.projects) if (!p.cells.size && !p.spans.length && !p.backlog.count) g.projects.delete(pk);
       if (!g.cells.size && !g.otherCells.size && !g.backlog.count) groups.delete(key);
     }
   }

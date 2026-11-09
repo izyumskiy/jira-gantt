@@ -266,6 +266,45 @@ export function nestedCell(cell, section, model, rowLabel) {
   return td;
 }
 
+// Задачи без спринта с плановым началом и завершением — полоса «По плану» сквозь секции, по датам:
+// в каждой секции кусок от max(начало, начало секции) до min(завершение, конец секции). Подпись и
+// числа — на самом широком куске; щелчок по любому куску — список задач.
+const CELL_PAD = 4; // горизонтальный отступ ячейки шкалы (.c-cell)
+export function addPlanSpans(tr, spans, model, rowLabel) {
+  for (const sp of spans || []) {
+    const pieces = [];
+    model.columns.forEach((sec, i) => {
+      if (sec.start == null) return;
+      const a = Math.max(sp.start, sec.start);
+      const b = Math.min(sp.end, sec.end);
+      if (b <= a) return;
+      const td = tr.children[1 + i];
+      if (!td) return;
+      let stack = td.querySelector(".stack");
+      if (!stack) {
+        stack = el("div", "stack");
+        td.append(stack);
+      }
+      const len = sec.end - sec.start;
+      const bar = el("div", "bar nested planned planned-span clickable" + (a === sp.start ? " span-start" : "") + (b === sp.end ? " span-end" : ""));
+      // Доли — от всей ширины ячейки, как у линии вехи (left: --x в ячейке), а не от содержимого без
+      // отступов: иначе конец полосы и флажок той же даты расходятся на отступ.
+      const fa = (a - sec.start) / len;
+      const fw = (b - a) / len;
+      bar.style.marginLeft = `calc(${fa} * (100% + ${2 * CELL_PAD}px) - ${CELL_PAD}px)`;
+      bar.style.width = `calc(${fw} * (100% + ${2 * CELL_PAD}px))`;
+      const dates = `${fmtDue(sp.start)} – ${fmtDue(sp.last)}`;
+      const doneText = applyDone(bar, sp.issues);
+      bar.title = `${t("gantt.planned")} · ${dates} · ${t("gantt.plannedSpanHint")} · ${doneText}`;
+      bar.onclick = (e) => showIssues(e.currentTarget, `${rowLabel} · ${t("gantt.planned")} ${dates}`, sp.issues);
+      stack.append(bar);
+      pieces.push({ bar, w: b - a });
+    });
+    const widest = pieces.reduce((x, y) => (y.w > x.w ? y : x), pieces[0]);
+    if (widest) widest.bar.append(el("span", "bar-sprint", t("gantt.planned")), ...numbers(sp.count, sp.sum));
+  }
+}
+
 // Ячейка бэклога вложенной строки: один голубой отрезок без имени спринта.
 export function backlogNested(cell, model, rowLabel) {
   const td = el("td", "c-cell c-backlog");
@@ -851,6 +890,7 @@ export function render(container, model, opts) {
       if (isPersonChild && p.key) pname.append(compareButton(p.label, profileOf.get(normName(p.label)) || null, profiles, personLoad));
       ptr.append(pname);
       for (const sec of model.columns) ptr.append(nestedCell(p.cells.get(sec.id), sec, model, `${g.label} · ${p.label}`));
+      addPlanSpans(ptr, p.spans, model, `${g.label} · ${p.label}`);
       if (showBacklog) ptr.append(backlogNested(p.backlog, model, `${g.label} · ${p.label}`));
       if (due) addDueLine(ptr, due, false);
       // Критический путь: полосы критичного человека — с оранжевой обводкой, у имени — ⚡ с причиной.
@@ -1411,6 +1451,10 @@ export function showIssues(anchor, title, issues) {
       const mark = el("span", "ti-planned", "◷");
       mark.title = t("gantt.plannedIssue", { date: it.planned });
       keyCell.append(mark);
+      // Плановые даты — видимой строкой: «План: с — по» (без завершения — «План: с …»).
+      const from = fmtDue(dayStart(it.planned));
+      const to = it.plannedEnd && dayStart(it.plannedEnd) != null ? fmtDue(dayStart(it.plannedEnd)) : "";
+      keyCell.append(el("div", "ti-plan-dates", to ? t("gantt.plannedDates", { from, to }) : t("gantt.plannedFrom", { from })));
     }
     // Заглушка на время отладки и бизнес-теста (US-6): AI-анализ не считает её разработкой.
     if (flowlib.isStub(it.summary, stubSigns)) {

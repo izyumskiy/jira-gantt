@@ -923,6 +923,11 @@ tr.biz-cust .part-target, tr.biz-cust .part-other { background: color-mix(in srg
 /* Задачи вне спринта в работе (канбан): серый отрезок в штриховку — у них нет доски и цвета команды. */
 /* Задачи без спринта, поставленные по плановому началу: отрезок в точку, без цвета команды. */
 .bar.nested.planned { --tc: #8993a4; background: repeating-linear-gradient(90deg, color-mix(in srgb, #8993a4 22%, var(--panel)) 0 6px, var(--panel) 6px 9px); }
+.ti-plan-dates { font-size: 11px; color: var(--muted); white-space: nowrap; }
+/* Полоса «По плану» сквозь секции: скругления только у настоящего начала и конца. */
+.bar.planned-span { border-radius: 0; min-width: 4px; padding-left: 4px; padding-right: 4px; box-sizing: border-box; }
+.bar.planned-span.span-start { border-top-left-radius: 3px; border-bottom-left-radius: 3px; }
+.bar.planned-span.span-end { border-top-right-radius: 3px; border-bottom-right-radius: 3px; }
 .ti-planned { margin-left: 4px; color: var(--muted); cursor: help; }
 .bar.nested.off-sprint {
   --tc: #a5adba;
