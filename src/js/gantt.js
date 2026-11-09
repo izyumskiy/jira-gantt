@@ -750,7 +750,9 @@ export function render(container, model, opts) {
   const table = el("table", `gantt mode-${mode}`);
   applyNameWidth(table, mode);
   const childTitle = { person: t("gantt.assignee"), epic: t("gantt.epic") }[model.childKind] || t("gantt.project");
-  table.append(chartHead(model, () => render(container, model, opts), { title: epicLike ? t("gantt.epic") : t("gantt.assignee"), hint: ` / ${childTitle}`, widthKey: mode }));
+  // Заголовок секции свёрнут, как на «Эпик — история»: подпись, точки команд и «N спр.»; список
+  // спринтов — в подсказке и по щелчку на заголовок.
+  table.append(chartHead(model, () => render(container, model, opts), { title: epicLike ? t("gantt.epic") : t("gantt.assignee"), hint: ` / ${childTitle}`, widthKey: mode, compact: true }));
   const showBacklog = true;
   const extraCols = showBacklog ? 1 : 0;
 
