@@ -2593,6 +2593,7 @@ check("пиктограмма 💬 есть и на «По эпикам и лю�
     check("Excel: пиктограмма выгрузки — в каждой строке проекта", btn.length === rowsOf(".s-project").length && !!btn[0].querySelector("svg") && btn[0].title === t("story.exportHint"));
     btn[0].click();
     await new Promise((r) => setTimeout(r, 0));
+    check("Excel: пиктограмма выгрузки — общая для ракурса и «Поиска»", sv.exportIcon().tagName.toLowerCase() === "svg" && sv.exportIcon().querySelectorAll("path").length === 3);
     check("Excel: щелчок выгружает именно этот проект", exported.length === 1 && exported[0] === rowsOf(".s-project")[0].dataset.project, exported.join());
     sv.render(box, model, opts);
     box.querySelector(".gantt-bar .link").click();

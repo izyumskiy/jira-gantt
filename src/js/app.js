@@ -1615,8 +1615,13 @@ async function addLocalNote(kind, key, note) {
 // их сотрудники и списанные часы по месяцам. Списания Jira не хранит у нас — читаем их по задачам
 // проекта в момент выгрузки.
 async function exportProject(p) {
+  return exportEpics(p.epics.map((en) => en.epic), p.name || t("story.noProject"));
+}
+
+// Та же выгрузка для списка эпиков: с ракурса — эпики проекта, с «Поиска» — всё, что видно
+// в «Сохранённых эпиках» (с учётом фильтров по метке и исполнителю). name — для имени файла.
+async function exportEpics(epics, name) {
   try {
-    const epics = p.epics.map((en) => en.epic);
     if (!epics.length) {
       status(t("story.exportEmpty"), "error");
       return;
@@ -1631,13 +1636,12 @@ async function exportProject(p) {
       issuesByEpic.get(i.epicKey).push(i);
       epicOfKey.set(i.key, i.epicKey);
     }
-    const name = p.name || t("story.noProject");
     status(t("story.exporting", { name, i: 0, n: epicOfKey.size }));
     const logs = await xls.fetchWorklogs(epicOfKey, {
       onProgress: (i, n) => status(t("story.exporting", { name, i, n }))
     });
     const table = xls.buildExport({ epics, issuesByEpic, logs, profiles });
-    const file = xls.fileName(p.name);
+    const file = xls.fileName(name);
     const a = document.createElement("a");
     a.href = URL.createObjectURL(new Blob([xls.toCsv(table)], { type: "text/csv;charset=utf-8" }));
     a.download = file;
@@ -2206,6 +2210,19 @@ async function boot() {
     await renderStored();
     await refreshHeader();
     redrawActive();
+  };
+
+  // Выгрузка в Excel всех эпиков, попавших в текущий фильтр «Поиска» (та же таблица, что у проекта).
+  $("#btnExportEpics").append(storiesView.exportIcon());
+  $("#btnExportEpics").onclick = async (e) => {
+    const b = e.currentTarget;
+    b.disabled = true;
+    try {
+      const shown = sortEpics(applyFilter(await sync.selectedEpics())); // тот же порядок, что в списке
+      await exportEpics(shown, state.filter.label || t("search.exportAll"));
+    } finally {
+      b.disabled = false;
+    }
   };
 
   $("#btnFind").onclick = async () => {

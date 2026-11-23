@@ -569,7 +569,7 @@ export function showProjectPicker(anchor, en, projectNames, opts) {
 
 // Выгрузка проекта в Excel (пиктограмма «стрелка в лоток»): эпики проекта, сотрудники и
 // списанные часы по месяцам. Пока идут запросы к Jira, кнопка заблокирована.
-function exportIcon() {
+export function exportIcon() {
   const ns = "http://www.w3.org/2000/svg";
   const svg = document.createElementNS(ns, "svg");
   svg.setAttribute("viewBox", "0 0 24 24");
