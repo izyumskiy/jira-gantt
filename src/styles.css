@@ -527,7 +527,10 @@ button.s-pr:hover .s-pr-text { color: var(--accent); text-decoration: underline;
 .gantt-bar.s-bar .swatch-done { background: var(--mono-done); opacity: 1; }
 /* Компактная шапка секций: «Текущий» / «+1» и точки команд; спринты — по щелчку. */
 .gantt th.c-sprint.compact { vertical-align: middle; }
-.sp-dots { display: flex; align-items: center; flex-wrap: wrap; gap: 1px; margin-top: 2px; }
+/* Свёрнутая шапка секции: подпись и точки команд в одну строку — так она ниже. */
+.sp-head-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.sp-head-row .sp-name { flex: none; }
+.sp-dots { display: flex; align-items: center; flex-wrap: wrap; gap: 1px; min-width: 0; }
 .sp-dots .dot { width: 7px; height: 7px; margin-right: 1px; }
 .sp-count { margin-left: 4px; font-size: 11px; font-weight: 400; color: var(--muted); }
 .s-missing { margin-left: 6px; color: var(--danger); font-size: 11px; cursor: help; }

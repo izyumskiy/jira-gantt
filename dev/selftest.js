@@ -601,10 +601,23 @@ const noDateTh = () => [...gh.querySelectorAll("thead .c-sprint:not(.backlog)")]
 check("шапка секции «Без дат» свёрнута: «12 спр.», точки команд, список — в подсказке",
   !noDateTh().querySelector(".sp-item") && noDateTh().querySelector(".sp-count")?.textContent === t("gantt.sprintsN", { n: 12 }) && noDateTh().querySelectorAll(".sp-dots .dot").length === 12 && noDateTh().title.includes("Someday 12"),
   noDateTh().textContent);
+const headsOf = () => [...gh.querySelectorAll("thead .c-sprint:not(.backlog)")];
+{
+  // Свёрнутая шапка — в одну строку: подпись и точки команд на одном уровне.
+  const row = noDateTh().querySelector(".sp-head-row");
+  const name = row && row.querySelector(".sp-name");
+  const dots = row && row.querySelector(".sp-dots");
+  check("свёрнутая шапка: подпись и точки — в одной строке",
+    !!name && !!dots && Math.abs(name.getBoundingClientRect().top - dots.getBoundingClientRect().top) < 6,
+    row ? `${Math.round(name.getBoundingClientRect().top)} / ${Math.round(dots.getBoundingClientRect().top)}` : "нет строки");
+}
 noDateTh().click();
 check("клик по шапке раскрывает все 12 спринтов", noDateTh().querySelectorAll(".sp-item").length === 12);
-noDateTh().click();
-check("повторный клик сворачивает обратно", !noDateTh().querySelector(".sp-item") && !!noDateTh().querySelector(".sp-count"));
+check("клик по одной шапке раскрывает спринты во всех секциях сразу",
+  headsOf().length > 1 && headsOf().every((h) => h.querySelector(".sp-item")), headsOf().map((h) => h.querySelectorAll(".sp-item").length).join());
+headsOf()[0].click();
+check("повторный клик сворачивает все секции обратно",
+  headsOf().every((h) => !h.querySelector(".sp-item") && h.querySelector(".sp-count")), headsOf().map((h) => h.textContent).join(" | "));
 gh.remove();
 
 const g3 = document.createElement("div");

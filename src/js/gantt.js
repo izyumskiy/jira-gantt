@@ -134,7 +134,10 @@ const collapseSeeded = new Set();
 
 // В шапке секции показываем не больше стольких спринтов; остальные — по клику на шапку.
 const HEADER_SPRINTS = 7;
-const expandedHeaders = new Set();
+// Развёрнутость шапки — одна на всю диаграмму: щелчок по любой секции раскрывает и сворачивает
+// списки спринтов во всех сразу. По секциям раскрывать смысла нет — колонки тогда разной высоты,
+// а сравнивать их приходится взглядом по горизонтали.
+let headersExpanded = false;
 
 // Свернуть/развернуть группы снаружи (фильтр по человеку на «Ганте по эпикам и людям»).
 export function setCollapsed(mode, keys) {
@@ -638,17 +641,19 @@ export function chartHead(model, rerender, { title, hint = "", widthKey = "", co
   hr.append(th0);
   model.columns.forEach((sec, index) => {
     const th = el("th", "c-sprint" + (sec.id === model.currentId ? " current" : "") + (compact ? " compact" : ""));
-    if (compact && !expandedHeaders.has(sec.id)) {
+    if (compact && !headersExpanded) {
+      // Свёрнутая секция в одну строку: подпись, точки команд и число спринтов — шапка ниже.
       const caption = sec.id === NO_DATES_ID ? t("gantt.noDates") : sec.id === model.currentId ? t("gantt.current") : `+${index}`;
-      th.append(el("div", "sp-name", caption));
+      const row = el("div", "sp-head-row");
       const dots = el("div", "sp-dots");
       for (const s of sec.sprints) dots.append(dot(model.teamOf(s)));
       dots.append(el("span", "sp-count", t("gantt.sprintsN", { n: sec.sprints.length })));
-      th.append(dots);
+      row.append(el("span", "sp-name", caption), dots);
+      th.append(row);
       th.classList.add("expandable");
       th.title = `${sec.sprints.map((s) => `${s.name} · ${model.teamOf(s).name}`).join("\n")}\n${t("gantt.headerShow")}`;
       th.onclick = () => {
-        expandedHeaders.add(sec.id);
+        headersExpanded = true;
         rerender();
       };
       hr.append(th);
@@ -658,14 +663,14 @@ export function chartHead(model, rerender, { title, hint = "", widthKey = "", co
       th.classList.add("expandable");
       th.title = t("gantt.headerHide");
       th.onclick = () => {
-        expandedHeaders.delete(sec.id);
+        headersExpanded = false;
         rerender();
       };
     }
     if (sec.id === NO_DATES_ID) th.append(el("div", "sp-name", t("gantt.noDates")));
     if (sec.id === model.currentId) th.append(el("div", "sp-name", t("gantt.current")));
     const list = el("div", "sp-list");
-    const expanded = expandedHeaders.has(sec.id);
+    const expanded = headersExpanded;
     const shown = expanded ? sec.sprints : sec.sprints.slice(0, HEADER_SPRINTS);
     for (const s of shown) {
       const item = el("div", "sp-item");
@@ -681,7 +686,7 @@ export function chartHead(model, rerender, { title, hint = "", widthKey = "", co
       th.classList.add("expandable");
       th.title = expanded ? t("gantt.headerLess") : t("gantt.headerMore", { n: hidden });
       th.onclick = () => {
-        expanded ? expandedHeaders.delete(sec.id) : expandedHeaders.add(sec.id);
+        headersExpanded = !expanded;
         rerender();
       };
     }
@@ -690,8 +695,9 @@ export function chartHead(model, rerender, { title, hint = "", widthKey = "", co
   // Справа от спринтов — «Бэклог»: задачи без спринта и не в статусе «Готово» (на всех вкладках;
   // у человека — по его задачам целевых эпиков, «прочие» вне спринтов не загружаются).
   const th = el("th", "c-sprint backlog");
+  // Одной строкой, как свёрнутые секции: пояснение — в подсказке, иначе шапка выше на строку.
   th.append(el("div", "sp-name", t("gantt.backlog")));
-  th.append(el("div", "sp-date", t("gantt.backlogHint")));
+  th.title = t("gantt.backlogHint");
   hr.append(th);
   thead.append(hr);
   return thead;
