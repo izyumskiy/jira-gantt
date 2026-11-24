@@ -1213,6 +1213,6 @@ circle.tr-total { fill: #6b778c; }
 /* Выгрузка в Excel: пиктограмма в строке проекта («Эпик — история») и у списка «Поиска». */
 .stored-head { align-items: baseline; gap: 8px; }
 .stored-head h3 { margin-bottom: 0; }
-.s-act.s-export { display: inline-flex; align-items: center; padding: 1px 5px; }
-.s-act.s-export svg { display: block; }
+.s-act.s-export, .s-act.s-filter { display: inline-flex; align-items: center; padding: 1px 5px; }
+.s-act.s-export svg, .s-act.s-filter svg { display: block; }
 .s-act.s-export[disabled] { opacity: .5; cursor: progress; }

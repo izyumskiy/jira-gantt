@@ -2225,6 +2225,22 @@ async function boot() {
     }
   };
 
+  // Текущий фильтр эпиков как JQL — в буфер, для подстановки в поиск Jira.
+  $("#btnCopyJql").onclick = async () => {
+    try {
+      const shown = sortEpics(applyFilter(await sync.selectedEpics()));
+      const jql = sync.epicsJql(shown.map((e) => e.key));
+      if (!jql) {
+        status(t("search.jqlEmpty"), "error");
+        return;
+      }
+      await navigator.clipboard.writeText(jql);
+      status(t("search.jqlCopied", { n: shown.length }));
+    } catch (e) {
+      status(t("search.jqlFailed", { msg: e && e.message ? e.message : String(e) }), "error");
+    }
+  };
+
   $("#btnFind").onclick = async () => {
     try {
       await ensurePermission();

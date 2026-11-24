@@ -13,7 +13,7 @@ import { setLang, applyI18n, t } from "../src/js/i18n.js";
 import * as settings from "../src/js/settings.js";
 import * as agg from "../src/js/agg.js";
 import * as gantt from "../src/js/gantt.js";
-import { parseSprint, datesFromName, checkApis, searchEpics, epicKeysFrom, sync as runSync, backfillHistory } from "../src/js/sync.js";
+import { parseSprint, datesFromName, checkApis, searchEpics, epicKeysFrom, epicsJql, sync as runSync, backfillHistory } from "../src/js/sync.js";
 import * as jiraApi from "../src/js/jira.js";
 import * as analytics from "../src/js/analytics.js";
 import * as summary from "../src/js/summary.js";
@@ -2525,6 +2525,11 @@ check("пиктограмма 💬 есть и на «По эпикам и лю�
   document.querySelector(".tooltip .tip-close")?.click();
   check("Р5: у истории без задач — отрезок по её спринту", !!rowsOf(".s-story").find((r) => r.dataset.story === "US-3").querySelector(".sbar.own-sprint"));
   check("Р5: вехи проекта и эпика — в колонке «Срок» (◇ — плановое завершение), линия вехи — на шкале", /◇ \d{2}\.\d{2}/.test(rowsOf(".s-project")[0].querySelector(".s-due").textContent) && /◆ \d{2}\.\d{2}/.test(rowsOf(".s-epic").find((r) => r.dataset.epic === "E-1").querySelector(".s-due").textContent) && !!rowsOf(".s-epic").find((r) => r.dataset.epic === "E-1").querySelector(".due-line"));
+  // Фильтр эпиков как JQL для Jira: перечисление ключей того, что видно в списке.
+  check("JQL: ключи списка с сортировкой, дубли и регистр убраны",
+    epicsJql(["dbd-982", "DBD-1085", "DBD-982"]) === "key in (DBD-982, DBD-1085) ORDER BY key ASC", epicsJql(["dbd-982", "DBD-1085", "DBD-982"]));
+  check("JQL: пустой список и мусор дают пустую строку", epicsJql([]) === "" && epicsJql(["", "не ключ", "123"]) === "");
+
   // Выгрузка проекта в Excel: строка на сотрудника эпика, списанные часы по месяцам.
   {
     const xls = await import("../src/js/projectExport.js");
