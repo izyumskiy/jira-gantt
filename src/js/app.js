@@ -20,6 +20,7 @@ import * as autoSync from "./autoSync.js";
 import * as stories from "./stories.js";
 import * as storiesView from "./storiesView.js";
 import * as omg from "./omg.js";
+import * as xls from "./projectExport.js";
 import * as llm from "../llm/client.js";
 import * as customersView from "./customersView.js";
 import { toHtml as markdownToHtml } from "./markdown.js";
@@ -1610,6 +1611,50 @@ async function addLocalNote(kind, key, note) {
   await db.putAll(store, [{ ...rec, omg: { ...cur, notes: [...(cur.notes || []), note] } }]);
 }
 
+// Выгрузка проекта в Excel с ракурса «Эпик — история»: эпики проекта (те, что показаны в строке),
+// их сотрудники и списанные часы по месяцам. Списания Jira не хранит у нас — читаем их по задачам
+// проекта в момент выгрузки.
+async function exportProject(p) {
+  return exportEpics(p.epics.map((en) => en.epic), p.name || t("story.noProject"));
+}
+
+// Та же выгрузка для списка эпиков: с ракурса — эпики проекта, с «Поиска» — всё, что видно
+// в «Сохранённых эпиках» (с учётом фильтров по метке и исполнителю). name — для имени файла.
+async function exportEpics(epics, name) {
+  try {
+    if (!epics.length) {
+      status(t("story.exportEmpty"), "error");
+      return;
+    }
+    const [issues, profiles] = await Promise.all([db.all(db.STORES.issues), db.all(db.STORES.people)]);
+    const keys = new Set(epics.map((e) => e.key));
+    const issuesByEpic = new Map(epics.map((e) => [e.key, []]));
+    // Ворклоги читаем и у самого эпика: время, списанное на эпик, тоже чьё-то.
+    const epicOfKey = new Map(epics.map((e) => [e.key, e.key]));
+    for (const i of issues) {
+      if (!keys.has(i.epicKey)) continue;
+      issuesByEpic.get(i.epicKey).push(i);
+      epicOfKey.set(i.key, i.epicKey);
+    }
+    status(t("story.exporting", { name, i: 0, n: epicOfKey.size }));
+    const logs = await xls.fetchWorklogs(epicOfKey, {
+      onProgress: (i, n) => status(t("story.exporting", { name, i, n }))
+    });
+    const table = xls.buildExport({ epics, issuesByEpic, logs, profiles });
+    const file = xls.fileName(name);
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([xls.toCsv(table)], { type: "text/csv;charset=utf-8" }));
+    a.download = file;
+    document.body.append(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    status(t("story.exportDone", { file, e: epics.length, rows: table.rows.length }));
+  } catch (e) {
+    fail(e);
+  }
+}
+
 async function drawStories() {
   try {
     const [issues, others, linked, sprints, epics, boards, priorities] = await Promise.all([
@@ -1669,6 +1714,7 @@ async function drawStories() {
         drawStories();
       },
       epicsOfProject: (key) => epics.filter((e) => keyOf(e) === key),
+      onExportProject: exportProject,
       onRenamed: async (keys, name) => {
         await setEpicProject(keys, name);
         drawStories();
@@ -2164,6 +2210,35 @@ async function boot() {
     await renderStored();
     await refreshHeader();
     redrawActive();
+  };
+
+  // Выгрузка в Excel всех эпиков, попавших в текущий фильтр «Поиска» (та же таблица, что у проекта).
+  $("#btnExportEpics").append(storiesView.exportIcon());
+  $("#btnExportEpics").onclick = async (e) => {
+    const b = e.currentTarget;
+    b.disabled = true;
+    try {
+      const shown = sortEpics(applyFilter(await sync.selectedEpics())); // тот же порядок, что в списке
+      await exportEpics(shown, state.filter.label || t("search.exportAll"));
+    } finally {
+      b.disabled = false;
+    }
+  };
+
+  // Текущий фильтр эпиков как JQL — в буфер, для подстановки в поиск Jira.
+  $("#btnCopyJql").onclick = async () => {
+    try {
+      const shown = sortEpics(applyFilter(await sync.selectedEpics()));
+      const jql = sync.epicsJql(shown.map((e) => e.key));
+      if (!jql) {
+        status(t("search.jqlEmpty"), "error");
+        return;
+      }
+      await navigator.clipboard.writeText(jql);
+      status(t("search.jqlCopied", { n: shown.length }));
+    } catch (e) {
+      status(t("search.jqlFailed", { msg: e && e.message ? e.message : String(e) }), "error");
+    }
   };
 
   $("#btnFind").onclick = async () => {

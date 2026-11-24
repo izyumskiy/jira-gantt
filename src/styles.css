@@ -1209,3 +1209,10 @@ circle.tr-total { fill: #6b778c; }
 .sum-accuracy { margin-top: 12px; }
 .acc-table td.acc-hit { color: #1f845a; }
 .acc-table td.acc-miss { color: #de350b; font-weight: 600; }
+
+/* Выгрузка в Excel: пиктограмма в строке проекта («Эпик — история») и у списка «Поиска». */
+.stored-head { align-items: baseline; gap: 8px; }
+.stored-head h3 { margin-bottom: 0; }
+.s-act.s-export, .s-act.s-filter { display: inline-flex; align-items: center; padding: 1px 5px; }
+.s-act.s-export svg, .s-act.s-filter svg { display: block; }
+.s-act.s-export[disabled] { opacity: .5; cursor: progress; }

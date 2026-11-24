@@ -260,6 +260,13 @@ export function epicKeysFrom(text) {
   return [...new Set(found)];
 }
 
+// JQL по списку эпиков — для подстановки в поиск Jira. Перечисление ключей, а не условия фильтра:
+// так в Jira откроется ровно то, что видно в списке (выбор менеджера, а не все эпики с такой меткой).
+export function epicsJql(keys) {
+  const clean = [...new Set(keys.map((k) => String(k).trim().toUpperCase()).filter((k) => new RegExp(`^${KEY_PATTERN}$`).test(k)))];
+  return clean.length ? `key in (${clean.join(", ")}) ORDER BY key ASC` : "";
+}
+
 // Поиск эпиков. Ключи ищутся по key in (…), остальной текст — по названию. Смешивать их в одном
 // `summary ~` нельзя: Jira ищет по тексту, и ключ вида PRJ-123 в таком запросе вытаскивает
 // половину проекта вместо одного эпика.

@@ -201,9 +201,10 @@ function barCells(node, model, lvl, label, { start = false } = {}) {
   return out;
 }
 
-// Кнопка-действие строки (видна при наведении).
+// Кнопка-действие строки (видна при наведении). text — строка или готовый элемент (пиктограмма).
 function actionBtn(cls, text, title, onClick) {
-  const b = el("button", `pop-btn s-act ${cls}`, text);
+  const b = el("button", `pop-btn s-act ${cls}`, text instanceof Node ? null : text);
+  if (text instanceof Node) b.append(text);
   b.type = "button";
   b.title = title;
   b.setAttribute("aria-label", title);
@@ -395,7 +396,10 @@ export function render(container, model, opts = {}) {
         twist: twisty(pc, () => toggle(pKey(p))),
         icon: prio.icon(p.priority, model.priorities, t),
         title: ptitle,
-        actions: p.key !== NO_PROJECT && opts.epicsOfProject ? [renameButton(p, opts)] : [],
+        actions: [
+          ...(opts.onExportProject ? [exportButton(p, opts)] : []),
+          ...(p.key !== NO_PROJECT && opts.epicsOfProject ? [renameButton(p, opts)] : [])
+        ],
         progress: progressCell(p.done, p.count),
         due: dueCell(p.milestone, p.allDone)
       }),
@@ -562,6 +566,39 @@ export function showProjectPicker(anchor, en, projectNames, opts) {
 }
 
 // ---------- переименование проекта (Р3) ----------
+
+// Выгрузка проекта в Excel (пиктограмма «стрелка в лоток»): эпики проекта, сотрудники и
+// списанные часы по месяцам. Пока идут запросы к Jira, кнопка заблокирована.
+export function exportIcon() {
+  const ns = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(ns, "svg");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("width", "14");
+  svg.setAttribute("height", "14");
+  svg.setAttribute("fill", "none");
+  svg.setAttribute("stroke", "currentColor");
+  svg.setAttribute("stroke-width", "2");
+  svg.setAttribute("stroke-linecap", "round");
+  svg.setAttribute("stroke-linejoin", "round");
+  svg.setAttribute("aria-hidden", "true");
+  for (const d of ["M12 3v10", "M8 11l4 4 4-4", "M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"]) {
+    const path = document.createElementNS(ns, "path");
+    path.setAttribute("d", d);
+    svg.append(path);
+  }
+  return svg;
+}
+
+function exportButton(p, opts) {
+  return actionBtn("s-export", exportIcon(), t("story.exportHint"), async (b) => {
+    b.disabled = true;
+    try {
+      await opts.onExportProject(p);
+    } finally {
+      b.disabled = false;
+    }
+  });
+}
 
 function renameButton(p, opts) {
   const b = el("button", "pop-btn link s-rename", t("story.rename"));

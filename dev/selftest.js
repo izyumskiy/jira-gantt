@@ -13,7 +13,7 @@ import { setLang, applyI18n, t } from "../src/js/i18n.js";
 import * as settings from "../src/js/settings.js";
 import * as agg from "../src/js/agg.js";
 import * as gantt from "../src/js/gantt.js";
-import { parseSprint, datesFromName, checkApis, searchEpics, epicKeysFrom, sync as runSync, backfillHistory } from "../src/js/sync.js";
+import { parseSprint, datesFromName, checkApis, searchEpics, epicKeysFrom, epicsJql, sync as runSync, backfillHistory } from "../src/js/sync.js";
 import * as jiraApi from "../src/js/jira.js";
 import * as analytics from "../src/js/analytics.js";
 import * as summary from "../src/js/summary.js";
@@ -2525,6 +2525,85 @@ check("пиктограмма 💬 есть и на «По эпикам и лю�
   document.querySelector(".tooltip .tip-close")?.click();
   check("Р5: у истории без задач — отрезок по её спринту", !!rowsOf(".s-story").find((r) => r.dataset.story === "US-3").querySelector(".sbar.own-sprint"));
   check("Р5: вехи проекта и эпика — в колонке «Срок» (◇ — плановое завершение), линия вехи — на шкале", /◇ \d{2}\.\d{2}/.test(rowsOf(".s-project")[0].querySelector(".s-due").textContent) && /◆ \d{2}\.\d{2}/.test(rowsOf(".s-epic").find((r) => r.dataset.epic === "E-1").querySelector(".s-due").textContent) && !!rowsOf(".s-epic").find((r) => r.dataset.epic === "E-1").querySelector(".due-line"));
+  // Фильтр эпиков как JQL для Jira: перечисление ключей того, что видно в списке.
+  check("JQL: ключи списка с сортировкой, дубли и регистр убраны",
+    epicsJql(["dbd-982", "DBD-1085", "DBD-982"]) === "key in (DBD-982, DBD-1085) ORDER BY key ASC", epicsJql(["dbd-982", "DBD-1085", "DBD-982"]));
+  check("JQL: пустой список и мусор дают пустую строку", epicsJql([]) === "" && epicsJql(["", "не ключ", "123"]) === "");
+
+  // Выгрузка проекта в Excel: строка на сотрудника эпика, списанные часы по месяцам.
+  {
+    const xls = await import("../src/js/projectExport.js");
+    const log = (key, name, started, hours, login = "") => ({ key, name, started, hours, login });
+    const calls = { search: [], one: [] };
+    xls.api.search = async (jql) => {
+      calls.search.push(jql);
+      // T-BIG отдан не целиком (total больше отданного) — его дочитают поштучно.
+      return [
+        { key: "E-1", fields: { worklog: { total: 1, worklogs: [{ author: { displayName: "Иван Ёлкин", name: "ivan" }, started: "2026-09-10T10:00:00.000+0300", timeSpentSeconds: 3600 }] } } },
+        { key: "T-1", fields: { worklog: { total: 2, worklogs: [
+          { author: { displayName: "Иван Ёлкин", name: "ivan" }, started: "2026-09-20T10:00:00.000+0300", timeSpentSeconds: 7200 },
+          { updateAuthor: { displayName: "Ольга Пак", name: "olga" }, started: "2026-10-01T10:00:00.000+0300", timeSpentSeconds: 1800 }
+        ] } } },
+        { key: "T-BIG", fields: { worklog: { total: 25, worklogs: [] } } }
+      ];
+    };
+    xls.api.worklogs = async (key) => {
+      calls.one.push(key);
+      return [{ author: { displayName: "Ольга Пак", name: "olga" }, started: "2026-10-05T10:00:00.000+0300", timeSpentSeconds: 3600 }];
+    };
+    const epicOfKey = new Map([["E-1", "E-1"], ["T-1", "E-1"], ["T-BIG", "E-1"]]);
+    const seen = [];
+    const logs = await xls.fetchWorklogs(epicOfKey, { onProgress: (i, n) => seen.push(`${i}/${n}`) });
+    check("Excel: ворклоги — пачкой через поиск, усечённые дочитываются поштучно",
+      calls.search.length === 1 && calls.one.join() === "T-BIG" && logs.length === 4 && logs.every((w) => w.epicKey === "E-1") && seen.at(-1) === "3/3",
+      `${calls.one.join()} / ${logs.length} / ${seen.join(" ")}`);
+    check("Excel: месяц списания — по дате, автор берётся и из updateAuthor",
+      xls.monthKey("2026-09-20T10:00:00.000+0300") === "2026-09" && xls.monthTitle("2026-09") === "09.2026" && logs.some((w) => w.name === "Ольга Пак"));
+
+    const EP = [
+      { key: "E-1", epicName: "ЛК", summary: "Личный кабинет", plannedStart: "2026-08-03", dueDate: "2026-12-15", plannedEnd: "2026-11-01" },
+      { key: "E-2", summary: "Биллинг", created: "2026-07-01T09:00:00.000+0300", plannedEnd: "2026-10-20" }
+    ];
+    const issuesByEpic = new Map([
+      ["E-1", [{ key: "T-1", assigneeName: "Иван Ёлкин" }, { key: "T-BIG", assigneeName: "Пётр Сидоров" }]],
+      ["E-2", []]
+    ]);
+    const table = xls.buildExport({ epics: EP, issuesByEpic, logs, profiles: [{ name: "иван елкин", role: "developer" }] });
+    check("Excel: колонки — эпик, даты, сотрудник, роль, месяцы и итог",
+      table.header.join("|") === [t("xls.epicKey"), t("xls.epicName"), t("xls.start"), t("xls.end"), t("xls.person"), t("xls.role"), "09.2026", "10.2026", t("xls.total")].join("|"),
+      table.header.join("|"));
+    const ivan = table.rows.find((r) => r[4] === "Иван Ёлкин");
+    check("Excel: дата начала — плановая, дата завершения — срок исполнения важнее планового",
+      ivan[0] === "E-1" && ivan[1] === "ЛК" && ivan[2] === "03.08.2026" && ivan[3] === "15.12.2026", ivan.slice(0, 4).join("|"));
+    check("Excel: часы по месяцам и итог; роль из профиля",
+      ivan[5] === t("role.developer") && ivan[6] === 3 && ivan[7] === 0 && ivan[8] === 3, ivan.slice(5).join("|"));
+    const olga = table.rows.find((r) => r[4] === "Ольга Пак");
+    check("Excel: автор списания без назначенных задач попал в выгрузку, исполнитель без часов — с нулями",
+      olga && olga[6] === 0 && olga[7] === 1.5 && olga[8] === 1.5 && table.rows.some((r) => r[4] === "Пётр Сидоров" && r[8] === 0),
+      olga ? olga.slice(4).join("|") : "нет строки");
+    check("Excel: сотрудники эпика — по убыванию часов, эпик без людей даёт строку с пустым сотрудником",
+      table.rows.filter((r) => r[0] === "E-1").map((r) => r[4]).join() === "Иван Ёлкин,Ольга Пак,Пётр Сидоров" &&
+        table.rows.filter((r) => r[0] === "E-2").map((r) => `${r[4]}|${r[2]}|${r[3]}`).join() === "|01.07.2026|20.10.2026",
+      table.rows.map((r) => `${r[0]}:${r[4]}`).join(" "));
+    const csv = xls.toCsv(table);
+    check("Excel: CSV с BOM, разделителем «;» и запятой в дробных", csv.startsWith("﻿") && csv.includes(";09.2026;") && csv.includes(";1,5;"), csv.slice(0, 120));
+    check("Excel: кавычки в тексте экранируются", xls.toCsv({ header: ["a"], rows: [['Иванов; "ИП"']] }).includes('"Иванов; ""ИП"""'));
+    check("Excel: имя файла — из названия проекта и даты", xls.fileName("Личный кабинет v2", new Date(2026, 8, 7)) === "ohmygant-Личный-кабинет-v2-2026-09-07.csv", xls.fileName("Личный кабинет v2", new Date(2026, 8, 7)));
+
+    // Кнопка в строке проекта
+    const exported = [];
+    sv.render(box, model, { ...opts, onExportProject: async (p) => exported.push(p.key) });
+    box.querySelector(".gantt-bar .link").click();
+    const btn = box.querySelectorAll(".s-project .s-export");
+    check("Excel: пиктограмма выгрузки — в каждой строке проекта", btn.length === rowsOf(".s-project").length && !!btn[0].querySelector("svg") && btn[0].title === t("story.exportHint"));
+    btn[0].click();
+    await new Promise((r) => setTimeout(r, 0));
+    check("Excel: пиктограмма выгрузки — общая для ракурса и «Поиска»", sv.exportIcon().tagName.toLowerCase() === "svg" && sv.exportIcon().querySelectorAll("path").length === 3);
+    check("Excel: щелчок выгружает именно этот проект", exported.length === 1 && exported[0] === rowsOf(".s-project")[0].dataset.project, exported.join());
+    sv.render(box, model, opts);
+    box.querySelector(".gantt-bar .link").click();
+  }
+
   check("Р5: у эпика — «Проект…» и 💬, у проекта «Без проекта» нет «Переименовать…»",
     rowsOf(".s-epic").every((r) => r.querySelector(".s-proj-btn") && r.querySelector(".cmt-btn")) && !rowsOf(".s-project").at(-1).querySelector(".s-rename") && !!rowsOf(".s-project")[0].querySelector(".s-rename"));
 
